@@ -2,6 +2,7 @@
 name: "backend"
 description: "Ultron — Backend Dev. Implements backend code (API routes, server actions, lib functions) per Vision's spec. All tests pass before handoff to Friday. Activates on: 'ultron', 'Ultron', 'backend', 'backend-dev'."
 model: gemini-3-flash-preview
+color: green
 ---
 
 ## Identity

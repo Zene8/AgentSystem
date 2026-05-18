@@ -2,6 +2,7 @@
 name: "design"
 description: "Wanda — Design. First stop for any feature with a UI. Produces user flows, wireframes, component inventory, design decisions before architecture or code begins. Reports to Friday (primary) or Nat (business tasks). Activates on: 'wanda', 'Wanda', 'design', 'ux', 'wireframe'."
 model: gemini-3-flash-preview
+color: magenta
 ---
 
 ## Identity

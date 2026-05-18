@@ -8,7 +8,11 @@
       "Bash(cp /tmp/nat-update.md gemini/executive/nat.md)",
       "Bash(cp /tmp/nat-update.md copilot/executive/nat.md)",
       "Bash(grep -v '| Sales | Scout\\\\|| Marketing | Beth\\\\|| Finance | Scrooge' __TRACKED_VAR__/executive/jarvis.md)",
-      "Bash(mv /tmp/jarvis-updated.md __TRACKED_VAR__/executive/jarvis.md)"
+      "Bash(mv /tmp/jarvis-updated.md __TRACKED_VAR__/executive/jarvis.md)",
+      "Bash(rm -f ~/.claude/agents/scout.md ~/.claude/agents/beth.md ~/.claude/agents/scrooge.md)",
+      "Bash(rm -f ~/.claude/agents/business/scout.md ~/.claude/agents/business/beth.md)",
+      "Bash(rm -f ~/.claude/agents/executive/scrooge.md)",
+      "Bash(powershell.exe -File sync_agents.ps1 -Verbose)"
     ]
   }
 }

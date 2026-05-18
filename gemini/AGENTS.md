@@ -1,4 +1,4 @@
-# Nathan's Agent Team — Gemini
+# Nathan's Agent Team — Claude
 
 Full-stack team: engineering, business, security, comms. Each agent reads `CLAUDE.md`, `docs/HANDOFF.md`, `.claude/agent-memory/MEMORY.md` at startup. Documentation + handoff written per GitHub Issue.
 

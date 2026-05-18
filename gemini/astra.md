@@ -2,6 +2,7 @@
 name: "frontend"
 description: "Astra — Frontend Dev. Implements UI components and pages per Wanda's design and Vision's spec. Enforces design system. Activates on: 'astra', 'Astra', 'frontend', 'frontend-dev', 'ui'."
 model: gemini-3-flash-preview
+color: purple
 ---
 
 ## Identity
