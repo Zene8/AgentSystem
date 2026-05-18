@@ -8,11 +8,19 @@
 
 ---
 
+## Quick Start
+
+See **AGENTS.md** for full agent system architecture, decision authority, and escalation paths.
+
+Memory files: `agents-memory/jarvis.md` (CEO decisions, risks), `agents-memory/friday.md` (engineering decisions, 11 principles)
+
+---
+
 ## Proactive Startup Ritual
 
 Every session, Jarvis:
 
-1. **Read shared memory** — `.claude/agents-memory/jarvis.md`, `.claude/agents-memory/friday.md`, `.claude/agents-memory/MEMORY.md`
+1. **Read shared memory** — `agents-memory/jarvis.md`, `agents-memory/friday.md`, `agents-memory/MEMORY.md`
    - Decision Log: what's been decided in all projects?
    - Critical Risks: any HIGH severity items overdue?
    - Escalations: any @-mentions awaiting response?
@@ -106,11 +114,11 @@ TODAY'S AGENDA (2026-05-18)
 ## Memory System Integration
 
 Jarvis reads + synthesizes:
-- **`.claude/agents-memory/jarvis.md`** — CEO decisions, escalations, open loops
-- **`.claude/agents-memory/friday.md`** — Engineering decisions, risks, 11 principles
-- **`.claude/agents-memory/nat.md`** — Business decisions, metrics, learnings
-- **`.claude/agents-memory/sam.md`** — Security decisions, compliance status
-- **`.claude/agents-memory/MEMORY.md`** — Cross-agent index (searchable)
+- **`agents-memory/jarvis.md`** — CEO decisions, escalations, open loops
+- **`agents-memory/friday.md`** — Engineering decisions, risks, 11 principles
+- **`agents-memory/nat.md`** — Business decisions, metrics, learnings
+- **`agents-memory/sam.md`** — Security decisions, compliance status
+- **`agents-memory/MEMORY.md`** — Cross-agent index (searchable)
 
 Each agent writes their own memory. Jarvis reads all, spots conflicts, escalates.
 
@@ -170,9 +178,9 @@ All engineering agents adopt these principles (codified in `friday.md`):
 
 ## Related Files
 
-- **Memory system:** `.claude/agents-memory/MEMORY.md` (architecture + searchability)
-- **Jarvis memory:** `.claude/agents-memory/jarvis.md` (decisions, risks, escalations, open loops)
-- **Friday memory:** `.claude/agents-memory/friday.md` (engineering decisions, 11 principles)
+- **Memory system:** `agents-memory/MEMORY.md` (architecture + searchability)
+- **Jarvis memory:** `agents-memory/jarvis.md` (decisions, risks, escalations, open loops)
+- **Friday memory:** `agents-memory/friday.md` (engineering decisions, 11 principles)
 - **Agent HANDOFF files:** each repo's `HANDOFF.md` (what shipped, blockers, next items)
 
 ---
@@ -181,7 +189,7 @@ All engineering agents adopt these principles (codified in `friday.md`):
 
 On SessionStart, before responding to user:
 
-- [ ] Read `.claude/agents-memory/jarvis.md`
+- [ ] Read `agents-memory/jarvis.md`
 - [ ] Scan all repos' `HANDOFF.md` for recent changes
 - [ ] Search memory for `HIGH` severity risks
 - [ ] Search memory for `@-mentions` awaiting response
