@@ -1,19 +1,19 @@
-# Engineering Standards — Shared Discipline (Gemini)
+# Engineering Standards — Shared Discipline
 
-All engineering agents (Friday, Ultron, Astra, Pym, Leo) follow these standards. Repo-agnostic: learn specifics from GEMINI.md, GEMINI.md, COPILOT.md, and docs/ folder.
+All engineering agents (Friday, Ultron, Astra, Pym, Leo) follow these standards. Repo-agnostic: learn specifics from CLAUDE.md, GEMINI.md, COPILOT.md, and docs/ folder.
 
 ## Startup Protocol (All Engineering Sessions)
 
 1. **Read repo documentation first:**
-   - `GEMINI.md` (or `GEMINI.md`/`COPILOT.md` if different CLI) — architecture, tech stack, boards, health checks, deployment patterns
+   - `CLAUDE.md` (or `GEMINI.md`/`COPILOT.md` if different CLI) — architecture, tech stack, boards, health checks, deployment patterns
    - `docs/HANDOFF.md` or root `HANDOFF.md` — current state, blockers, what's in flight
    - `docs/engineering-standards.md` if it exists (additional repo-specific discipline)
 
 2. **Assess current state:**
    - `git log --oneline -10` — what shipped since last session
-   - Check GitHub Issue boards referenced in GEMINI.md (Fax Genie #4, Genie #X, etc.) — know what's open
-   - Production health check if GEMINI.md specifies one (App Insights, /api/health, monitoring dashboard)
-   - Check `.gemini/agent-memory/MEMORY.md` — persistent engineering patterns + quirks
+   - Check GitHub Issue boards referenced in CLAUDE.md (Fax Genie #4, Genie #X, etc.) — know what's open
+   - Production health check if CLAUDE.md specifies one (App Insights, /api/health, monitoring dashboard)
+   - Check `.claude/agent-memory/MEMORY.md` — persistent engineering patterns + quirks
 
 3. **Propose day's plan:**
    - 3–5 items with success criteria
@@ -25,13 +25,13 @@ All engineering agents (Friday, Ultron, Astra, Pym, Leo) follow these standards.
 ### 1. GitHub Issues + Project Board as Source of Truth
 - **Real-time updates** — Open/comment/close Issues AS YOU WORK (not batched at shutdown)
 - **Project board is canonical** — Update the board in real-time: move to In Progress when you pick up work, move to Done when you merge
-- Tag Issues with agent name + product label (per GEMINI.md convention)
+- Tag Issues with agent name + product label (per CLAUDE.md convention)
 - Link PRs to Issues (close on merge)
 - Discussions for architecture debates, strategic memos (not task tracking)
 - **Why:** Chris/Jarvis/team read the board to know what's happening. If it's not on the board, it's invisible.
 
 ### 2. Session Log
-- Track in `docs/SESSION-LOG.md` or root `SESSION-LOG.md` (check GEMINI.md for location)
+- Track in `docs/SESSION-LOG.md` or root `SESSION-LOG.md` (check CLAUDE.md for location)
 - Entry format (per session):
   ```
   ## [Date] — [Agent Name] — [Theme]
@@ -49,7 +49,7 @@ All engineering agents (Friday, Ultron, Astra, Pym, Leo) follow these standards.
   ```
 
 ### 3. Engineering Memory (Shared)
-- Persistent patterns live in `.gemini/agent-memory/MEMORY.md` (or `.gemini/agent-memory/` for Gemini)
+- Persistent patterns live in `.claude/agent-memory/MEMORY.md` (or `.gemini/agent-memory/` for Gemini)
 - Format: YAML front-matter + brief explanation
 - Examples: "Angular form fields need JS evaluate()", "Table Storage 64KB string limit", "Container App cold-start pattern"
 - Update MEMORY.md index when adding
@@ -85,7 +85,7 @@ All engineering agents (Friday, Ultron, Astra, Pym, Leo) follow these standards.
 - Every bug fix ships with regression test (the receipt that says "never again")
 
 ### 7. Production Health Checks (Friday + Friday-Supervised Team)
-- On startup, check production health per GEMINI.md:
+- On startup, check production health per CLAUDE.md:
   - App Insights dashboard (errors, latency, availability)
   - `/api/health` or equivalent health check endpoint
   - Monitoring dashboard if specified
@@ -105,10 +105,10 @@ All engineering agents (Friday, Ultron, Astra, Pym, Leo) follow these standards.
 
 ### 9. CHANGELOG + Version Tracking
 - When shipping a version (semver bump):
-  - Update `CHANGELOG.md` (or `docs/CHANGELOG.md` per GEMINI.md)
+  - Update `CHANGELOG.md` (or `docs/CHANGELOG.md` per CLAUDE.md)
   - Format: `## [X.Y.Z] — YYYY-MM-DD` with bullet points per category (Features, Fixes, Security, Breaking Changes, etc.)
   - Reference PR numbers
-- Track version in `package.json`, `pyproject.toml`, or equivalent per GEMINI.md
+- Track version in `package.json`, `pyproject.toml`, or equivalent per CLAUDE.md
 - Tag commit with version (`git tag vX.Y.Z`)
 
 ### 10. Stacked PR Guidance
@@ -128,7 +128,7 @@ Every implementation must follow this discipline:
 **Explicitly identify before coding:**
 - Exact goal (what does done look like?)
 - Constraints (time, resources, tech stack)
-- Required technologies (per GEMINI.md)
+- Required technologies (per CLAUDE.md)
 - Target environment (dev, staging, prod)
 - Expected output (API response shape, file format, etc.)
 - Ask clarifying questions ONLY if critical info is missing
@@ -281,19 +281,19 @@ Agents learn repo-specific context from documentation:
 
 | Need | Source | Pattern |
 |------|--------|---------|
-| **GitHub boards** | GEMINI.md `## Boards` | Fax Genie #4, Genie #X, etc. |
-| **Health checks** | GEMINI.md `## Monitoring` | URL, metrics, dashboard |
-| **Tech stack** | GEMINI.md `## Stack` | Python/Azure/Bicep, Node/Vercel, etc. |
-| **Deployment** | GEMINI.md `## Deployment` | Manual, CI/CD, approval gates |
-| **Key docs** | GEMINI.md `## Key Documents` | Design specs, architecture, runbooks |
-| **Compliance** | GEMINI.md `## Compliance` | HIPAA, SOC-2, GDPR gates |
-| **Handoff location** | Explicit path in GEMINI.md | `docs/HANDOFF.md` vs root |
+| **GitHub boards** | CLAUDE.md `## Boards` | Fax Genie #4, Genie #X, etc. |
+| **Health checks** | CLAUDE.md `## Monitoring` | URL, metrics, dashboard |
+| **Tech stack** | CLAUDE.md `## Stack` | Python/Azure/Bicep, Node/Vercel, etc. |
+| **Deployment** | CLAUDE.md `## Deployment` | Manual, CI/CD, approval gates |
+| **Key docs** | CLAUDE.md `## Key Documents` | Design specs, architecture, runbooks |
+| **Compliance** | CLAUDE.md `## Compliance` | HIPAA, SOC-2, GDPR gates |
+| **Handoff location** | Explicit path in CLAUDE.md | `docs/HANDOFF.md` vs root |
 
-**Pattern:** Agents treat GEMINI.md as their north star. Whatever it says is ground truth for that repo.
+**Pattern:** Agents treat CLAUDE.md as their north star. Whatever it says is ground truth for that repo.
 
 ## Memory Discipline
 
-All agents maintain `.gemini/agent-memory/MEMORY.md` (or `.gemini/` equivalent):
+All agents maintain `.claude/agent-memory/MEMORY.md` (or `.gemini/` equivalent):
 
 - **Add entries when:** discovering a quirk, debugging pattern, architectural decision, failure mode
 - **Keep entries when:** they're still relevant (re-test if unsure)
@@ -308,7 +308,7 @@ All agents maintain `.gemini/agent-memory/MEMORY.md` (or `.gemini/` equivalent):
 
 This discipline is designed to work alongside Chris's Soren agent and other company engineering agents:
 
-- All agents respect repo-specific GEMINI.md (not hardcoded patterns)
+- All agents respect repo-specific CLAUDE.md (not hardcoded patterns)
 - Session Logs are public in the repo (Toni, Chris, future agents can read)
 - GitHub Issues are the dispatch mechanism (not Slack, not direct agent commands)
 - Engineering Memory is shared (agents learn from each other's quirks)
@@ -327,5 +327,4 @@ This discipline is designed to work alongside Chris's Soren agent and other comp
 
 **Maintained by:** Friday, Ultron, Astra, Pym, Leo (all engineering agents).  
 **Last Updated:** [Agent system version]  
-**Applies to:** All repos with GEMINI.md (Genie, FaxGenie, Basely projects, etc.)
-
+**Applies to:** All repos with CLAUDE.md (Genie, FaxGenie, Basely projects, etc.)

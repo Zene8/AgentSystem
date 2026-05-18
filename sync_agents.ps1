@@ -1,63 +1,54 @@
-# sync_agents.ps1
-$claudeRoot = ".claude/agents"
-$geminiRoot = ".gemini/agents"
-$copilotRoot = ".copilot/agents"
+﻿# Synchronize agent files from Claude (source) to Gemini and Copilot
+# Usage: powershell.exe -File sync_agents.ps1
 
-$agents = @(
-    @{ name = "jarvis"; category = "executive"; modelGemini = "gemini-3.1-pro-preview"; modelCopilot = "GPT-5.2" },
-    @{ name = "nat"; category = "executive"; modelGemini = "gemini-3.1-pro-preview"; modelCopilot = "GPT-5.2" },
-    @{ name = "sam"; category = "executive"; modelGemini = "gemini-3.1-pro-preview"; modelCopilot = "GPT-5.2" },
-    @{ name = "scrooge"; category = "executive"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "threepio"; category = "executive"; modelGemini = "gemini-3.1-flash-lite-preview"; modelCopilot = "GPT-5 mini" },
-    @{ name = "friday"; category = "engineering"; modelGemini = "gemini-3.1-pro-preview"; modelCopilot = "GPT-5.2" },
-    @{ name = "vision"; category = "engineering"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "wanda"; category = "engineering"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "ultron"; category = "engineering"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "astra"; category = "engineering"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "pym"; category = "engineering"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "leo"; category = "engineering"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "beth"; category = "business"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" },
-    @{ name = "scout"; category = "business"; modelGemini = "gemini-3-flash-preview"; modelCopilot = "GPT-4o" }
+param(
+    [switch]$Verbose
 )
 
-foreach ($agent in $agents) {
-    $srcPath = "$claudeRoot/$($agent.category)/$($agent.name).md"
-    if (-Not (Test-Path $srcPath)) { continue }
-    $content = Get-Content $srcPath -Raw
+$sourceDir = "C:\Users\natha\.claude\agents"
+$geminiDir = "C:\Users\natha\.gemini\agents"
+$copilotDir = "C:\Users\natha\.copilot\agents"
+$agentSystemDir = "C:\Users\natha\AgentSystem"
 
-    $capName = $agent.name.Substring(0,1).ToUpper() + $agent.name.Substring(1)
+Write-Host "🔄 Synchronizing agent files..."
+Write-Host "Source (Claude): $sourceDir"
+Write-Host "Target (Gemini): $geminiDir"
+Write-Host "Target (Copilot): $copilotDir"
+Write-Host ""
 
-    # Gemini
-    $gemContent = $content -replace '(?m)^model: .*$', "model: $($agent.modelGemini)"
-    $gemContent = $gemContent -replace 'CLAUDE.md', 'GEMINI.md'
-    $gemContent = $gemContent -replace '\.claude/', '.gemini/'
-    if ($gemContent -match '(?s)(---.*?---)') {
-        $front = $matches[0]
-        $rest = $gemContent.Substring($front.Length)
-        $gemContent = $front + "`n`n**Name:** $capName" + $rest
+# Copy agent files from Claude to Gemini and Copilot
+$agentFiles = @(Get-ChildItem -Path $sourceDir -Name "*.md" | Where-Object { $_ -notmatch "AGENTS" })
+
+$copiedCount = 0
+foreach ($file in $agentFiles) {
+    $sourcePath = Join-Path $sourceDir $file
+    $geminiPath = Join-Path $geminiDir $file
+    $copilotPath = Join-Path $copilotDir $file
+
+    # Verify source exists and copy
+    if (Test-Path $sourcePath) {
+        Copy-Item -Path $sourcePath -Destination $geminiPath -Force | Out-Null
+        Copy-Item -Path $sourcePath -Destination $copilotPath -Force | Out-Null
+        $copiedCount++
     }
-    
-    $destGem = "$geminiRoot/$($agent.category)/$($agent.name).md"
-    Set-Content -Path $destGem -Value $gemContent
-
-    # Copilot
-    $copContent = $content -replace '(?m)^model: .*$', "model: $($agent.modelCopilot)"
-    $copContent = $copContent -replace 'CLAUDE.md', 'COPILOT.md'
-    $copContent = $copContent -replace '\.claude/', '.copilot/'
-    if ($copContent -match '(?s)(---.*?---)') {
-        $front = $matches[0]
-        $rest = $copContent.Substring($front.Length)
-        $copContent = $front + "`n`n**Name:** $capName" + $rest
-    }
-    
-    $destCop = "$copilotRoot/$($agent.category)/$($agent.name).md"
-    Set-Content -Path $destCop -Value $copContent
 }
 
-# Standards
-$stdSrc = "$claudeRoot/shared/ENGINEERING-STANDARDS.md"
-if (Test-Path $stdSrc) {
-    $stdContent = Get-Content $stdSrc -Raw
-    Set-Content -Path "$geminiRoot/shared/ENGINEERING-STANDARDS.md" -Value ($stdContent -replace 'CLAUDE.md', 'GEMINI.md' -replace '\.claude/', '.gemini/' -replace 'Shared Discipline', 'Shared Discipline (Gemini)')
-    Set-Content -Path "$copilotRoot/shared/ENGINEERING-STANDARDS.md" -Value ($stdContent -replace 'CLAUDE.md', 'COPILOT.md' -replace '\.claude/', '.copilot/' -replace 'Shared Discipline', 'Shared Discipline (Copilot)')
+# Copy shared standards
+$sharedSource = Join-Path $sourceDir "shared"
+$sharedGemini = Join-Path $geminiDir "shared"
+$sharedCopilot = Join-Path $copilotDir "shared"
+
+if (Test-Path $sharedSource) {
+    Copy-Item -Path "$sharedSource\*" -Destination $sharedGemini -Recurse -Force | Out-Null
+    Copy-Item -Path "$sharedSource\*" -Destination $sharedCopilot -Recurse -Force | Out-Null
 }
+
+# Backup to AgentSystem
+foreach ($cli in @("claude", "gemini", "copilot")) {
+    $src = "C:\Users\natha\.$cli\agents"
+    $dst = Join-Path $agentSystemDir $cli
+    if (-not (Test-Path $dst)) { New-Item -ItemType Directory -Force -Path $dst | Out-Null }
+    Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force | Out-Null
+}
+
+Write-Host "✅ Synced $copiedCount agent files across all platforms"
