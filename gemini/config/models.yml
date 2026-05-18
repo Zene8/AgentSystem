@@ -1,0 +1,19 @@
+# Agent model assignments
+# Edit here to change model/effort for any role.
+# gemini_equivalents used by ~/.gemini/agents/ files.
+agents:
+  ceo:              { model: claude-opus-4-7,   effort: high   }
+  cio:              { model: claude-sonnet-4-6, effort: high   }
+  architect:        { model: claude-sonnet-4-6, effort: high   }
+  tdd-test-writer:  { model: claude-sonnet-4-6, effort: normal }
+  backend-dev:      { model: claude-sonnet-4-6, effort: normal }
+  frontend-dev:     { model: claude-sonnet-4-6, effort: normal }
+  database-dev:     { model: claude-sonnet-4-6, effort: normal }
+  code-reviewer:    { model: claude-sonnet-4-6, effort: normal }
+  security-auditor: { model: claude-sonnet-4-6, effort: high   }
+  devops:           { model: claude-sonnet-4-6, effort: high   }
+  coo:              { model: claude-haiku-4-5-20251001, effort: normal }
+
+gemini_equivalents:
+  ceo:     gemini-2.5-pro
+  default: gemini-2.5-flash

@@ -1,0 +1,30 @@
+# MCP servers available to all agents.
+# To add a new MCP: add entry here AND ensure plugin is installed/connected.
+servers:
+  # Communication & productivity
+  - name: gmail
+  - name: google-calendar
+  - name: google-drive
+  - name: notion
+  - name: microsoft-365      # reconnected — Outlook, Teams, OneDrive
+
+  # Design
+  - name: canva
+  - name: figma
+
+  # Dev tools
+  - name: github             # via claude.ai GitHub integration
+  - name: playwright         # browser automation
+  - name: context7           # live library/framework docs
+  - name: neon               # Neon Postgres MCP
+  - name: vercel             # Vercel deployments MCP
+  - name: sentry             # error tracking
+
+  # Cloud
+  - name: azure              # full Azure resource management
+  - name: deploy-on-aws      # AWS knowledge + pricing
+
+  # Uncomment and configure when connected:
+  # - name: linear
+  # - name: slack
+  # - name: firebase
