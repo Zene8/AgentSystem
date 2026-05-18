@@ -1,0 +1,19 @@
+# Agent model assignments
+# Edit here to change model/effort for any role.
+# gemini_equivalents used by ~/.gemini/agents/ files.
+agents:
+  ceo:              { model: gemini-2.5-pro,   effort: high   }
+  cio:              { model: gemini-2.5-flash, effort: high   }
+  architect:        { model: gemini-2.5-flash, effort: high   }
+  tdd-test-writer:  { model: gemini-2.5-flash, effort: normal }
+  backend-dev:      { model: gemini-2.5-flash, effort: normal }
+  frontend-dev:     { model: gemini-2.5-flash, effort: normal }
+  database-dev:     { model: gemini-2.5-flash, effort: normal }
+  code-reviewer:    { model: gemini-2.5-flash, effort: normal }
+  security-auditor: { model: gemini-2.5-flash, effort: high   }
+  devops:           { model: gemini-2.5-flash, effort: high   }
+  coo:              { model: gemini-2.5-flash, effort: normal }
+
+gemini_equivalents:
+  ceo:     gemini-2.5-pro
+  default: gemini-2.5-flash
