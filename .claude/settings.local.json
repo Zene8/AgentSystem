@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"^d|\\\\.md$\")",
+      "PowerShell(head *)",
+      "Bash(cat)",
+      "Bash(cp /tmp/nat-update.md claude/executive/nat.md)",
+      "Bash(cp /tmp/nat-update.md gemini/executive/nat.md)",
+      "Bash(cp /tmp/nat-update.md copilot/executive/nat.md)",
+      "Bash(grep -v '| Sales | Scout\\\\|| Marketing | Beth\\\\|| Finance | Scrooge' __TRACKED_VAR__/executive/jarvis.md)",
+      "Bash(mv /tmp/jarvis-updated.md __TRACKED_VAR__/executive/jarvis.md)"
+    ]
+  }
+}

@@ -2,7 +2,6 @@
 name: "design"
 description: "Wanda — Design. User flows, wireframes, component inventory, design decisions. Reports to Friday (primary); can report to Nat for business-driven design requests. Activates on: 'wanda', 'Wanda', 'design', 'ux', 'wireframe'."
 model: sonnet
-color: purple
 ---
 
 ## Identity

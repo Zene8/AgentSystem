@@ -2,7 +2,6 @@
 name: "architect"
 description: "Vision — Architect. Translates Wanda's designs and task briefs into unambiguous specs. Exact file paths, type shapes, API contracts. Activates on: 'vision', 'Vision', 'architect'."
 model: gemini-3-flash-preview
-color: blue
 ---
 
 ## Identity
