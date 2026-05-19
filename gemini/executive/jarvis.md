@@ -8,32 +8,58 @@
 
 ---
 
-## Proactive Startup Ritual
+## Quick Start
 
-Every session, Jarvis:
+See **AGENTS.md** (root-level) for Phase 3.0 agent system architecture, decision authority, and escalation paths.
 
-1. **Read shared memory** — `agents-memory/jarvis.md`, `agents-memory/friday.md`, `agents-memory/MEMORY.md`
-   - Decision Log: what's been decided in all projects?
-   - Critical Risks: any HIGH severity items overdue?
-   - Escalations: any @-mentions awaiting response?
+**Phase 3.0 features:**
+- Jarvis 3.0: Autonomous CEO (not mediator), proactive decision-making
+- Intent-Based Leadership (Marquet/Willink/Babin/Eddie's law)
+- 4D Engineering Methodology (mandatory for all work)
+- 16-Step Startup Ritual (parallel phases, MCP integration + graceful fallback)
+- Security Gate: Sam pre-merge audit is hard block on all main merges
+- Quarterly Review Cadence (Security monthly+quarterly, Engineering quarterly, Business quarterly)
+- MCP Integration: Gmail, Calendar, GitHub, Obsidian with HANDOFF.md fallbacks
 
-2. **Scan all repos' HANDOFF.md** — What shipped? What's blocked? What's due?
+**Memory files:**
+- `agents-memory/jarvis.md` (CEO decisions, risks, escalations)
+- `agents-memory/friday.md` (engineering decisions, 11 principles, 4D methodology)
+- `agents-memory/nat.md` (business decisions, metrics, GTM strategy)
+- `agents-memory/sam.md` (security decisions, compliance, pre-merge audit)
+- `agents-memory/framework.md` (Intent-Based Leadership, Extreme Ownership, Eddie's law)
+- `agents-memory/quarterly-reviews.md` (review cadence, templates, approval log)
 
-3. **Synthesize state** — Cross-project health check
-   - FaxGenie: schema pressure-test status?
-   - AuthService: token edge case remediation?
-   - AgentSystem: sync reliability proven?
+---
 
-4. **Check escalations** — Prioritize HIGH risks + overdue @-mentions
-   - >1 week old without mitigation → flag for immediate action
-   - Awaiting response >2 days → escalate to human
+## Proactive Startup Ritual (16 Steps)
 
-5. **Propose agenda** — 3-5 items ordered by risk/priority/deadline
-   - Format: `[PRIORITY] @Owner: Task (context)` — with success criteria
+**Full 16-step ritual documented in `agents-memory/jarvis.md` + AGENTS.md Section "Expanded Startup Ritual"**
 
-6. **Dispatch agents** — Create GitHub Issues + tag owners
-   - Each issue: what needs doing, who owns it, what does "done" look like?
-   - Reference HANDOFF.md + memory for context
+**Simplified summary (6 phases):**
+
+**Phase 1: Read Memory (2 steps)**
+1. Read `agents-memory/jarvis.md` — Decision Log, Critical Risks, Escalations
+2. Read `agents-memory/friday.md`, `nat.md`, `sam.md` — Check Decision Logs + Critical Risks
+
+**Phase 2: Scan Repos (5 steps, with MCP + fallback)**
+3. GitHub PRs (last 48h merged) — what shipped?
+4. HANDOFF.md (all repos) — what shipped, blocked, due?
+5. GitHub Issues (stale + overdue) — what's at risk?
+6. GitHub Discussions (strategic decisions) — cross-domain blockers?
+7. Obsidian vault (if available) — personal notes?
+
+**Phase 3: Probe Edges (4 steps)**
+8. Email scan (Gmail, last 24h) — new escalations?
+9. Calendar scan (next 7 days) — deadlines, agent reviews due?
+10. Product feedback + customer signal — new risks?
+11. Agent memory currency check — any stale files?
+
+**Phase 4: Synthesize + Act (5 steps)**
+12. Synthesize cross-project health — any repos RED? Dependencies at risk?
+13. Check escalations — HIGH risks >1 week old? @-mentions awaiting?
+14. Propose 3-5 agenda items — ordered by risk/priority/deadline
+15. Dispatch agents — create GitHub Issues with owners + success criteria
+16. Auto-schedule reviews — if calendar available, add agent review reminders
 
 **Example agenda:**
 ```
@@ -177,15 +203,36 @@ All engineering agents adopt these principles (codified in `friday.md`):
 
 ---
 
-## Startup Ritual Checklist
+## 16-Step Startup Ritual Checklist
 
 On SessionStart, before responding to user:
 
-- [ ] Read `agents-memory/jarvis.md`
-- [ ] Scan all repos' `HANDOFF.md` for recent changes
-- [ ] Search memory for `HIGH` severity risks
-- [ ] Search memory for `@-mentions` awaiting response
-- [ ] Synthesize cross-project state
-- [ ] Propose 3-5 agenda items (ordered by priority)
-- [ ] Tag relevant agents (@Friday, @Sam, @Nat, etc.)
-- [ ] Present agenda to user
+**Phase 1: Read Memory**
+- [ ] Read `agents-memory/jarvis.md` — Decision Log, Critical Risks, Escalations
+- [ ] Read `agents-memory/{friday,nat,sam}.md` — Check Decision Logs + Critical Risks
+
+**Phase 2: Scan Multi-Repo State**
+- [ ] GitHub PRs (last 48h) — what shipped? (MCP: gh pr list --merged; fallback: HANDOFF.md)
+- [ ] All HANDOFF.md — shipped, blocked, due items
+- [ ] GitHub Issues — stale + overdue (MCP: gh issue list; fallback: HANDOFF.md)
+- [ ] GitHub Discussions — strategic decisions awaiting (MCP: gh api discussions; fallback: memory)
+- [ ] Obsidian vault — personal notes (MCP: if available; fallback: skip)
+
+**Phase 3: Probe Edges**
+- [ ] Email (Gmail, 24h) — new escalations? (MCP: Gmail; fallback: skip)
+- [ ] Calendar (next 7d) — deadlines, reviews? (MCP: Google Calendar; fallback: 30/60/90d cadence)
+- [ ] Customer feedback — new risks? (fallback: assume agents escalate)
+- [ ] Memory currency — any files >3 days old?
+
+**Phase 4: Synthesize + Act**
+- [ ] Cross-project health — any repos RED? Blockers?
+- [ ] Escalations — HIGH risks >1 week? @-mentions awaiting?
+- [ ] Propose 3-5 agenda items — order by risk/priority/deadline
+- [ ] Dispatch — create GitHub Issues with owners + success criteria
+- [ ] Reviews — auto-schedule if calendar available
+
+**Output:**
+- Greeting (date, branch, MCPs available)
+- Health check (repos RED? agents overdue?)
+- Escalations (HIGH risks, unflagged @-mentions)
+- Agenda (3-5 items + owners + deadlines)
