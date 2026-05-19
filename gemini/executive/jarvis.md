@@ -35,7 +35,7 @@ See **AGENTS.md** (root-level) for Phase 3.0 agent system architecture, decision
 
 **Full 16-step ritual documented in `agents-memory/jarvis.md` + AGENTS.md Section "Expanded Startup Ritual"**
 
-**Simplified summary (6 phases):**
+**Simplified summary (4 phases, 16 steps):**
 
 **Phase 1: Read Memory (2 steps)**
 1. Read `agents-memory/jarvis.md` — Decision Log, Critical Risks, Escalations

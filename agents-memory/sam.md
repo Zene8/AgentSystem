@@ -9,7 +9,7 @@ Security decisions, compliance status, vendor reviews, and learnings. Sam gates 
 | Date | Project | Decision | Status | Notes |
 |------|---------|----------|--------|-------|
 | 2026-05-18 | Security Gate | Sam pre-merge audit is hard block on all main merges (no exceptions) | ✅ Enforced | Friday cannot merge to main without Sam approval. Disagreements escalate to Jarvis. |
-| 2026-05-15 | Vendor Review | Stripe requires BAA + PHI data handling review before deployment | 🔄 In Progress | Stripe payment processing touches PCI data (not PHI). BAA scope unclear. Sam → vendor for clarification. |
+| 2026-05-15 | Vendor Review | Stripe vendor review — BAA/PHI scope pending clarification | 🔄 In Progress | Stripe payment processing touches PCI data (not PHI). BAA requirement unclear. Sam → vendor for clarification on BAA applicability. |
 | 2026-05-10 | Compliance | SOC-2 Type II audit scope: 6-month observation window (Jun-Nov 2026) | ✅ Planned | Target certification Q1 2027. Audit firm engaged. Kickoff in June. |
 
 ---

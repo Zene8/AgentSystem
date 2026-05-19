@@ -3,13 +3,14 @@
 # This makes the repo the single source of truth. Edits in repo/ sync outward.
 
 param(
-    [switch]$Verbose
+    [switch]$Verbose,
+    [string]$Username = $env:USERNAME  # Windows username for path construction
 )
 
 $repoDir = (Get-Location).Path
-$claudeDir = "C:\Users\natha\.claude\agents"
-$geminiDir = "C:\Users\natha\.gemini\agents"
-$copilotDir = "C:\Users\natha\.copilot\agents"
+$claudeDir = "$env:USERPROFILE\.claude\agents"
+$geminiDir = "$env:USERPROFILE\.gemini\agents"
+$copilotDir = "$env:USERPROFILE\.copilot\agents"
 
 Write-Host "Syncing agents from repo to CLI config dirs..."
 Write-Host "Source (repo): $repoDir"

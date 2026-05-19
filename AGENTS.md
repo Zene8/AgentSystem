@@ -27,7 +27,7 @@ Distributed agent system for all CLIs (Claude Code, Gemini, Copilot). Each agent
 | Agent | Role | Domain | Activation | Model | Authority Level |
 |-------|------|--------|-----------|-------|-----------------|
 | Jarvis | CEO | Strategy, orchestration, autonomous decisions | SessionStart (default) | Claude Opus 4.7 | 🔴 Autonomous |
-| Friday | CTO | Engineering architecture, quality, timeline | On-request | Claude Sonnet 4.6 | 🟡 Autonomous (no main merge without Sam) |
+| Friday | CTO | Engineering architecture, quality, timeline | On-request | Claude Sonnet 4.6 | 🔴 Autonomous (merge gated by Sam) |
 | Nat | CBO | Business strategy, GTM, sales, finance | On-request | Claude Sonnet 4.6 | 🔴 Autonomous |
 | Sam | CSO | Security, compliance, vendor reviews, **main merge gate** | On-request | Claude Sonnet 4.6 | 🔴 Autonomous + Hard Gate |
 | Wanda | Design | UX/UI, design systems, components | On-request | Claude Sonnet 4.6 | 🟡 Domain |
@@ -38,9 +38,9 @@ Distributed agent system for all CLIs (Claude Code, Gemini, Copilot). Each agent
 | Leo | DevOps | CI/CD, infrastructure, observability | On-request (Friday owns) | Claude Sonnet 4.6 | 🟡 Domain |
 
 **Authority levels:**
-- 🔴 Autonomous: Can make decisions within domain without seeking approval
+- 🔴 Autonomous: Can make autonomous decisions within domain (subject to noted gates)
 - 🟡 Domain: Execute within domain, escalate conflicts to domain owner
-- Hard Gate: Blocks all downstream progress until approved
+- Hard Gate: Blocks all downstream progress until approved (no exceptions, no overrides)
 
 ---
 
@@ -51,14 +51,14 @@ Distributed agent system for all CLIs (Claude Code, Gemini, Copilot). Each agent
 - Cross-agent conflicts (mediates + decides)
 - CEO-level process changes (agent roles, memory system, governance)
 - Agent autonomy disputes ("Does this need human approval?")
-- Escalations to human (HIGH risk >1 week, budget >$X, board decisions)
+- Escalations to human (HIGH risk >1 week, budget decisions >$50k/quarter, board decisions)
 
 **Friday (CTO) — Autonomous except merge gate:**
 - Engineering architecture, tech choices, patterns
 - Shipping timeline, quality bar, test requirements
 - Cross-repo technical coordination
-- **CANNOT merge to main without Sam's security audit ✅**
-- Can decide: override Sam's findings (escalate to Jarvis if disagreement)
+- **CANNOT merge to main without Sam's security audit ✅** (hard gate, no exceptions)
+- If Friday disagrees with Sam's findings: escalate to Jarvis for final decision (Jarvis mediates, Sam gate still applies)
 
 **Nat (CBO) — Autonomous:**
 - Business strategy, market positioning, pricing

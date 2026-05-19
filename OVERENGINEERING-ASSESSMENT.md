@@ -1,6 +1,6 @@
 # Did You Overengineer Phase 3? Honest Assessment
 
-**TL;DR:** Partially, yes. Phase 3 adds ~40-50h setup cost for a system currently running fine on ~10h/day. Medium-term ROI is positive (at 15+ agents). Short-term (next 3 months), 60% of Phase 3 features solve anticipated problems, not today's problems.
+**TL;DR:** Partially, yes. Phase 3 adds ~40-50h setup cost for a system currently running fine on ~10h/month. Medium-term ROI is positive (at 15+ agents). Short-term (next 3 months), 60% of Phase 3 features solve anticipated problems, not today's problems.
 
 ---
 
