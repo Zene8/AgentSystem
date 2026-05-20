@@ -214,7 +214,7 @@ $totalExpected = $expectedCount * 3
 
 $verificationPassed = $true
 if ($claudeCount -eq $expectedCount -and $geminiCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and -not $syncFailed) {
-    Write-Status "Verification: All $expectedCount agents synced to all 3 platforms ($totalExpected/ files)" "SUCCESS"
+    Write-Status "Verification: All $expectedCount agents synced to all 3 platforms ($claudeCount/$expectedCount, $geminiCount/$expectedCount, $copilotCount/$expectedCount files)" "SUCCESS"
 
     # Byte-count spot-check for jarvis.md across platforms
     $masterPath = ".agents/agents/jarvis.md"
