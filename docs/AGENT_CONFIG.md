@@ -26,14 +26,11 @@ agy workflows list
 ### Claude Code (Anthropic)
 ```bash
 # Install
-curl -fsSL https://code.claude.com/install | bash
+curl -fsSL https://claude.ai/install.sh | bash
 
 # Start with your project
 cd /path/to/project
 claude
-
-# Run in background
-claude --bg
 ```
 
 ### GitHub Copilot CLI
@@ -41,11 +38,11 @@ claude --bg
 # Authenticate
 gh auth login
 
-# Delegate a task
-gh aw /delegate "Fix issue #42"
+# Run Copilot CLI
+gh copilot
 
-# Check task status
-gh aw status
+# Get help
+gh copilot -- --help
 ```
 
 ## When to Use Which Platform
@@ -74,7 +71,7 @@ All agents follow `.agents/rules/` coding standards:
 
 **"Config changes not synced"**
 - Antigravity: Changes sync instantly from desktop app
-- Claude: Reload session with `/reload`
+- Claude: Restart session or run `/clear` to reset context
 - Copilot: Commit config changes and push
 
 **"Credentials expired"**
