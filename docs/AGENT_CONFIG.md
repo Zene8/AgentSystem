@@ -42,7 +42,7 @@ gh auth login
 gh copilot
 
 # Get help
-gh copilot -- --help
+gh copilot --help
 ```
 
 ## When to Use Which Platform
