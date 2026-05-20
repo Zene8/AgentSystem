@@ -43,6 +43,8 @@ cat .agents/rules/ENGINEERING-STANDARDS.md
 ```yaml
 hooks:
   after_edit:
+    - run: npm run lint
+      fail_mode: warn
     - run: powershell -File sync_agents_from_repo.ps1
       fail_mode: warn
       description: Auto-sync agent definitions to all CLI configs
