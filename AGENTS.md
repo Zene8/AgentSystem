@@ -158,7 +158,7 @@ User
        └─▶ Sam ────────────────── security (any agent, any time)
 ```
 
-**Hard gate:** Sam must review ALL main branch merges. No exceptions. Friday can override with documented justification to Jarvis.
+**Hard gate:** Sam must review ALL main branch merges. No exceptions. If Friday and Sam disagree on a finding, escalate to Jarvis with documented reasoning from both sides — Jarvis decides. Friday does not override Sam unilaterally.
 
 ---
 
