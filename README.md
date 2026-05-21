@@ -1,40 +1,24 @@
-# Nathan's Unified AI Agent System
+# AgentSystem — Unified AI Agent Registry
 
-This repository contains the configuration and implementation details for Nathan's AI agent team, synchronized across multiple CLI tools: Claude Code, Gemini CLI, and Copilot CLI.
+This repository is the single source of truth for an AI agent fleet that runs across multiple CLIs (Claude Code, Gemini CLI, Copilot). It contains canonical agent definitions, memory, sync automation, and governance docs.
 
-## System Architecture
+Top-level docs
+- [AGENTS.md](AGENTS.md) — roster, roles, and decision authority (primary agent WIKI)
+- [CLAUDE.md](CLAUDE.md) — Claude-specific configuration and memory guidance
+- [docs/HANDOFF.md](docs/HANDOFF.md) — current state, blockers, and next steps
+- [.agents/](.agents/) — canonical agent definitions (master files)
+- `sync_agents_from_repo.ps1` — syncs `.agents/` → user CLI folders (`%USERPROFILE%\.claude`, `\.copilot`, `\.gemini`)
 
-The team is structured into four main domains:
+Quick start
+1. Edit or add an agent under `.agents/agents/` (follow the existing master format)
+2. Run the sync to push user copies:
+```powershell
+powershell -File .\sync_agents_from_repo.ps1
+```
 
-1.  **Executive & Ops:** Jarvis (CEO), Friday (CTO), Nat (CBO), Sam (CSO), Scrooge (Finance), Threepio (Comms).
-2.  **Engineering:** Vision (Architect), Wanda (Design), Ultron (Backend), Astra (Frontend), Pym (Database), Leo (DevOps).
-3.  **Business:** Scout (Sales), Beth (Marketing).
-4.  **Shared Discipline:** Shared engineering standards and 10-point discipline.
+Design principles
+- Single source of truth: keep agent definitions in `.agents/` and sync to user CLI folders
+- Per-agent model mappings are handled by the sync script to match each platform's model ids
+- Memory is stored in `agents-memory/` and indexed by `MEMORY.md`
 
-## CLI Implementation Paths
-
-Each CLI has its own configuration folder with tailored agent definitions (models, triggers, and file path references):
-
-*   **Claude Code:** `.claude/agents/`
-*   **Gemini CLI:** `.gemini/agents/`
-*   **Copilot CLI:** `.copilot/agents/`
-
-## Synchronization
-
-Claude Code serves as the source of truth for agent identities and roles. All updates to the system should first be implemented in the Claude configuration and then propagated to Gemini and Copilot configurations using the `sync_agents.ps1` script (or equivalent logic).
-
-### Model Mappings
-
-| Agent Class | Claude Model | Gemini Model | Copilot Model |
-| :--- | :--- | :--- | :--- |
-| **Reasoning / High** | Opus | gemini-3.1-pro-preview | GPT-5.2 |
-| **Execution / Normal** | Sonnet / Haiku | gemini-3-flash-preview | GPT-4o |
-| **Comms / Lite** | Haiku | gemini-3.1-flash-lite-preview | GPT-5 mini |
-
-## Shared Discipline
-
-All engineering agents follow a **10-Point Engineering Discipline** and the **4-D Methodology** (Deconstruct, Diagnose, Develop, Deliver). These standards are stored in the `shared/ENGINEERING-STANDARDS.md` file within each CLI's configuration.
-
-## Usage
-
-To use these agents, invoke them via their respective CLI triggers (e.g., `jarvis`, `friday`, or `skill jarvis` in Copilot).
+If you want a developer walkthrough or to propose doc deletions, open an issue referencing this README and the `AGENTS.md` entry for the affected agent.

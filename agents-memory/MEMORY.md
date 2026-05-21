@@ -83,9 +83,17 @@ git grep "@Friday:" agents-memory/*.md
 
 ---
 
+## Related Documents
+
+- **threepio-handoff-pattern.md** — Agent autonomy + auto-documentation design. Agents self-update memory post-session via SESSION SUMMARY template. Threepio auto-publishes to all repos.
+- **PHASE3-VS-CHRIS-DETAILED-COMPARISON.md** — Exhaustive side-by-side of user's Phase 3 system vs Chris's 9-agent system. 12 categories (architecture, scalability, decision authority, fault tolerance, MCP dependency, memory, leadership, overhead, learning curve, compliance, cost per feature, risk mitigation).
+- **OVERENGINEERING-ASSESSMENT.md** — Honest assessment: Phase 3 is 30% overengineered for today (8 agents), 30% right-sized for month 6 (12 agents), 40% future-proofed for month 12 (15+ agents). Verdict: worth building, simplify ceremony (16-step → 5-step, MCP → GitHub only).
+
+---
+
 ## Maintenance
 
 - **Daily:** Jarvis scans for escalations + HIGH risks
 - **Weekly:** Jarvis reviews Critical Risks, flags >1 week old
-- **Per session:** Agent updates memory (Decision Log, Learnings, Session History)
+- **Per session:** Agent updates memory (Decision Log, Learnings, Session History) or outputs SESSION SUMMARY → Threepio auto-publishes
 - **Monthly:** Jarvis audits for stale decisions, archives closed items

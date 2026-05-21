@@ -1,0 +1,38 @@
+# GitHub Copilot Agent Configuration
+
+name: Copilot Agent
+description: Agent for handling GitHub-native tasks
+
+# Task Delegation Rules
+delegation:
+  # Scope: only well-defined issues with clear acceptance criteria
+  - pattern: "bug: *"
+    action: delegate
+    description: "Fix known bugs"
+
+  - pattern: "feature: *"
+    action: ask_for_context
+    description: "New features need approval first"
+
+  - pattern: "docs: *"
+    action: delegate
+    description: "Documentation improvements"
+
+  - pattern: "chore: *"
+    action: ask_for_context
+    description: "Chores need context"
+
+# CI/CD Integration
+ci_integration:
+  - trigger: "test_failure"
+    action: "Suggest fixes in PR comment"
+
+  - trigger: "lint_failure"
+    action: "Suggest auto-fix via /fix-lint"
+
+# Default Behavior
+defaults:
+  branch_strategy: "feature branches"
+  commit_strategy: "small, frequent commits"
+  pr_strategy: "single PR per task"
+  auto_merge: false  # require human review
