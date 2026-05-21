@@ -97,9 +97,9 @@ function Get-GeminiModel {
     # Agent-specific overrides
     switch ($AgentName.ToLower()) {
         'jarvis' { return 'gemini-3.1-pro-preview' }
-        'friday' { return 'gemini-2.5-pro' }
-        'nat'    { return 'gemini-2.5-pro' }
-        'sam'    { return 'gemini-2.5-pro' }
+        'friday' { return 'gemini-3-flash-preview' }
+        'nat'    { return 'gemini-3-flash-preview' }
+        'sam'    { return 'gemini-3-flash-preview' }
         'threepio' { return 'gemini-3.1-flash-lite-preview' }
         default {
             if ($defaultMap.ContainsKey($ClaudeModel)) { return $defaultMap[$ClaudeModel] }
@@ -383,9 +383,9 @@ function Add-GeminiYamlFrontmatter {
     # Determine Gemini model by agent role
     switch ($AgentName.ToLower()) {
         'jarvis' { $geminiModel = 'gemini-3.1-pro-preview' }
-        'friday' { $geminiModel = 'gemini-2.5-pro' }
-        'nat'    { $geminiModel = 'gemini-2.5-pro' }
-        'sam'    { $geminiModel = 'gemini-2.5-pro' }
+        'friday' { $geminiModel = 'gemini-3-flash-preview' }
+        'nat'    { $geminiModel = 'gemini-3-flash-preview' }
+        'sam'    { $geminiModel = 'gemini-3-flash-preview' }
         'threepio' { $geminiModel = 'gemini-3.1-flash-lite-preview' }
         default { $geminiModel = 'gemini-3-flash-preview' }
     }

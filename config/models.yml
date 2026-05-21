@@ -15,5 +15,5 @@ agents:
   coo:              { model: claude-haiku-4-5-20251001, effort: normal }
 
 gemini_equivalents:
-  ceo:     gemini-2.5-pro
-  default: gemini-2.5-flash
+  ceo:     gemini-3.1-pro-preview
+  default: gemini-3-flash-preview

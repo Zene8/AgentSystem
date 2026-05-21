@@ -182,7 +182,7 @@ User
 | Agent | Claude | Gemini | Copilot |
 |-------|--------|--------|---------|
 | Jarvis | claude-opus-4-7 | gemini-3.1-pro-preview | gpt-5.2-codex |
-| Friday / Nat / Sam | claude-sonnet-4-6 | gemini-2.5-pro | gpt-5.4-mini |
+| Friday / Nat / Sam | claude-sonnet-4-6 | gemini-3-flash-preview | gpt-5.4-mini |
 | Threepio | claude-sonnet-4-6 | gemini-3.1-flash-lite-preview | gpt-5-mini |
 | All other agents | claude-haiku-4-5-20251001 | gemini-3-flash-preview | gpt-5-mini |
 
