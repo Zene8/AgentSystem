@@ -84,12 +84,15 @@ Agents automatically publish session output to decision logs, HANDOFF.md, repo-s
    - Pulls from all sub-repo HANDOFF.md files
    - Single source of truth for Jarvis startup ritual
 
-6. **Commit all changes:**
+6. **Commit all changes to feature branch and open PR (for audit gate):**
    ```bash
+   git checkout -b auto/session-handoff-[agent-name]-[date]
    git add agents-memory/ HANDOFF.md claude.md gemini.md copilot.md docs/
    git commit -m "Auto-update: session handoff [Agent names] [date]"
-   git push origin main
+   git push origin auto/session-handoff-[agent-name]-[date]
+   gh pr create --title "Auto-update: session handoff [Agent Names]" --body "Automated session summary from @[Agent]. Requires Sam's pre-merge security review."
    ```
+   - Threepio opens PR → Sam reviews (security audit gate applies) → if approved, Threepio merges to main
 
 7. **Notify:** Log completion. No slack/email needed (Jarvis reads committed memory + HANDOFF on next startup).
 

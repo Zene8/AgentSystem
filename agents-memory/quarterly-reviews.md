@@ -42,8 +42,9 @@
   - Reads: Sam's monthly, Friday's latest Decision Log, Nat's pipeline
   - Output: Monthly risk summary (HIGH items, escalation decisions)
 
-- **Quarterly:** Org health review (week after all quarterly reviews due)
-  - Reads: Security deep dive, Engineering report, Business report
+- **Quarterly:** Org health review (mid-month following quarter-end, after all agent reviews due)
+  - **Timing:** April (Q1: after Mar business review), July (Q2: after Jun business review), October (Q3: after Sep business review), January (Q4: after Dec business review)
+  - Reads: Security deep dive (Jan/Apr/Jul/Oct), Engineering report (Feb/May/Aug/Nov), Business report (Mar/Jun/Sep/Dec)
   - Scope: Org structure health, process execution, agent autonomy calibration, cross-repo visibility, resource allocation
   - Output: Quarterly CEO review (org health + strategic adjustments)
   - Approval: Jarvis → Human (for major pivots/budget decisions)
