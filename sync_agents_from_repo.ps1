@@ -64,18 +64,30 @@ function Initialize-LogDirectory {
 
 # Helper: Map Claude model names to Gemini equivalents
 function Get-GeminiModel {
-    param([string]$ClaudeModel)
+    param(
+        [string]$ClaudeModel,
+        [string]$AgentName
+    )
 
-    $mapping = @{
-        "claude-opus-4-7" = "Gemini 3.1 Pro (High)"
-        "claude-sonnet-4-6" = "Gemini 3.5 Flash (High)"
-        "claude-haiku-4-5-20251001" = "Gemini 3.5 Flash (Medium)"
+    # Default mapping by Claude model
+    $defaultMap = @{
+        "claude-opus-4-7" = "gemini-3.1-pro-preview"
+        "claude-sonnet-4-6" = "gemini-2.5-pro"
+        "claude-haiku-4-5-20251001" = "gemini-3-flash-preview"
     }
 
-    if ($mapping.ContainsKey($ClaudeModel)) {
-        return $mapping[$ClaudeModel]
+    # Agent-specific overrides
+    switch ($AgentName.ToLower()) {
+        'jarvis' { return 'gemini-3.1-pro-preview' }
+        'friday' { return 'gemini-2.5-pro' }
+        'nat'    { return 'gemini-2.5-pro' }
+        'sam'    { return 'gemini-2.5-pro' }
+        'threepio' { return 'gemini-3.1-flash-lite-preview' }
+        default {
+            if ($defaultMap.ContainsKey($ClaudeModel)) { return $defaultMap[$ClaudeModel] }
+            return 'gemini-3-flash-preview'
+        }
     }
-    return "Gemini 3.5 Flash (Medium)"
 }
 
 # Helper: Map Claude model names to Copilot equivalents
@@ -127,11 +139,13 @@ function Add-ClaudeYamlFrontmatter {
         [string]$Content
     )
 
+    # Extract top-level metadata and a cleaned body for Claude frontmatter
     $metadata = Get-AgentMetadata -Content $Content
     $name = if ($metadata.name) { $metadata.name } else { $AgentName }
     $description = if ($metadata.description) { $metadata.description } else { "" }
     $model = if ($metadata.model) { $metadata.model } else { "claude-sonnet-4-6" }
 
+    # Build YAML header
     $yaml = @"
 ---
 name: "$name"
@@ -142,7 +156,11 @@ memory: user
 
 "@
 
-    return $yaml + $Content
+    # Strip metadata key:value lines from the original content so the body only
+    # contains the agent prompt/instructions (Claude expects frontmatter + body)
+    $body = Strip-MetadataFromContent -Content $Content
+
+    return $yaml + $body
 }
 
 # Helper: Prepend YAML frontmatter for GitHub Copilot format
@@ -152,13 +170,22 @@ function Add-CopilotYamlFrontmatter {
         [string]$Content
     )
 
+    # Extract metadata and produce a clean body for Copilot frontmatter
     $metadata = Get-AgentMetadata -Content $Content
     $name = if ($metadata.name) { $metadata.name } else { $AgentName }
     $description = if ($metadata.description) { $metadata.description } else { "" }
-    $claudeModel = if ($metadata.model) { $metadata.model } else { "claude-sonnet-4-6" }
-    $copilotModel = Get-CopilotModel -ClaudeModel $claudeModel
 
-    Write-Host "DEBUG Add-CopilotYamlFrontmatter: AgentName=$AgentName, claudeModel=$claudeModel, copilotModel=$copilotModel (type: $($copilotModel.GetType().Name))" -ForegroundColor Cyan
+    # Determine Copilot (gpt) model by agent role
+    switch ($AgentName.ToLower()) {
+        'jarvis' { $copilotModel = 'gpt-5.2-codex' }
+        'friday' { $copilotModel = 'gpt-5.4-mini' }
+        'nat'    { $copilotModel = 'gpt-5.4-mini' }
+        'sam'    { $copilotModel = 'gpt-5.4-mini' }
+        'threepio' { $copilotModel = 'gpt-5-mini' }
+        default { $copilotModel = 'gpt-5-mini' }
+    }
+
+    Write-Host "DEBUG Add-CopilotYamlFrontmatter: AgentName=$AgentName, copilotModel=$copilotModel" -ForegroundColor Cyan
 
     $yaml = @"
 ---
@@ -169,7 +196,37 @@ model: "$copilotModel"
 
 "@
 
-    return $yaml + $Content
+    $body = Strip-MetadataFromContent -Content $Content
+
+    return $yaml + $body
+}
+
+
+# Helper: Remove top-level metadata key:value lines from a master agent file and return the remaining body.
+function Strip-MetadataFromContent {
+    param([string]$Content)
+
+    $lines = $Content -split "`r?`n"
+    $bodyLines = @()
+    $inMetadata = $true
+
+    foreach ($line in $lines) {
+        if ($inMetadata -and $line -match '^[a-z\-]+:\s*(.*)$') {
+            # still in metadata header, skip
+            continue
+        }
+
+        # If we hit an empty line that's immediately after metadata, skip it
+        if ($inMetadata -and $line.Trim() -eq "") {
+            $inMetadata = $false
+            continue
+        }
+
+        $inMetadata = $false
+        $bodyLines += $line
+    }
+
+    return ($bodyLines -join "`n").Trim()
 }
 
 # Helper: Process multiline YAML block strings correctly
@@ -230,7 +287,8 @@ function ConvertTo-AgentJson {
 
     # Map Claude model to Gemini equivalent
     if ($agent["model"]) {
-        $agent["model"] = Get-GeminiModel -ClaudeModel $agent["model"]
+        $agentNameForJson = if ($agent["name"]) { $agent["name"] } else { $null }
+        $agent["model"] = Get-GeminiModel -ClaudeModel $agent["model"] -AgentName $agentNameForJson
     }
 
     return $agent | ConvertTo-Json -Depth 10
@@ -282,6 +340,80 @@ function Sync-AntigravityAgent {
         }
 
         Write-Status "Synced to Antigravity: $targetPath" "SUCCESS"
+    }
+    catch {
+        Write-Status "ERROR: Failed to write $targetPath : $($_.Exception.Message)" "ERROR"
+        $SyncFailed.Value = $true
+    }
+}
+
+
+# Helper: Prepend YAML frontmatter for Gemini CLI (user-level markdown)
+function Add-GeminiYamlFrontmatter {
+    param(
+        [string]$AgentName,
+        [string]$Content
+    )
+
+    $metadata = Get-AgentMetadata -Content $Content
+    # Gemini requires a slug-style name (lowercase, hyphens). Use repository agent key.
+    $rawName = $AgentName
+    $name = ($rawName -replace '[^a-z0-9-]', '-') -replace '--+', '-' -replace '^-|-$',''
+    $name = $name.ToLower()
+    $description = if ($metadata.description) { $metadata.description } else { "" }
+
+    # Determine Gemini model by agent role
+    switch ($AgentName.ToLower()) {
+        'jarvis' { $geminiModel = 'gemini-3.1-pro-preview' }
+        'friday' { $geminiModel = 'gemini-2.5-pro' }
+        'nat'    { $geminiModel = 'gemini-2.5-pro' }
+        'sam'    { $geminiModel = 'gemini-2.5-pro' }
+        'threepio' { $geminiModel = 'gemini-3.1-flash-lite-preview' }
+        default { $geminiModel = 'gemini-3-flash-preview' }
+    }
+
+    $yaml = @"
+---
+name: "$name"
+description: "$description"
+model: "$geminiModel"
+---
+
+"@
+
+    $body = Strip-MetadataFromContent -Content $Content
+
+    return $yaml + $body
+}
+
+
+# Helper: Sync agent definition to user-level Gemini CLI as Markdown
+function Sync-GeminiAgent {
+    param(
+        [string]$AgentName,
+        [string]$Content,
+        [ref]$SyncFailed
+    )
+
+    $targetDir = "$env:USERPROFILE\.gemini\agents"
+    $targetPath = "$targetDir\$AgentName.md"
+
+    try {
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        $contentWithFrontmatter = Add-GeminiYamlFrontmatter -AgentName $AgentName -Content $Content
+
+        [System.IO.File]::WriteAllText($targetPath, $contentWithFrontmatter, [System.Text.UTF8Encoding]::new($false))
+
+        if (-not (Test-Path $targetPath)) {
+            Write-Status "ERROR: File not found after write: $targetPath" "ERROR"
+            $SyncFailed.Value = $true
+            return
+        }
+
+        Write-Status "Synced to Gemini: $targetPath" "SUCCESS"
     }
     catch {
         Write-Status "ERROR: Failed to write $targetPath : $($_.Exception.Message)" "ERROR"
@@ -382,7 +514,7 @@ Initialize-LogDirectory
 Initialize-AntigravityAgentRoot
 Write-Status "Starting agent definition sync..." "INFO"
 
-$agents = @("jarvis", "friday", "nat", "sam", "wanda", "threepio", "ultron", "astra", "pym", "leo")
+$agents = @("jarvis", "friday", "nat", "sam", "wanda", "threepio", "ultron", "astra", "pym", "leo", "general-coding")
 $syncFailed = $false
 
 foreach ($agent in $agents) {
@@ -402,39 +534,50 @@ foreach ($agent in $agents) {
     Sync-AntigravityAgent -AgentName $agent -Content $content -SyncFailed ([ref]$syncFailed)
     Sync-ClaudeCodeAgent -AgentName $agent -Content $content -SyncFailed ([ref]$syncFailed)
     Sync-CopilotAgent -AgentName $agent -Content $content -SyncFailed ([ref]$syncFailed)
+    Sync-GeminiAgent -AgentName $agent -Content $content -SyncFailed ([ref]$syncFailed)
 }
 
 # Verify sync integrity (check user-level directories)
 $claudeDir = "$env:USERPROFILE\.claude\agents"
 $copilotDir = "$env:USERPROFILE\.copilot\agents"
 $antigravityDir = "$env:USERPROFILE\.gemini\antigravity-cli\agent"
+$geminiDir = "$env:USERPROFILE\.gemini\agents"
 
-$claudeCount = (Get-ChildItem -Path $claudeDir -Filter "*.md" -ErrorAction SilentlyContinue | Measure-Object).Count
-$copilotCount = (Get-ChildItem -Path $copilotDir -Filter "*.md" -ErrorAction SilentlyContinue | Measure-Object).Count
-$antigravityCount = (Get-ChildItem -Path $antigravityDir -Filter "agent.json" -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+$claudeCount = 0
+$copilotCount = 0
+$antigravityCount = 0
+$geminiCount = 0
+
+foreach ($agent in $agents) {
+    if (Test-Path "$claudeDir\$agent.md") { $claudeCount++ }
+    if (Test-Path "$copilotDir\$agent.md") { $copilotCount++ }
+    if (Test-Path "$antigravityDir\$agent\agent.json") { $antigravityCount++ }
+    if (Test-Path "$geminiDir\$agent.md") { $geminiCount++ }
+}
 
 $expectedCount = $agents.Count
 $verificationPassed = $true
 
-if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $antigravityCount -eq $expectedCount -and -not $syncFailed) {
-    Write-Status "Verification: All $expectedCount agents synced to all 3 platforms (Claude: $claudeCount, Copilot: $copilotCount, Antigravity: $antigravityCount)" "SUCCESS"
+if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $antigravityCount -eq $expectedCount -and $geminiCount -eq $expectedCount -and -not $syncFailed) {
+    Write-Status "Verification: All $expectedCount agents synced to all platforms (Claude: $claudeCount, Copilot: $copilotCount, Gemini: $geminiCount, Antigravity: $antigravityCount)" "SUCCESS"
 
     # Content spot-check for jarvis.md across platforms
     $masterPath = ".agents/agents/jarvis.md"
     $claudePath = "$env:USERPROFILE\.claude\agents\jarvis.md"
     $copilotPath = "$env:USERPROFILE\.copilot\agents\jarvis.md"
     $antigravityPath = "$env:USERPROFILE\.gemini\antigravity-cli\agent\jarvis\agent.json"
+    $geminiPath = "$env:USERPROFILE\.gemini\agents\jarvis.md"
 
-    if ((Test-Path $masterPath) -and (Test-Path $claudePath) -and (Test-Path $copilotPath) -and (Test-Path $antigravityPath)) {
+    if ((Test-Path $masterPath) -and (Test-Path $claudePath) -and (Test-Path $copilotPath) -and (Test-Path $antigravityPath) -and (Test-Path $geminiPath)) {
         $masterSize = (Get-Item $masterPath).Length
         $claudeSize = (Get-Item $claudePath).Length
         $copilotSize = (Get-Item $copilotPath).Length
         $antigravitySize = (Get-Item $antigravityPath).Length
+        $geminiSize = (Get-Item $geminiPath).Length
 
-        # Claude and Copilot files have YAML frontmatter added, so they'll be larger than master
-        # Verify they exist and have content
-        if ($claudeSize -gt $masterSize -and $copilotSize -gt $masterSize -and $antigravitySize -gt 0) {
-            Write-Status "Spot-check (jarvis): Claude ($claudeSize bytes with frontmatter) and Copilot ($copilotSize bytes with frontmatter) synced. Antigravity JSON ($antigravitySize bytes) differs due to format conversion (expected)." "SUCCESS"
+        # Verify files exist and are non-empty (frontmatter/body transformations may change size)
+        if ($claudeSize -gt 0 -and $copilotSize -gt 0 -and $antigravitySize -gt 0 -and $geminiSize -gt 0) {
+            Write-Status "Spot-check (jarvis): Files present (Claude: $claudeSize bytes, Copilot: $copilotSize bytes, Gemini: $geminiSize bytes, Antigravity: $antigravitySize bytes)." "SUCCESS"
         } else {
             Write-Status "ERROR: Content verification failed for jarvis - Master: $masterSize, Claude: $claudeSize, Copilot: $copilotSize, Antigravity: $antigravitySize" "ERROR"
             $verificationPassed = $false
@@ -449,19 +592,20 @@ if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $
     $claudePath = "$env:USERPROFILE\.claude\agents\friday.md"
     $copilotPath = "$env:USERPROFILE\.copilot\agents\friday.md"
     $antigravityPath = "$env:USERPROFILE\.gemini\antigravity-cli\agent\friday\agent.json"
+    $geminiPath = "$env:USERPROFILE\.gemini\agents\friday.md"
 
-    if ((Test-Path $masterPath) -and (Test-Path $claudePath) -and (Test-Path $copilotPath) -and (Test-Path $antigravityPath)) {
+    if ((Test-Path $masterPath) -and (Test-Path $claudePath) -and (Test-Path $copilotPath) -and (Test-Path $antigravityPath) -and (Test-Path $geminiPath)) {
         $masterSize = (Get-Item $masterPath).Length
         $claudeSize = (Get-Item $claudePath).Length
         $copilotSize = (Get-Item $copilotPath).Length
         $antigravitySize = (Get-Item $antigravityPath).Length
+        $geminiSize = (Get-Item $geminiPath).Length
 
-        # Claude and Copilot files have YAML frontmatter added, so they'll be larger than master
-        # Verify they exist and have content
-        if ($claudeSize -gt $masterSize -and $copilotSize -gt $masterSize -and $antigravitySize -gt 0) {
-            Write-Status "Spot-check (friday): Claude ($claudeSize bytes with frontmatter) and Copilot ($copilotSize bytes with frontmatter) synced. Antigravity JSON ($antigravitySize bytes) differs due to format conversion (expected)." "SUCCESS"
+        # Verify files exist and are non-empty (frontmatter/body transformations may change size)
+        if ($claudeSize -gt 0 -and $copilotSize -gt 0 -and $antigravitySize -gt 0 -and $geminiSize -gt 0) {
+            Write-Status "Spot-check (friday): Files present (Claude: $claudeSize bytes, Copilot: $copilotSize bytes, Gemini: $geminiSize bytes, Antigravity: $antigravitySize bytes)." "SUCCESS"
         } else {
-            Write-Status "ERROR: Content verification failed for friday - Master: $masterSize, Claude: $claudeSize, Copilot: $copilotSize, Antigravity: $antigravitySize" "ERROR"
+            Write-Status "ERROR: Content verification failed for friday - Master: $masterSize, Claude: $claudeSize, Copilot: $copilotSize, Antigravity: $antigravitySize, Gemini: $geminiSize" "ERROR"
             $verificationPassed = $false
         }
     } else {
