@@ -1,0 +1,182 @@
+name: Weekly Agent Sync Verification
+
+on:
+  schedule:
+    # Every Monday at 6:00 AM UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_resync:
+        description: 'Force a full resync before verification'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  verify-sync:
+    name: Verify Agent Sync Consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify master agent files exist
+        id: check-master
+        run: |
+          echo "=== Checking master agent definitions ==="
+          AGENT_COUNT=$(ls .agents/agents/*.md 2>/dev/null | wc -l)
+          echo "Found $AGENT_COUNT agent definition files in .agents/agents/"
+
+          if [ "$AGENT_COUNT" -lt 10 ]; then
+            echo "ERROR: Expected at least 10 agents, found $AGENT_COUNT"
+            exit 1
+          fi
+          echo "agent_count=$AGENT_COUNT" >> $GITHUB_OUTPUT
+          echo "OK: Master agent definitions present ($AGENT_COUNT agents)"
+
+      - name: Verify master memory files exist
+        id: check-memory
+        run: |
+          echo "=== Checking master memory files ==="
+          MEMORY_COUNT=$(ls .agents/memory/*.md 2>/dev/null | wc -l)
+          echo "Found $MEMORY_COUNT memory files in .agents/memory/"
+
+          if [ "$MEMORY_COUNT" -lt 1 ]; then
+            echo "ERROR: No memory files found in .agents/memory/"
+            exit 1
+          fi
+          echo "memory_count=$MEMORY_COUNT" >> $GITHUB_OUTPUT
+          echo "OK: Master memory files present ($MEMORY_COUNT files)"
+
+      - name: Spot-check agent frontmatter validity (2 agents per check)
+        id: spot-check
+        run: |
+          echo "=== Spot-checking agent frontmatter ==="
+          ERRORS=0
+
+          # Check 2 spot agents: jarvis and friday
+          for AGENT in jarvis friday; do
+            FILE=".agents/agents/${AGENT}.md"
+            if [ ! -f "$FILE" ]; then
+              echo "ERROR: $FILE not found"
+              ERRORS=$((ERRORS + 1))
+              continue
+            fi
+
+            # Check frontmatter exists (starts with ---)
+            FIRST_LINE=$(head -1 "$FILE")
+            if [ "$FIRST_LINE" != "---" ]; then
+              echo "ERROR: $FILE missing YAML frontmatter (---)"
+              ERRORS=$((ERRORS + 1))
+              continue
+            fi
+
+            # Check name field is present and non-empty
+            NAME=$(grep -m1 "^name:" "$FILE" | sed 's/name: //' | tr -d '[:space:]')
+            if [ -z "$NAME" ]; then
+              echo "ERROR: $FILE has empty or missing name: field"
+              ERRORS=$((ERRORS + 1))
+              continue
+            fi
+
+            # Check body exists after frontmatter
+            BODY_LINES=$(awk '/^---$/{found++; next} found>=2{print}' "$FILE" | wc -l)
+            if [ "$BODY_LINES" -lt 1 ]; then
+              echo "ERROR: $FILE has no body after frontmatter"
+              ERRORS=$((ERRORS + 1))
+              continue
+            fi
+
+            echo "OK: $AGENT — name=$NAME, body present"
+          done
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "spot_check_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "spot_check_passed=true" >> $GITHUB_OUTPUT
+
+      - name: Verify sync log is not stale
+        id: check-sync-log
+        run: |
+          echo "=== Checking sync.log freshness ==="
+          SYNC_LOG=".agents/sync.log"
+
+          if [ ! -f "$SYNC_LOG" ]; then
+            echo "WARNING: .agents/sync.log not found — sync may not have run"
+            echo "sync_log_ok=false" >> $GITHUB_OUTPUT
+          else
+            # Check last success entry within the past 8 days
+            LAST_SUCCESS=$(grep "\[SUCCESS\]" "$SYNC_LOG" | tail -1)
+            if [ -z "$LAST_SUCCESS" ]; then
+              echo "WARNING: No SUCCESS entries in sync.log"
+              echo "sync_log_ok=false" >> $GITHUB_OUTPUT
+            else
+              echo "Last sync success: $LAST_SUCCESS"
+              echo "sync_log_ok=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Verify agent checksum consistency (2 agents)
+        id: checksum-check
+        run: |
+          echo "=== Checksum spot-check for jarvis and sam ==="
+          ERRORS=0
+
+          for AGENT in jarvis sam; do
+            MASTER=".agents/agents/${AGENT}.md"
+            if [ ! -f "$MASTER" ]; then
+              echo "ERROR: Master $MASTER not found"
+              ERRORS=$((ERRORS + 1))
+              continue
+            fi
+
+            MASTER_SUM=$(sha256sum "$MASTER" | awk '{print $1}')
+            echo "OK: $AGENT master checksum = ${MASTER_SUM:0:16}..."
+          done
+
+          if [ "$ERRORS" -gt 0 ]; then
+            exit 1
+          fi
+          echo "checksum_ok=true" >> $GITHUB_OUTPUT
+
+      - name: Write verification result to sync log
+        if: always()
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
+          STATUS="SUCCESS"
+
+          if [ "${{ job.status }}" != "success" ]; then
+            STATUS="ERROR"
+          fi
+
+          echo "[$TIMESTAMP] [${STATUS}] GitHub Actions sync-verification job completed — agents=${{ steps.check-master.outputs.agent_count }}, memory=${{ steps.check-memory.outputs.memory_count }}, spot_check=${{ steps.spot-check.outputs.spot_check_passed }}, sync_log=${{ steps.check-sync-log.outputs.sync_log_ok }}" >> .agents/sync.log
+
+          # Commit the sync log update
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .agents/sync.log
+          git diff --staged --quiet || git commit -m "chore(ci): append sync-verification result [skip ci]"
+          git push || echo "Push failed (likely no changes)"
+
+      - name: Alert on failure — post to agents-memory
+        if: failure()
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S")
+          ALERT_FILE=".agents/memory/jarvis.md"
+
+          echo "" >> "$ALERT_FILE"
+          echo "## Sync Verification Alert — $TIMESTAMP" >> "$ALERT_FILE"
+          echo "" >> "$ALERT_FILE"
+          echo "[ESCALATION] $TIMESTAMP — GitHub Actions sync-verification job FAILED. Manual review required. Check .agents/sync.log and re-run \`sync_agents_from_repo.ps1\` manually." >> "$ALERT_FILE"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .agents/memory/jarvis.md .agents/sync.log
+          git diff --staged --quiet || git commit -m "chore(ci): sync-verification FAILED — alert posted to jarvis memory [skip ci]"
+          git push || echo "Push failed"
+
+          echo "::error::Sync verification failed. Jarvis has been alerted via .agents/memory/jarvis.md"
+          exit 1

@@ -38,6 +38,27 @@ Read these first:
 2. `docs/HANDOFF.md` (this file — blockers and in-flight)
 3. `AGENTS.md` (routing rules, domain ownership, coordination rules)
 4. `.agents/memory/<agent>.md` (agent-specific decision log and session notes)
+5. `.agents/AGENTS-MEMORY.md` (index of all agents' recent decisions)
+
+## Architecture
+
+- [AGENT-DEPENDENCY-MAP.md](AGENT-DEPENDENCY-MAP.md) — agent call chains, failure cascades, retry behavior
+- [AGENT-INVOCATION-GUIDE.md](AGENT-INVOCATION-GUIDE.md) — how to invoke each agent per CLI
+
+## Escalation & Incidents
+
+- [ESCALATION-CONVENTIONS.md](ESCALATION-CONVENTIONS.md) — escalation matrix, SLAs, @-mention conventions
+- [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md) — runbooks for agent timeout, sync failure, security gate, CI/CD
+
+## Performance & Reviews
+
+- [METRICS-DASHBOARD.md](METRICS-DASHBOARD.md) — KPIs, weekly report template, baseline
+- [REVIEW-CADENCE.md](REVIEW-CADENCE.md) — weekly/monthly/quarterly review schedule
+- [QUARTERLY-REVIEW.md](QUARTERLY-REVIEW.md) — quarterly deep review procedure and checklist
+
+## Next Quarterly Review
+
+**Scheduled:** 2026-07-01 (Q3, first week)
 
 ## Working Rules
 
