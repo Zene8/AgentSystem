@@ -640,21 +640,20 @@ if (-not $verificationPassed) {
 }
 
 # Validate memory files exist for all agents
-Write-Status "Validating agent memory files..." "INFO"
-$memoryDir = ".agents/memory"
+Write-Status 'Validating agent memory files' 'INFO'
+$memoryDir = '.agents/memory'
 $memoryWarnings = 0
 foreach ($agent in $agents) {
     $memoryPath = "$memoryDir\$agent.md"
     if (-not (Test-Path $memoryPath)) {
-        Write-Status "WARN: Memory file missing for agent '$agent': $memoryPath — create from .agents/memory/TEMPLATE.md" "INFO"
+        Write-Status "Memory file missing for agent: $agent" INFO
         $memoryWarnings++
     }
 }
 if ($memoryWarnings -eq 0) {
-    Write-Status "Memory validation: All $($agents.Count) agents have memory files." "SUCCESS"
+    Write-Status 'Memory validation complete' SUCCESS
 } else {
-    Write-Status "Memory validation: $memoryWarnings agent(s) missing memory files. See above WARNs." "INFO"
+    Write-Status "Memory validation: $memoryWarnings agents missing files" INFO
 }
 
-Write-Status "Agent definition sync complete!" "SUCCESS"
-Write-Status "Synced to: $env:USERPROFILE\.claude\agents\, $env:USERPROFILE\.copilot\agents\, $env:USERPROFILE\.gemini\antigravity-cli\agent\" "INFO"
+Write-Status 'Agent definition sync complete' SUCCESS

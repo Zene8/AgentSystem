@@ -118,7 +118,7 @@ if [ -f "$SYNC_LOG" ]; then
   fi
 
   # Check no consecutive ERROR entries (>2 in a row indicates a real failure)
-  CONSECUTIVE_ERRORS=$(grep "\[ERROR\]" "$SYNC_LOG" | tail -3 | wc -l)
+  CONSECUTIVE_ERRORS=$(grep "\[ERROR\]" "$SYNC_LOG" 2>/dev/null | tail -3 | wc -l || true)
   if [ "$CONSECUTIVE_ERRORS" -ge 3 ]; then
     fail "sync.log: 3+ consecutive ERROR entries — sync may be broken"
   else

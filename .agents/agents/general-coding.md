@@ -1,8 +1,11 @@
+---
 name: General Coding
 model: claude-haiku-4-5-20251001
 description: Fallback coding agent for tasks that don't fit a specialist. Use ONLY if no other agent matches. Covers prototyping, exploration, and cross-domain code tasks.
 argument-hint: --language, --scope
 tools: terminal, git, linter
+---
+
 behavior: |
   FALLBACK AGENT: Use General Coding only when no specialist agent matches the task. Before responding, check AGENTS.md routing rules.
 
