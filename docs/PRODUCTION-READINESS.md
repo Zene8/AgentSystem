@@ -174,7 +174,7 @@ Follow GITHUB-ISSUES.md in sequence:
 4. AD-02: Jarvis startup (2 hours)
 5. AD-05: Domain map (1 hour)
 6. AD-06: Bypass mechanism (1 hour)
-7. AD-07: Threepio & general-coding (1.5 hours)
+7. AD-07: Threepio & r2d2 (1.5 hours)
 8. AD-08: Coordination rules (1.5 hours)
 9. AD-09: Sync script (2 hours)
 10. AD-10: Consolidated docs (2 hours)

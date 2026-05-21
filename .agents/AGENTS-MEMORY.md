@@ -21,7 +21,7 @@ Quick-lookup table of each agent's most recent decision, current memory state, a
 | Leo | DevOps / CI-CD / infrastructure / observability | 2026-05-21 | Conflicts → Friday. Domain: infra. | _(no memory file yet)_ |
 | Wanda | Design / component design / design system | 2026-05-21 | Technical issues → Friday. Quarterly review participant. | _(no memory file yet)_ |
 | Threepio | Docs / README / handoffs / PR descriptions | 2026-05-21 | Documentation agent. No escalation path — routes to domain expert. | _(no memory file yet)_ |
-| general-coding | General coding tasks not matching a domain | 2026-05-21 | Fallback agent when no domain match. | _(no memory file yet)_ |
+| r2d2 | General coding tasks not matching a domain | 2026-05-21 | Fallback agent when no domain match. | _(no memory file yet)_ |
 
 ---
 

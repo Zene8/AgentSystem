@@ -372,7 +372,7 @@
 **Recommendation:** 
 - Keep Nat for business strategy
 - Add Scout equivalent (sales pipeline, prospect research)
-- Add Tiffany equivalent (marketing, content, campaigns) or use general-coding as fallback
+- Add Tiffany equivalent (marketing, content, campaigns) or use r2d2 as fallback
 
 ---
 

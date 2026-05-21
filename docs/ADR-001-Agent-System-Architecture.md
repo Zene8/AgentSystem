@@ -39,7 +39,7 @@ Current `.agents/` system (11 agents, 134 LOC) is **functionally correct but ope
 | **Astra** | Frontend, components | Haiku 4.5 | Friday | Tests + accessibility, escalates to Friday |
 | **Wanda** | Design, UX/UI | Sonnet 4.6 | Jarvis | Design authority, escalates Friday/Jarvis |
 | **Threepio** | Comms, docs, PR descriptions | — | — | Minimal definition |
-| **general-coding** | Catch-all | — | — | Fallback only |
+| **r2d2** | Catch-all | — | — | Fallback only |
 
 **Strengths:**
 - ✅ Clear escalation chains (Friday → Jarvis for conflicts)
@@ -55,7 +55,7 @@ Current `.agents/` system (11 agents, 134 LOC) is **functionally correct but ope
 - ❌ No memory structure (no session logs, decision logs, learnings)
 - ❌ No explicit routing rules (no "route backend questions to Ultron")
 - ❌ No bypass mechanism (no "ignore Jarvis, dispatch directly to Soren")
-- ❌ Threepio & general-coding underspecified
+- ❌ Threepio & r2d2 underspecified
 - ❌ No startup procedure (no equivalent to Toni's 16-step startup)
 - ❌ No coordination rules (no "If task spans agents, flag for Chris")
 - ❌ Memory files exist (friday.md, jarvis.md, nat.md, sam.md) but structure undefined

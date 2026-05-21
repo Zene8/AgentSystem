@@ -37,7 +37,7 @@ Decisions, escalations, cross-agent risks, and learnings. Jarvis synthesizes acr
 
 ## Session History
 
-- **2026-05-21 09:15:** Agent directives implementation (AD-01 through AD-10). Jarvis marked as default entry agent in CLAUDE.md. AGENTS.md rewritten as comprehensive reference with routing rules, domain ownership map, coordination rules, bypass mechanism, memory structure, startup procedure, escalation paths. Memory template created at .agents/memory/TEMPLATE.md. Threepio and general-coding agent files fully specified. Sync script updated with name/behavior validation and memory file warnings. HANDOFF.md updated with blocked work tracking format. Closes issues #13–22.
+- **2026-05-21 09:15:** Agent directives implementation (AD-01 through AD-10). Jarvis marked as default entry agent in CLAUDE.md. AGENTS.md rewritten as comprehensive reference with routing rules, domain ownership map, coordination rules, bypass mechanism, memory structure, startup procedure, escalation paths. Memory template created at .agents/memory/TEMPLATE.md. Threepio and r2d2 agent files fully specified. Sync script updated with name/behavior validation and memory file warnings. HANDOFF.md updated with blocked work tracking format. Closes issues #13–22.
 - **2026-05-18:** Phase 1 business consolidation (Scout/Beth/Scrooge → Nat), new sync architecture (repo → CLI), memory system design. Jarvis upgraded. (3.5h)
 - **2026-05-16:** Jarvis review + sustainability check. Team feedback on proactivity + escalation clarity. (1.5h)
 - **2026-05-14:** CEO as default agent + SessionStart hook implementation. (2h)

@@ -227,14 +227,14 @@ If you have a specific task and want to skip Jarvis orchestration, invoke the ag
 
 ---
 
-## AD-07: Complete Threepio & general-coding definitions
+## AD-07: Complete Threepio & r2d2 definitions
 **Label:** `system/agent-architecture`, `enhancement`
 **Body:**
 ```
 **From:** ADR-001 Agent System Architecture Review
 
 ## Context
-Threepio & general-coding are underspecified. Unclear when to use.
+Threepio & r2d2 are underspecified. Unclear when to use.
 
 ## Work
 
@@ -251,11 +251,11 @@ behavior: |
   Escalation: Conflicts on docs direction → Friday (CTO). Comms on company announcements → Nat (CBO).
 \`\`\`
 
-### general-coding (Fallback Agent)
-Update or create .agents/agents/general-coding.md:
+### r2d2 (Fallback Agent)
+Update or create .agents/agents/r2d2.md:
 \`\`\`yaml
-name: General Coding
-model: claude-sonnet-4-6
+name: r2d2
+model: claude-haiku-4-5
 description: Catch-all for coding tasks that don't fit a specialist. Use ONLY if no other agent matches.
 behavior: |
   This agent is a fallback ONLY. When to use:
@@ -270,7 +270,7 @@ behavior: |
 
 ## Acceptance Criteria
 - [ ] Threepio.md updated with full behavior
-- [ ] general-coding.md created/updated
+- [ ] r2d2.md created/updated
 - [ ] Both have clear escalation paths
 - [ ] Routing rules reflect these agents
 ```

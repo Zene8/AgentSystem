@@ -532,7 +532,7 @@ Initialize-LogDirectory
 Initialize-AntigravityAgentRoot
 Write-Status "Starting agent definition sync..." "INFO"
 
-$agents = @("jarvis", "friday", "nat", "sam", "wanda", "threepio", "ultron", "astra", "pym", "leo", "general-coding")
+$agents = @("jarvis", "friday", "nat", "sam", "wanda", "threepio", "ultron", "astra", "pym", "leo", "r2d2")
 $syncFailed = $false
 
 foreach ($agent in $agents) {

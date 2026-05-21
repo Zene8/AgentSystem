@@ -22,7 +22,7 @@ Command syntax, latency expectations, invocation patterns, and troubleshooting f
 | Leo | claude-haiku-4-5 | DevOps | `claude --agent leo` | `gemini --agent leo` | `@leo` |
 | Wanda | claude-sonnet-4-6 | Design | `claude --agent wanda` | `gemini --agent wanda` | `@wanda` |
 | Threepio | claude-sonnet-4-6 | Docs | `claude --agent threepio` | `gemini --agent threepio` | `@threepio` |
-| General Coding | claude-haiku-4-5 | Fallback | `claude --agent general-coding` | `gemini --agent general-coding` | `@general-coding` |
+| r2d2 | claude-haiku-4-5 | Fallback | `claude --agent r2d2` | `gemini --agent r2d2` | `@r2d2` |
 
 ---
 
