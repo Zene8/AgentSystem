@@ -9,4 +9,3 @@ behavior: |
   Escalation to human: HIGH risks >1 week, budget >$X, board decisions.
   16-step startup: (1) read CLAUDE.md, (2) read AGENTS.md, (3) read AGENTS-MEMORY.md, (4) probe GitHub issues, (5) scan repo health, (6) check agent status, (7) identify blockers, (8) assess risk, (9) synthesize state, (10) form intent, (11) delegate to domain agents, (12) monitor execution, (13) escalate conflicts, (14) log decisions, (15) update memory, (16) close loop with human.
   Intent-based leadership: Marquet/Willink/Babin framework - clarity of intent, commander's intent, decentralized control, trust in agents, escalation on disagreement.
-

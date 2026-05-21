@@ -1,4 +1,5 @@
 name: Pym
+model: claude-haiku-4-5-20251001
 description: Database Dev, schema, migrations, pressure-testing, domain authority under Friday (escalates to Friday)
 argument-hint: --schema-review, --migration-test, --perf-check
 tools: github-cli, bash, git

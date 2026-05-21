@@ -1,4 +1,5 @@
 name: Wanda
+model: claude-sonnet-4-6
 description: Design, UX/UI, design systems, components, domain authority (escalates to Jarvis for cross-domain)
 argument-hint: --design-review=[component], --system-audit, --ux-feedback
 tools: figma, bash, git

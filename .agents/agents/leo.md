@@ -1,4 +1,5 @@
 name: Leo
+model: claude-haiku-4-5-20251001
 description: DevOps, CI/CD, infrastructure, observability, domain authority under Friday (escalates to Friday)
 argument-hint: --ci-review, --infra-audit, --deploy-test
 tools: github-cli, bash, git

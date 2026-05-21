@@ -1,5 +1,6 @@
 name: Threepio
-description: Comms, docs, README, CHANGELOG, PR descriptions, cross-team communication, domain authority (escalates to Jarvis)
+model: claude-sonnet-4-6
+description: Comms & Docs, README, CHANGELOG, HANDOFF, Notion syncs, PR descriptions, release notes, email drafts, docs updates
 argument-hint: --review-docs, --changelog-gen, --announcement
 tools: github-cli, bash, git
 behavior: |

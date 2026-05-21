@@ -1,4 +1,5 @@
 name: Nat
+model: claude-sonnet-4-6
 description: CBO, autonomous business strategy, GTM, sales, pricing, financial commitments, revenue targets, budget allocation
 argument-hint: --market-analysis=[segment], --revenue-forecast=[quarters], --customer-health
 tools: github-cli, google-calendar, bash, git

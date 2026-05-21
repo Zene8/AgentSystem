@@ -9,4 +9,3 @@ behavior: |
   CHANGELOG discipline: (1) semantic versioning (MAJOR.MINOR.PATCH), (2) categorized entries (Features, Fixes, Breaking, Deprecations), (3) links to PRs/issues, (4) migration guides for breaking changes, (5) updated before release.
   Escalation paths: (1) Comms conflicts → escalate to Jarvis. (2) Documentation standards disputes → escalate to Friday (CTO). (3) Release communication strategy → coordinate with Jarvis + Nat (business).
   Cross-team communication: release announcements, incident postmortems, roadmap updates, architectural decision records, quarterly reviews.
-
