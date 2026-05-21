@@ -50,6 +50,24 @@ function Get-MasterAgentDefinition {
         }
     }
 
+    # Validate name field is a non-empty slug
+    if ($content -match '^name:\s*(.+)$') {
+        $agentNameValue = $Matches[1].Trim()
+        if ([string]::IsNullOrWhiteSpace($agentNameValue)) {
+            Write-Status "ERROR: 'name:' field is empty in $mastePath — must be a non-empty slug" "ERROR"
+            return $null
+        }
+    }
+
+    # Validate behavior section has content beyond the block scalar indicator
+    if ($content -match 'behavior:\s*\|') {
+        $behaviorMatch = [regex]::Match($content, 'behavior:\s*\|\s*\n([\s\S]+?)(?=\n[a-z\-]+:|\z)')
+        if (-not $behaviorMatch.Success -or [string]::IsNullOrWhiteSpace($behaviorMatch.Groups[1].Value)) {
+            Write-Status "ERROR: 'behavior:' section is empty in $mastePath — agent body required" "ERROR"
+            return $null
+        }
+    }
+
     return $content
 }
 
@@ -619,6 +637,23 @@ if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $
 
 if (-not $verificationPassed) {
     exit 1
+}
+
+# Validate memory files exist for all agents
+Write-Status "Validating agent memory files..." "INFO"
+$memoryDir = ".agents/memory"
+$memoryWarnings = 0
+foreach ($agent in $agents) {
+    $memoryPath = "$memoryDir\$agent.md"
+    if (-not (Test-Path $memoryPath)) {
+        Write-Status "WARN: Memory file missing for agent '$agent': $memoryPath — create from .agents/memory/TEMPLATE.md" "INFO"
+        $memoryWarnings++
+    }
+}
+if ($memoryWarnings -eq 0) {
+    Write-Status "Memory validation: All $($agents.Count) agents have memory files." "SUCCESS"
+} else {
+    Write-Status "Memory validation: $memoryWarnings agent(s) missing memory files. See above WARNs." "INFO"
 }
 
 Write-Status "Agent definition sync complete!" "SUCCESS"
