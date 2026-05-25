@@ -92,6 +92,11 @@ else
   ok "no edges in test repo (confidence test skipped)"
 fi
 
+echo "=== Test: agent brain scaffold exists ==="
+AGENT_BRAIN_WIN=$(node -e "const os=require('os');const p=require('path');process.stdout.write(p.join(os.homedir(),'.claude','agent-memory','nexus','agent-brain'))" 2>/dev/null)
+[ -f "$AGENT_BRAIN_WIN/graph.json" ] && ok "agent brain graph.json exists" || fail "agent brain graph.json missing — run agent-brain-init.js"
+[ -f "$AGENT_BRAIN_WIN/INDEX.md" ]   && ok "agent brain INDEX.md exists"   || fail "agent brain INDEX.md missing"
+
 echo ""
 echo "========================================"
 printf "  PASSED: %d\n" $PASS
