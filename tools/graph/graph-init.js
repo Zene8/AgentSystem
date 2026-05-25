@@ -140,13 +140,12 @@ for (const filePath of sourceFiles) {
           const candidate = resolve(base, match[1] + ext);
           if (fileNodeMap[candidate]) {
             graph = addEdge(graph, sourceId, fileNodeMap[candidate]);
-            const edge = graph.edges.find(
-              e => e.source === sourceId && e.target === fileNodeMap[candidate]
-            );
-            if (edge) {
-              edge.weights.semantic = 0.85;
-              edge.composite = recomputeComposite(edge.weights);
-            }
+            const tgt = fileNodeMap[candidate];
+            graph = { ...graph, edges: graph.edges.map(e =>
+              e.source === sourceId && e.target === tgt
+                ? { ...e, weights: { ...e.weights, semantic: 0.85 }, composite: recomputeComposite({ ...e.weights, semantic: 0.85 }) }
+                : e
+            )};
             break;
           }
         }
@@ -166,11 +165,13 @@ for (const line of logFiles.split('\n')) {
     for (let i = 0; i < nodeIds.length; i++) {
       for (let j = i + 1; j < nodeIds.length; j++) {
         graph = addEdge(graph, nodeIds[i], nodeIds[j]);
-        const edge = graph.edges.find(e =>
-          (e.source === nodeIds[i] && e.target === nodeIds[j]) ||
-          (e.source === nodeIds[j] && e.target === nodeIds[i])
-        );
-        if (edge) edge.weights._co_raw = (edge.weights._co_raw || 0) + 1;
+        const srcId = nodeIds[i];
+        const tgtId = nodeIds[j];
+        graph = { ...graph, edges: graph.edges.map(e =>
+          (e.source === srcId && e.target === tgtId) || (e.source === tgtId && e.target === srcId)
+            ? { ...e, weights: { ...e.weights, _co_raw: (e.weights._co_raw || 0) + 1 } }
+            : e
+        )};
       }
     }
     commitFiles = [];
@@ -179,12 +180,15 @@ for (const line of logFiles.split('\n')) {
   }
 }
 const maxCoRaw = Math.max(...graph.edges.map(e => e.weights._co_raw || 0), 1);
-for (const edge of graph.edges) {
-  if (edge.weights._co_raw) {
-    edge.weights.co_change = parseFloat(((edge.weights._co_raw || 0) / maxCoRaw).toFixed(4));
-    edge.composite = recomputeComposite(edge.weights);
-  }
-}
+graph = { ...graph, edges: graph.edges.map(e =>
+  e.weights._co_raw
+    ? { ...e,
+        weights: { ...e.weights, co_change: parseFloat(((e.weights._co_raw || 0) / maxCoRaw).toFixed(4)) },
+        composite: recomputeComposite({ ...e.weights, co_change: parseFloat(((e.weights._co_raw || 0) / maxCoRaw).toFixed(4)) })
+      }
+    : e
+)};
+
 
 // ── Step 5: Arch nodes ────────────────────────────────────────────────────────
 const docsDir = join(repoPath, 'docs');

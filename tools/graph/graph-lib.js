@@ -52,7 +52,7 @@ export function updateConfidence(graph, source, target, delta) {
   const edges = graph.edges.map(e => {
     if (e.source === source && e.target === target) {
       const raw = (e.weights.confidence || 0) + delta;
-      const clamped = Math.min(1.0, Math.max(0.0, parseFloat(raw.toFixed(4))));
+      const clamped = parseFloat(Math.min(1.0, Math.max(0.0, raw)).toFixed(4));
       const updated = { ...e, weights: { ...e.weights, confidence: clamped } };
       return { ...updated, composite: recomputeComposite(updated.weights) };
     }
@@ -78,7 +78,7 @@ export function pruneOrphanedEdges(graph) {
 }
 
 export function parseFrontmatter(content) {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const match = content.match(/^---\n([\s\S]*?)\n?---\n?([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content };
   return { frontmatter: parseYaml(match[1]), body: match[2] };
 }
@@ -93,12 +93,12 @@ function parseYaml(text) {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const inlineArr = line.match(/^(\w+):\s+\[([^\]]*)\]\s*$/);
+    const inlineArr = line.match(/^([\w-]+):\s+\[([^\]]*)\]\s*$/);
     if (inlineArr) {
       result[inlineArr[1]] = inlineArr[2].split(',').map(s => s.trim());
       i++; continue;
     }
-    const blockListStart = line.match(/^(\w+):\s*$/);
+    const blockListStart = line.match(/^([\w-]+):\s*$/);
     if (blockListStart) {
       const key = blockListStart[1];
       const items = [];
@@ -110,7 +110,7 @@ function parseYaml(text) {
       result[key] = items;
       continue;
     }
-    const scalar = line.match(/^(\w+):\s+(.+)$/);
+    const scalar = line.match(/^([\w-]+):\s+(.+)$/);
     if (scalar) {
       result[scalar[1]] = scalar[2].replace(/^["']|["']$/g, '');
     }
@@ -126,7 +126,7 @@ function toYaml(obj) {
       if (k === 'connections') {
         return `${k}:\n${v.map(s => `  - "${s}"`).join('\n')}`;
       }
-      return `${k}: [${v.join(', ')}]`;
+      return `${k}: [${v.map(s => String(s)).join(', ')}]`;
     }
     return `${k}: ${v}`;
   }).join('\n') + '\n';
