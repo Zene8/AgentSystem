@@ -42,6 +42,7 @@ When a request matches a pattern, dispatch to the listed agent. Match the most s
 | Leadership / Orchestration / Cross-domain | Jarvis | — |
 | Docs / README / Handoffs / Release notes / PR descriptions | Threepio | Direction conflicts → Friday; announcements → Nat |
 | Architecture / Tech decisions / Design review | Friday | Escalates to Jarvis |
+| **All engineering tasks** | **Friday (direct — `claude @friday`)** | Workers via peer dispatch |
 
 **Ambiguous cases:**
 - "Auth in frontend" → Astra (implementation) + Sam (audit)
@@ -81,6 +82,49 @@ When a request matches a pattern, dispatch to the listed agent. Match the most s
 8. **Sync script is authoritative.** Run `sync_agents_from_repo.ps1` after any agent definition change.
 
 **Exception:** Ephemeral thinking within a single session doesn't need coordination. Only decisions and blockers that outlive the session require documentation.
+
+---
+
+## Engineering Entry Point
+
+**For all engineering work, go directly to Friday — not Jarvis.**
+
+```bash
+claude @friday
+```
+
+Friday is the direct entry agent for: code, architecture, debugging, design, deployment, testing, PR review, and any technical task. Jarvis is NOT in the loop for engineering execution.
+
+**Friday's peer dispatch** (no Jarvis approval needed):
+
+| Worker | When |
+|--------|------|
+| Ultron | Backend APIs, services, deployment |
+| Pym | Database schema, migrations, queries |
+| Leo | CI/CD, infrastructure, observability |
+| Astra | Frontend components, UX, performance |
+| Wanda | Design system, tokens, visual specs |
+| Threepio | Docs, PR descriptions, README, release notes |
+| Sam | Security audit (REQUIRED before every main merge) |
+
+**Inter-agent messaging:**
+```bash
+# Friday → Sam pre-merge audit (required every main merge)
+node tools/agent-message.js --from=Friday --to=Sam \
+  --subject="Pre-merge audit: <branch>" \
+  --action="Security audit before merge to main" \
+  --context="<what changed>" --links="<PR URL>" --priority=high
+
+# Read Friday inbox
+node tools/agent-message.js --list --to=Friday
+
+# Friday → worker handoff
+node tools/agent-message.js --from=Friday --to=Ultron \
+  --subject="<task>" --action="<what to do>" \
+  --context="<what Friday decided>" --links="<issue/PR>" --priority=normal
+```
+
+**Escalate to Jarvis ONLY for:** cross-domain strategy (business + engineering tradeoff), resource conflicts between agents, budget/timeline requiring CEO input, Sam vs. Friday security disagreement.
 
 ---
 
@@ -145,17 +189,19 @@ Summary:
 
 ```
 User
- └─▶ Jarvis (default entry, orchestration)
-       ├─▶ Friday (CTO) ──────── architecture, tech decisions, merge gate
-       │     └─▶ Sam (CSO) ───── security audit, hard gate on main
-       ├─▶ Nat (CBO) ─────────── business strategy, GTM
-       ├─▶ Ultron ─────────────── backend APIs
-       │     └─▶ Pym ─────────── database (if API touches schema)
-       ├─▶ Astra ──────────────── frontend
-       │     └─▶ Wanda ──────── design (if UX questions arise)
-       ├─▶ Leo ────────────────── DevOps / CI-CD
-       ├─▶ Threepio ───────────── docs and comms
-       └─▶ Sam ────────────────── security (any agent, any time)
+ ├─▶ Friday (engineering entry — claude @friday) ← ALL code/arch/debug/deploy tasks
+ │     ├─▶ Ultron ──── backend APIs, services
+ │     │     └─▶ Pym ─ database (if API touches schema)
+ │     ├─▶ Astra ───── frontend
+ │     │     └─▶ Wanda design (if UX questions arise)
+ │     ├─▶ Leo ──────── DevOps / CI-CD
+ │     ├─▶ Threepio ─── docs and comms
+ │     └─▶ Sam ──────── security audit (REQUIRED before every main merge)
+ │
+ └─▶ Jarvis (cross-domain, strategy, CEO-level orchestration only)
+       ├─▶ Friday ─── engineering escalations
+       ├─▶ Nat ──────── business strategy, GTM
+       └─▶ Sam ──────── security (any agent, any time)
 ```
 
 **Hard gate:** Sam must review ALL main branch merges. No exceptions. If Friday and Sam disagree on a finding, escalate to Jarvis with documented reasoning from both sides — Jarvis decides. Friday does not override Sam unilaterally.
