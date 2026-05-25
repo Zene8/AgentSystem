@@ -1,7 +1,7 @@
 # Agent System Handoff
 
-**Last Updated:** 2026-05-21
-**Status:** Canonical agents, docs, and sync output are unified.
+**Last Updated:** 2026-05-25
+**Status:** Canonical agents, docs, and sync output are unified. All issues #24-#28 closed. PR #29 pending Sam audit + merge.
 
 ## Current State
 
@@ -29,7 +29,7 @@ _(none)_
 
 Work that is started but not yet complete. Link to GitHub issues.
 
-_(none at this time — see GitHub Issues for current sprint)_
+- **PR #29** — memory files + production readiness. Sam audit in progress. After merge: `git tag v1.0-production-ready && git push origin v1.0-production-ready`
 
 ## Startup
 
