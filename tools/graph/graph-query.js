@@ -62,7 +62,7 @@ const scored = graph.nodes.map(nodeId => {
 
   const score = keywords.length > 0
     ? parseFloat((edgeScore * 0.4 + keywordScore * 0.6).toFixed(4))
-    : edgeScore;
+    : parseFloat(edgeScore.toFixed(4));
 
   return { nodeId, score, edgeScore, keywordScore };
 });
