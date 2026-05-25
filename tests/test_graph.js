@@ -18,6 +18,10 @@ import {
   WEIGHT_PROFILES,
   decayedVisitScore,
   spreadingActivation,
+  computeSalience,
+  buildEpisodeNode,
+  shouldPropagate,
+  buildSharedMemoryEntry,
 } from '../tools/graph/graph-lib.js';
 
 function tmpDir() {
@@ -293,4 +297,140 @@ test('spreadingActivation: empty seed returns empty map', () => {
   const g = makeChainGraph();
   const result = spreadingActivation(g, []);
   assert.equal(result.size, 0);
+});
+
+// ── Fix 4: Bayesian confidence tests (#33) ───────────────────────────────────
+
+test('updateConfidence: first trial applies full delta', () => {
+  let g = emptyGraph('agent', 'test');
+  g = addNode(addNode(g, 'a'), 'b');
+  g = addEdge(g, 'a', 'b');
+  // n=0: learningRate = 1/(1+0*0.1) = 1.0 → full delta applied
+  g = updateConfidence(g, 'a', 'b', 0.2);
+  const edge = g.edges[0];
+  assert.equal(edge.weights._confidence_trials, 1);
+  // 0.0 + 0.2 * 1.0 = 0.2
+  assert.equal(edge.weights.confidence, 0.2);
+});
+
+test('updateConfidence: 10th trial applies half delta', () => {
+  let g = emptyGraph('agent', 'test');
+  g = addNode(addNode(g, 'a'), 'b');
+  g = addEdge(g, 'a', 'b');
+  g.edges[0].weights._confidence_trials = 10;
+  g.edges[0].weights.confidence = 0.5;
+  // n=10: learningRate = 1/(1+10*0.1) = 1/2 = 0.5 → delta * 0.5
+  g = updateConfidence(g, 'a', 'b', 0.2);
+  const edge = g.edges[0];
+  assert.equal(edge.weights._confidence_trials, 11);
+  // 0.5 + 0.2 * 0.5 = 0.6
+  assert.equal(edge.weights.confidence, 0.6);
+});
+
+test('updateConfidence: high-certainty pattern barely moves on failure', () => {
+  let g = emptyGraph('agent', 'test');
+  g = addNode(addNode(g, 'a'), 'b');
+  g = addEdge(g, 'a', 'b');
+  g.edges[0].weights._confidence_trials = 50;
+  g.edges[0].weights.confidence = 0.9;
+  // n=50: learningRate = 1/(1+50*0.1) = 1/6 ≈ 0.167
+  g = updateConfidence(g, 'a', 'b', -0.15);
+  const edge = g.edges[0];
+  // 0.9 + (-0.15 * 0.167) ≈ 0.9 - 0.025 = 0.875 (barely moved)
+  assert.ok(edge.weights.confidence > 0.87, `Expected > 0.87, got ${edge.weights.confidence}`);
+  assert.ok(edge.weights.confidence < 0.9, 'Should have decreased slightly');
+});
+
+test('addEdge: new edges have _confidence_trials = 0', () => {
+  let g = emptyGraph('agent', 'test');
+  g = addNode(addNode(g, 'a'), 'b');
+  g = addEdge(g, 'a', 'b');
+  assert.equal(g.edges[0].weights._confidence_trials, 0);
+});
+
+// ── Fix 7: Salience tagging tests (#38) ──────────────────────────────────────
+
+test('computeSalience: incident + long duration = high salience', () => {
+  const s = computeSalience({ incident: true, durationMinutes: 180 });
+  // 0.40 + 0.20 = 0.60
+  assert.equal(s, 0.60);
+});
+
+test('computeSalience: all flags set = 1.0', () => {
+  const s = computeSalience({
+    incident: true,
+    durationMinutes: 180,
+    firstTimeSolve: true,
+    presolveConfidence: 0.1,
+  });
+  assert.equal(s, 1.0);
+});
+
+test('computeSalience: no flags = 0.0', () => {
+  assert.equal(computeSalience({}), 0.0);
+  assert.equal(computeSalience(), 0.0);
+});
+
+test('computeSalience: clamped to 1.0 maximum', () => {
+  // Even if somehow more than 4 conditions trigger, max is 1.0
+  const s = computeSalience({ incident: true, durationMinutes: 999, firstTimeSolve: true, presolveConfidence: 0.0 });
+  assert.equal(s, 1.0);
+});
+
+// ── Fix 8: Episodic memory node builder tests (#35) ──────────────────────────
+
+test('buildEpisodeNode: returns valid frontmatter markdown', () => {
+  const content = buildEpisodeNode({
+    id: 'episode-auth-incident-01',
+    sequence: ['observed: 500 errors', 'traced: null pointer in middleware', 'fixed: rollback dep'],
+    contextTags: ['production', 'auth', 'incident'],
+    salience: 0.8,
+    durationMinutes: 120,
+    outcomeRef: 'outcome-1234',
+  });
+  assert.ok(content.startsWith('---'), 'Should start with frontmatter');
+  assert.ok(content.includes('type: episode'), 'Should have episode type');
+  assert.ok(content.includes('salience: 0.8'), 'Should include salience');
+  assert.ok(content.includes('observed: 500 errors'), 'Should include sequence steps');
+  assert.ok(content.includes('[[outcome-1234]]'), 'Should include outcome ref as wikilink');
+});
+
+test('buildEpisodeNode: parses back correctly', () => {
+  const content = buildEpisodeNode({
+    id: 'episode-test',
+    contextTags: ['test', 'auth'],
+    salience: 0.6,
+    durationMinutes: 30,
+  });
+  const { frontmatter } = parseFrontmatter(content);
+  assert.equal(frontmatter.id, 'episode-test');
+  assert.equal(frontmatter.type, 'episode');
+  assert.equal(frontmatter.salience, '0.6');
+});
+
+// ── Fix 9: Cross-agent propagation tests (#39) ───────────────────────────────
+
+test('shouldPropagate: high confidence + high salience = true', () => {
+  assert.equal(shouldPropagate(0.85, 0.75), true);
+  assert.equal(shouldPropagate(1.0, 1.0), true);
+});
+
+test('shouldPropagate: either threshold unmet = false', () => {
+  assert.equal(shouldPropagate(0.75, 0.9), false);  // confidence too low
+  assert.equal(shouldPropagate(0.9, 0.65), false);  // salience too low
+  assert.equal(shouldPropagate(0.5, 0.5), false);   // both too low
+});
+
+test('buildSharedMemoryEntry: returns valid frontmatter markdown', () => {
+  const content = buildSharedMemoryEntry({
+    id: 'outcome-auth-retry',
+    body: '# Auth retry pattern worked\n\nRetry on 5xx with backoff.',
+    confidence: 0.9,
+    salience: 0.8,
+    sourceAgent: 'friday',
+    audience: ['sam', 'ultron'],
+  });
+  assert.ok(content.includes('type: shared-outcome'));
+  assert.ok(content.includes('source_agent: friday'));
+  assert.ok(content.includes('Auth retry pattern worked'));
 });

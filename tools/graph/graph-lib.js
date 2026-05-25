@@ -45,8 +45,9 @@ export function addEdge(graph, source, target) {
       semantic: 0.0,
       _visit_raw: 0,
       visit_count: 0.0,
-      last_visited: null,   // Fix 1: timestamp for temporal decay
+      last_visited: null,      // Fix 1: timestamp for temporal decay
       confidence: 0.0,
+      _confidence_trials: 0,   // Fix 4: Bayesian — track sample size
     },
     composite: 0.0,
   };
@@ -92,12 +93,29 @@ export function decayedVisitScore(visit_count, last_visited, now = Date.now(), h
   return parseFloat((visit_count * decay).toFixed(4));
 }
 
+// Fix 4: Bayesian confidence updates — learning rate shrinks as evidence accumulates.
+// High-certainty patterns (many trials) barely move on a single outcome.
+// Low-certainty patterns (few trials) update aggressively — every datapoint is informative.
+// learningRate = 1.0 / (1 + n * 0.1)
+// At n=0:  rate=1.00 (full delta)
+// At n=10: rate=0.50 (half delta)
+// At n=50: rate=0.17 (small nudge)
 export function updateConfidence(graph, source, target, delta) {
   const edges = graph.edges.map(e => {
     if (e.source === source && e.target === target) {
-      const raw = (e.weights.confidence || 0) + delta;
+      const n = e.weights._confidence_trials || 0;
+      const learningRate = 1.0 / (1 + n * 0.1);
+      const adjustedDelta = delta * learningRate;
+      const raw = (e.weights.confidence || 0) + adjustedDelta;
       const clamped = parseFloat(Math.min(1.0, Math.max(0.0, raw)).toFixed(4));
-      const updated = { ...e, weights: { ...e.weights, confidence: clamped } };
+      const updated = {
+        ...e,
+        weights: {
+          ...e.weights,
+          confidence: clamped,
+          _confidence_trials: n + 1,
+        },
+      };
       return { ...updated, composite: recomputeComposite(updated.weights) };
     }
     return e;
@@ -118,6 +136,67 @@ export function recomputeComposite(weights, config = {}) {
     (weights.visit_count || 0) * profile.visit_count +
     (weights.confidence || 0) * profile.confidence
   ).toFixed(4));
+}
+
+// Fix 7 (issue #38): Salience tagging — high-stakes events encode stronger memories.
+// Salience multiplies into edge influence during consolidation.
+// Pass a descriptor object; each true flag contributes to salience score.
+// Max salience = 1.0 (all flags set).
+export function computeSalience({ incident = false, durationMinutes = 0, firstTimeSolve = false, presolveConfidence = 1.0 } = {}) {
+  let s = 0.0;
+  if (incident) s += 0.40;
+  if (durationMinutes > 120) s += 0.20;
+  if (firstTimeSolve) s += 0.20;
+  if (presolveConfidence < 0.3) s += 0.20;
+  return parseFloat(Math.min(1.0, s).toFixed(4));
+}
+
+// Fix 8 (issue #35): Episodic memory node builder.
+// Creates a node file content string for an episode-* node.
+// sequence: ordered array of step strings ("observed: X", "action: Y")
+// context_tags: array of tags for spreading activation seeding
+// salience: use computeSalience() output
+// outcome_ref: string like "[[outcome-1071]]"
+export function buildEpisodeNode({ id, sequence = [], contextTags = [], salience = 0.0, durationMinutes = 0, outcomeRef = null, connections = [] }) {
+  const created = new Date().toISOString().slice(0, 10);
+  const frontmatter = {
+    id,
+    type: 'episode',
+    brain: 'agent',
+    created,
+    context_tags: contextTags,
+    salience,
+    duration_minutes: durationMinutes,
+    ...(outcomeRef ? { outcome_ref: outcomeRef } : {}),
+    connections: [...(outcomeRef ? [`[[${outcomeRef.replace(/[\[\]]/g, '')}]]`] : []), ...connections],
+  };
+  const seqLines = sequence.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  const body = `# Episode: ${id}\n\n## Sequence\n\n${seqLines || '(none recorded)'}\n\n**Salience:** ${salience}\n**Duration:** ${durationMinutes} min\n`;
+  return serializeFrontmatter(frontmatter, body);
+}
+
+// Fix 9 (issue #39): Cross-agent memory propagation.
+// Returns true if outcome meets propagation threshold (auto-copy to nexus/shared/).
+// Callers must do the actual file write — this is the gate check only.
+export function shouldPropagate(confidence, salience) {
+  return confidence >= 0.8 && salience >= 0.7;
+}
+
+// Build the shared memory entry content from an existing outcome node.
+// audience: array of agent slugs who should load this memory.
+export function buildSharedMemoryEntry({ id, body, confidence, salience, sourceAgent, audience = [] }) {
+  const created = new Date().toISOString().slice(0, 10);
+  const frontmatter = {
+    id: `shared-${id}`,
+    type: 'shared-outcome',
+    brain: 'agent',
+    created,
+    source_agent: sourceAgent,
+    audience,
+    confidence,
+    salience,
+  };
+  return serializeFrontmatter(frontmatter, body);
 }
 
 export function pruneOrphanedEdges(graph) {
