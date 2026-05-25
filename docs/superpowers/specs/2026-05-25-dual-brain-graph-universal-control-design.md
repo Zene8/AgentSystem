@@ -96,7 +96,7 @@ AgentSystem/nexus/<project-slug>/
 |-----------|-------|-----------|---------|
 | `co_change` | 0.0–1.0 | `graph-init` only | Files/nodes that change together |
 | `semantic` | 0.0–1.0 | `graph-init` only | Keyword overlap (no LLM calls) |
-| `visit_count` | 0–N (normalized) | Every agent read/write | Access frequency |
+| `visit_count` | 0–N (normalized: `node_visits / max_visits_in_graph`) | Every agent read/write | Access frequency |
 | `confidence` | 0.0–1.0 | `/task-outcome` | Pattern led to good outcomes |
 | `composite` | 0.0–1.0 | Recomputed on any weight change | Traversal score |
 
@@ -323,4 +323,4 @@ jobs:
 - **Obsidian compatibility:** Mental model only. No plugin requirements.
 - **LLM for semantic weights:** No. Keyword overlap only. Cost = $0.
 - **Remote control infra:** Self-hosted runner (async) + Termius SSH (interactive). No always-on API server.
-- **Brain storage location:** Agent brain at `~/.claude/agent-memory/nexus/agent-brain/` (user-global). Repo brain at `AgentSystem/nexus/<slug>/` (repo-local, gitignored for large graphs).
+- **Brain storage location:** Agent brain at `~/.claude/agent-memory/nexus/agent-brain/` (user-global). Repo brain at `AgentSystem/nexus/<slug>/` (repo-local, always gitignored — generated from git/AST, never hand-authored).
