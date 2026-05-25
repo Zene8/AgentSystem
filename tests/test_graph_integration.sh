@@ -44,6 +44,10 @@ echo "=== Test: graph-init creates commit nodes ==="
 COMMITS=$(ls "$NEXUS_DIR/nodes/commit-"* 2>/dev/null | wc -l)
 [ "$COMMITS" -gt 0 ] && ok "commit nodes created ($COMMITS)" || fail "no commit nodes"
 
+echo "=== Test: graph-init creates file nodes ==="
+FILE_NODES=$(ls "$NEXUS_DIR/nodes/file-"* 2>/dev/null | wc -l)
+[ "$FILE_NODES" -gt 0 ] && ok "file nodes created ($FILE_NODES)" || fail "no file nodes"
+
 echo "=== Test: graph.json has valid structure ==="
 GRAPH_FILE="$(echo "$NEXUS_DIR_N" | sed 's/\\/\\\\/g')/graph.json"
 node -e "
@@ -54,6 +58,15 @@ if (!Array.isArray(g.nodes)) process.exit(1);
 if (!Array.isArray(g.edges)) process.exit(1);
 console.log('valid');
 " 2>/dev/null && ok "graph.json structure valid" || fail "graph.json invalid structure"
+
+echo "=== Test: graph-query returns results ==="
+QUERY_OUT=$(node "$REPO_ROOT/tools/graph/graph-query.js" "$TEST_SLUG" agent 2>/dev/null)
+[ -n "$QUERY_OUT" ] && ok "graph-query returns output" || fail "graph-query returned nothing"
+
+echo "=== Test: graph-query --json outputs valid JSON ==="
+node "$REPO_ROOT/tools/graph/graph-query.js" "$TEST_SLUG" agent --json 2>/dev/null \
+  | node -e "try { const d=require('fs').readFileSync(0,'utf8'); JSON.parse(d); console.log('ok'); } catch(e) { process.exit(1); }" \
+  && ok "graph-query --json valid" || fail "graph-query --json invalid"
 
 echo ""
 echo "========================================"
