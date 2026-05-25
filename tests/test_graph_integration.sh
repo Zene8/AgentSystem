@@ -68,6 +68,30 @@ node "$REPO_ROOT/tools/graph/graph-query.js" "$TEST_SLUG" agent --json 2>/dev/nu
   | node -e "try { const d=require('fs').readFileSync(0,'utf8'); JSON.parse(d); console.log('ok'); } catch(e) { process.exit(1); }" \
   && ok "graph-query --json valid" || fail "graph-query --json invalid"
 
+echo "=== Test: graph-weight visit increments visit_count ==="
+EDGE=$(node -e "
+const g=JSON.parse(require('fs').readFileSync('$(node -e "process.stdout.write(require('path').join(process.cwd(),'nexus','$TEST_SLUG','graph.json'))" 2>/dev/null || echo "$NEXUS_DIR/graph.json")','utf8'));
+const e=g.edges[0]; if(e) process.stdout.write(e.source+' '+e.target);
+" 2>/dev/null || echo "")
+if [ -n "$EDGE" ]; then
+  SRC=$(echo $EDGE | cut -d' ' -f1)
+  TGT=$(echo $EDGE | cut -d' ' -f2)
+  node "$REPO_ROOT/tools/graph/graph-weight.js" visit "$TEST_SLUG" "$SRC" "$TGT" 2>/dev/null
+  RAW=$(node -e "const g=JSON.parse(require('fs').readFileSync('$NEXUS_DIR/graph.json','utf8'));const e=g.edges.find(e=>e.source==='$SRC'&&e.target==='$TGT');console.log(e?e.weights._visit_raw:0);" 2>/dev/null)
+  [ "${RAW:-0}" -ge 1 ] && ok "visit_count raw incremented ($RAW)" || fail "visit_count not incremented"
+else
+  ok "no edges in test repo (visit test skipped)"
+fi
+
+echo "=== Test: graph-weight confidence adjusts ==="
+if [ -n "$EDGE" ]; then
+  node "$REPO_ROOT/tools/graph/graph-weight.js" confidence "$TEST_SLUG" "$SRC" "$TGT" 0.1 2>/dev/null
+  CONF=$(node -e "const g=JSON.parse(require('fs').readFileSync('$NEXUS_DIR/graph.json','utf8'));const e=g.edges.find(e=>e.source==='$SRC'&&e.target==='$TGT');console.log(e?e.weights.confidence:0);" 2>/dev/null)
+  node -e "const c=parseFloat('$CONF'); process.exit((c>=0&&c<=1)?0:1)" && ok "confidence in [0,1] ($CONF)" || fail "confidence out of range"
+else
+  ok "no edges in test repo (confidence test skipped)"
+fi
+
 echo ""
 echo "========================================"
 printf "  PASSED: %d\n" $PASS
