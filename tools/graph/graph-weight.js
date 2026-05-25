@@ -30,9 +30,11 @@ let graph = readGraph(graphPath);
 if (command === 'visit') {
   const [source, target] = rest;
   if (!source || !target) { console.error('visit requires <source> <target>'); process.exit(1); }
+  const edgeExists = graph.edges.some(e => e.source === source && e.target === target);
+  if (!edgeExists) { console.error(`visit: edge not found: ${source} → ${target}`); process.exit(1); }
   graph = updateVisitCount(graph, source, target);
   const edge = graph.edges.find(e => e.source === source && e.target === target);
-  console.log(`visit: ${source} → ${target} raw=${edge?.weights._visit_raw} normalized=${edge?.weights.visit_count}`);
+  console.log(`visit: ${source} → ${target} raw=${edge.weights._visit_raw} normalized=${edge.weights.visit_count}`);
 }
 
 if (command === 'confidence') {
@@ -41,16 +43,20 @@ if (command === 'confidence') {
   if (!source || !target || isNaN(delta)) {
     console.error('confidence requires <source> <target> <delta>'); process.exit(1);
   }
+  const edgeExists = graph.edges.some(e => e.source === source && e.target === target);
+  if (!edgeExists) { console.error(`confidence: edge not found: ${source} → ${target}`); process.exit(1); }
   graph = updateConfidence(graph, source, target, delta);
   const edge = graph.edges.find(e => e.source === source && e.target === target);
-  console.log(`confidence: ${source} → ${target} = ${edge?.weights.confidence} (composite=${edge?.composite})`);
+  console.log(`confidence: ${source} → ${target} = ${edge.weights.confidence} (composite=${edge.composite})`);
 }
 
 if (command === 'deprecate') {
   const [nodeId] = rest;
   if (!nodeId) { console.error('deprecate requires <node-id>'); process.exit(1); }
   const nodePath = join(nexusDir, 'nodes', `${nodeId}.md`);
-  if (existsSync(nodePath)) {
+  if (!existsSync(nodePath)) {
+    console.warn(`deprecate: node file not found: ${nodePath} (graph entry kept)`);
+  } else {
     let content = readFileSync(nodePath, 'utf8');
     if (!content.includes('deprecated: true')) {
       content = content.replace(/^---\n/, '---\ndeprecated: true\n');
