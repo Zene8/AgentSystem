@@ -4,7 +4,12 @@ import { dirname } from 'node:path';
 
 export function readRegistry(registryPath) {
   if (!existsSync(registryPath)) return { version: '1.0', repos: [] };
-  return JSON.parse(readFileSync(registryPath, 'utf8'));
+  try {
+    return JSON.parse(readFileSync(registryPath, 'utf8'));
+  } catch (e) {
+    console.warn(`known-repos: malformed registry at ${registryPath} — returning empty. Error: ${e.message}`);
+    return { version: '1.0', repos: [] };
+  }
 }
 
 export function writeRegistry(registryPath, registry) {
