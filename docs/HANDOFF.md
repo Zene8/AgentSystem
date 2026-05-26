@@ -1,7 +1,93 @@
 # Agent System Handoff
 
 **Last Updated:** 2026-05-25
-**Status:** Canonical agents, docs, and sync output are unified. All issues #24-#28 closed. PR #29 pending Sam audit + merge.
+**Status:** Dual-brain graph + universal bootstrap + remote control complete on `feat+dual-brain-graph-universal-control`. 51/51 tests passing. Pending: runner setup (one-time, requires elevation) + Sam audit + PR merge.
+
+---
+
+## Checkpoint: Dual-Brain Graph + Universal Control (2026-05-25)
+
+**Branch:** `feat+dual-brain-graph-universal-control`
+**Commits:** `2f91480` → `edb1f98` (20 commits)
+**Test coverage:** 51 tests, 0 failures
+
+### What shipped
+
+**Sub-project 1 — Dual-Brain Graph Library** (`tools/graph/`)
+
+| File | Purpose |
+|------|---------|
+| `graph-lib.js` | Core: `addEdge`, `updateVisitCount`, `updateConfidence`, `pruneOrphanedEdges`, `recomputeComposite`. Zero npm deps (built-ins only). ES modules. |
+| `graph-init.js` | Populates repo brain from `git log` + AST import scan. Creates commit/hotfile/file/arch nodes + co-change/semantic edges. |
+| `graph-query.js` | CLI: keyword search + composite ranking. `--json`, `--top=N`, `--brain-path` flags. |
+| `graph-weight.js` | CLI: `visit`, `confidence`, `deprecate` commands. Validates edge exists before mutating. |
+| `agent-brain-init.js` | Seeds 11 agent identity nodes in `~/.claude/agent-memory/nexus/agent-brain/`. Idempotent. |
+| `known-repos.js` | Global repo registry: `readRegistry`, `writeRegistry`, `upsertRepo`, `findRepo`. |
+
+**Edge weight formula:** `composite = co_change×0.20 + semantic×0.20 + visit_count×0.30 + confidence×0.30`
+
+Agent brain at `~/.claude/agent-memory/nexus/agent-brain/` — user-global, never decays.
+Repo brain at `nexus/<slug>/` — project-local, gitignored, regenerated from git/AST.
+
+**Sub-project 2 — Universal Bootstrap** (`tools/`)
+
+| File | Purpose |
+|------|---------|
+| `bootstrap-repo.ps1` | Idempotent one-shot: detect project type → install deps → inject CLAUDE.md block → run graph-init → register in known-repos.json → verify CLIs. |
+| `claude-md-block.txt` | Template with `{{SLUG}}` placeholder injected into any repo's CLAUDE.md. |
+
+AgentSystem self-bootstrapped: 93 nodes, 6 edges, registry entry at `~/.claude/agent-memory/nexus/known-repos.json`.
+
+**Sub-project 3 — Remote Control**
+
+| File | Purpose |
+|------|---------|
+| `tools/create-agent-labels.ps1` | Created 11 `agent:*` labels in GitHub (jarvis, friday, sam, ultron, pym, leo, nat, wanda, astra, threepio, r2d2). |
+| `.github/workflows/agent-dispatch.yml` | Self-hosted runner: `agent:*` label → parse → ack comment → `claude -p "$task"` → result comment → remove label. |
+| `.github/ISSUE_TEMPLATE/agent-task.md` | Phone-friendly issue template. |
+| `tools/setup-runner.ps1` | One-time self-hosted runner setup as Windows service (requires elevation). |
+
+**Phone workflow (after runner setup):**
+```
+GitHub mobile → New Issue → "Agent Task" template → Add label: agent:friday
+→ Runner picks up → claude -p runs → result posted as comment → push notification
+```
+
+### One-time actions still needed
+
+1. **Install self-hosted runner** (requires PowerShell as Administrator):
+   ```powershell
+   powershell -File tools/setup-runner.ps1
+   ```
+   Verify: `gh api repos/:owner/:repo/actions/runners --jq '.runners[] | {name, status}'`
+
+2. **Sam audit + PR merge** — per hard gate rule, Sam must review before merge to main.
+
+3. **Sync agents** after merge:
+   ```powershell
+   powershell -File sync_agents_from_repo.ps1
+   ```
+
+### Key graph CLI commands (post-bootstrap)
+
+```bash
+# Query repo brain
+node tools/graph/graph-query.js agentsystem auth retry
+
+# Record agent visit (strengthens edge)
+node tools/graph/graph-weight.js visit agentsystem file-auth.js file-middleware.js
+
+# Record outcome (positive = +0.1 confidence, negative = -0.15)
+node tools/graph/graph-weight.js confidence agentsystem pattern-auth-retry outcome-1071 0.1
+
+# Refresh repo brain after major commits
+node tools/graph/graph-init.js agentsystem .
+
+# Bootstrap a new repo
+powershell -File tools/bootstrap-repo.ps1 -RepoPath C:\path\to\repo -Slug myrepo
+```
+
+---
 
 ## Current State
 

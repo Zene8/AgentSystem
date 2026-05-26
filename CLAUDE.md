@@ -50,3 +50,14 @@ Bypass pattern
 Contact / Escalation
 - For sync script or model mapping issues, raise an issue and tag `friday` and `sam` for review.
 - Full agent documentation: see AGENTS.md
+
+<!-- AGENT-SYSTEM-BOOTSTRAP: do not remove this block -->
+## Agent System Context (auto-injected by bootstrap-repo.ps1)
+
+- Agent routing: see `~/.claude/CLAUDE.md`
+- Agent brain: `~/.claude/agent-memory/nexus/agent-brain/`
+- Repo brain: `nexus/agentsystem/` (run `node tools/graph/graph-init.js agentsystem .` to refresh)
+- Query graph: `node tools/graph/graph-query.js agentsystem <keywords>`
+- Update weights: `node tools/graph/graph-weight.js visit agentsystem <source> <target>`
+- Known repos: `~/.claude/agent-memory/nexus/known-repos.json`
+<!-- END AGENT-SYSTEM-BOOTSTRAP -->
