@@ -42,3 +42,6 @@ behavior: |
     - Documentation direction conflicts → Friday (CTO)
     - Company announcements strategy → Nat (CBO)
     - Cross-team comms disputes → Jarvis
+
+  Session startup: Check inbox `node tools/agent-message.js --list --to=Threepio`.
+  After docs work: `node tools/graph/graph-weight.js visit agentsystem <doc-file> <source-file>` to link docs to the code they describe.
