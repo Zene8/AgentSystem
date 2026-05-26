@@ -50,3 +50,51 @@ Bypass pattern
 Contact / Escalation
 - For sync script or model mapping issues, raise an issue and tag `friday` and `sam` for review.
 - Full agent documentation: see AGENTS.md
+
+## Autonomous Mode ("do work")
+
+Tell any agent "do work", "continue", or "keep going" and they will:
+1. Read your personal brain: `~/.claude/agent-memory/nexus/personal-brain/user-brain.md`
+2. Check open GitHub issues (`gh issue list --state=open`)
+3. Pick highest priority by label (priority:high > priority:medium > unlabeled)
+4. Execute the full issue workflow without further prompting
+
+No confirmation needed for reversible actions.
+
+## Standard Issue Workflow (all agents follow this)
+
+Every task, from any entry point (Jarvis, Friday, direct agent), follows this pattern:
+
+| Step | Command |
+|------|---------|
+| Check issues | `gh issue list --state=open` |
+| Create (complex task) | `gh issue create` × 2 — Design + Implementation |
+| Create (simple task) | `gh issue create` × 1 |
+| Branch from dev | `git checkout dev && git checkout -b issue-{N}-{slug}` |
+| Do work | Dispatch to workers |
+| PR to dev | `gh pr create --base dev` |
+| Merge | `gh pr merge {N} --squash --delete-branch` |
+| Close | `gh issue close {N} --comment "Resolved in PR #{pr}"` |
+
+## Hierarchical Swarms (Claude Code only)
+
+Jarvis can spawn multiple Friday instances; Friday can spawn multiple workers.
+Use `claude -p "<task>" --agent=<name>` for parallel execution.
+Gemini/Copilot: same agent definitions, no subprocess spawn — work sequentially.
+
+## Personal Brain
+
+Each agent reads `~/.claude/agent-memory/nexus/personal-brain/user-brain.md` at startup.
+Initialize: `node tools/personal-brain-init.js --name="Your Name" --email="you@example.com"`
+Update this file whenever your preferences or project goals change.
+
+## Phone Workflow
+
+GitHub mobile → New Issue → "Agent Task" template → Add label: `agent:friday`
+Runner picks up → `claude -p "$task"` runs → result posted as comment → push notification
+
+## SONA Patterns
+
+All agents log patterns to `~/.claude/agent-memory/nexus/sona-patterns.md` after significant work.
+Format: S (situation) → O (observation) → N (nodes) → A (action taken) + success flag.
+Agents read this file to avoid repeating past mistakes and reuse winning approaches.
