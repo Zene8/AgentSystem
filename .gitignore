@@ -3,3 +3,4 @@ $(pwd)/
 nexus/agentsystem/
 nexus/*/
 node_modules/
+.claude/
