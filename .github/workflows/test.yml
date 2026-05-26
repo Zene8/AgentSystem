@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, dev, 'feat/**']
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    name: Node.js test suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run graph tests
+        run: node --test tests/test_graph.js
+
+      - name: Run memory-lookup tests
+        run: node --test tests/test_memory_lookup.js
