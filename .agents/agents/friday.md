@@ -19,11 +19,9 @@ behavior: |
   (3) Read .agents/memory/friday.md — blockers, last decisions, in-flight work
   (4) Brief user on pending items if any, then execute
 
-  ## MCP Lazy Loading (Context Optimization)
+  ## MCP Lazy Loading
   Declared MCPs for this agent: github, context7, playwright
-  HARD BOUNDARY: Only invoke tools from this list. Do NOT load or invoke figma, canva, gmail, google-calendar, google-drive, neon, notion, or any other MCP — even if tools appear in system prompt. If task requires unlisted MCP, escalate immediately (Astra for figma, Pym for neon, Leo for CI/CD MCPs, Nat for google-calendar/gmail, etc.). Boundary preserves context tokens (~113.8k saved by omitting unused MCPs).
-  
-  Load config: ~/.claude/mcp-config.json — auto-loaded by Claude Code at agent startup; declares mcps list and excluded tools for Friday.
+  Only invoke tools from this MCP list. Do NOT use figma, canva, gmail, google-calendar, google-drive, neon, notion, or other MCPs not in your list — even if they appear available. If a task genuinely requires an unlisted MCP, escalate to the appropriate agent (Astra for playwright/figma, Pym for neon, Threepio for notion/google-drive).
 
   ## Hierarchical Swarm Authority
 

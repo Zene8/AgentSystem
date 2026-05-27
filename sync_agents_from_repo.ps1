@@ -1,4 +1,4 @@
-# sync_agents_from_repo.ps1 — Unified agent definition sync from master to all CLIs
+﻿# sync_agents_from_repo.ps1 â€” Unified agent definition sync from master to all CLIs
 
 param(
     [string]$LogFile = ".agents/sync.log"
@@ -54,7 +54,7 @@ function Get-MasterAgentDefinition {
     if ($content -match '^name:\s*(.+)$') {
         $agentNameValue = $Matches[1].Trim()
         if ([string]::IsNullOrWhiteSpace($agentNameValue)) {
-            Write-Status "ERROR: 'name:' field is empty in $mastePath — must be a non-empty slug" "ERROR"
+            Write-Status "ERROR: 'name:' field is empty in $mastePath â€” must be a non-empty slug" "ERROR"
             return $null
         }
     }
@@ -63,7 +63,7 @@ function Get-MasterAgentDefinition {
     if ($content -match 'behavior:\s*\|') {
         $behaviorMatch = [regex]::Match($content, 'behavior:\s*\|\s*\n([\s\S]+?)(?=\n[a-z\-]+:|\z)')
         if (-not $behaviorMatch.Success -or [string]::IsNullOrWhiteSpace($behaviorMatch.Groups[1].Value)) {
-            Write-Status "ERROR: 'behavior:' section is empty in $mastePath — agent body required" "ERROR"
+            Write-Status "ERROR: 'behavior:' section is empty in $mastePath â€” agent body required" "ERROR"
             return $null
         }
     }
@@ -677,8 +677,9 @@ if (Test-Path $configSrcDir) {
     foreach ($file in Get-ChildItem "$configSrcDir\*.yml" -ErrorAction SilentlyContinue) {
         $dest = "$configDestDir\$($file.Name)"
         Copy-Item -Path $file.FullName -Destination $dest -Force
-        Write-Status "Synced config: $($file.Name) → $dest" "SUCCESS"
+        Write-Status "Synced config: $($file.Name) â†’ $dest" "SUCCESS"
     }
 }
 
 Write-Status 'Agent definition sync complete' SUCCESS
+

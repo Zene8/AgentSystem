@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    First-time AgentSystem setup on a new machine. Idempotent — safe to re-run.
+    First-time AgentSystem setup on a new machine. Idempotent -- safe to re-run.
 
 .DESCRIPTION
     1. Checks prerequisites (node, git, gh, CLIs)
@@ -45,13 +45,13 @@ function Write-Fail  { param($msg) Write-Host "   XX  $msg" -ForegroundColor Red
 
 $Status = @{ pass = 0; warn = 0; fail = 0 }
 
-# ── 1. Prerequisites ──────────────────────────────────────────────────────────
+# 1. Prerequisites
 Write-Step "Checking prerequisites"
 
 $prereqs = @{
-    node   = "node --version"
-    git    = "git --version"
-    gh     = "gh --version"
+    node = "node --version"
+    git  = "git --version"
+    gh   = "gh --version"
 }
 foreach ($p in $prereqs.GetEnumerator()) {
     $found = Get-Command $p.Key -ErrorAction SilentlyContinue
@@ -60,12 +60,11 @@ foreach ($p in $prereqs.GetEnumerator()) {
         Write-OK "$($p.Key)  $ver"
         $Status.pass++
     } else {
-        Write-Fail "$($p.Key) not found — install before continuing"
+        Write-Fail "$($p.Key) not found - install before continuing"
         $Status.fail++
     }
 }
 
-# Optional CLIs
 foreach ($cli in @("claude", "gemini", "copilot")) {
     $found = Get-Command $cli -ErrorAction SilentlyContinue
     if ($found) { Write-OK "$cli CLI found" }
@@ -77,7 +76,7 @@ if ($Status.fail -gt 0) {
     exit 1
 }
 
-# ── 2. Personal brain ─────────────────────────────────────────────────────────
+# 2. Personal brain
 Write-Step "Initializing personal brain"
 
 if (-not $Name)  { try { $Name  = git config user.name  2>$null } catch {} }
@@ -94,7 +93,7 @@ if (Test-Path $brainScript) {
     $Status.warn++
 }
 
-# ── 3. Sync agents to all CLIs ────────────────────────────────────────────────
+# 3. Sync agents to all CLIs
 Write-Step "Syncing agents to all CLIs"
 
 $syncScript = Join-Path $ScriptDir "sync_agents_from_repo.ps1"
@@ -107,7 +106,7 @@ if (Test-Path $syncScript) {
     $Status.fail++
 }
 
-# ── 4. GitHub labels ──────────────────────────────────────────────────────────
+# 4. GitHub labels
 if (-not $SkipLabels) {
     Write-Step "Creating GitHub labels"
     $ghAuth = gh auth status 2>&1
@@ -121,21 +120,21 @@ if (-not $SkipLabels) {
             $Status.warn++
         }
     } else {
-        Write-Warn "gh not authenticated — skipping labels (run: gh auth login)"
+        Write-Warn "gh not authenticated - skipping labels (run: gh auth login)"
         $Status.warn++
     }
 } else {
     Write-Skip "Labels skipped (-SkipLabels)"
 }
 
-# ── 5. Self-hosted runner (optional) ─────────────────────────────────────────
+# 5. Self-hosted runner (optional)
 if ($Runner) {
     Write-Step "Setting up self-hosted runner"
     $runnerScript = Join-Path $ScriptDir "tools\setup-runner.ps1"
     if (Test-Path $runnerScript) {
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = [Security.Principal.WindowsPrincipal]$identity
-        $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $isAdmin   = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if ($isAdmin) {
             powershell -File $runnerScript
             $Status.pass++
@@ -151,17 +150,17 @@ if ($Runner) {
     Write-Skip "Runner setup skipped (add -Runner flag when ready, requires admin)"
 }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# Summary
 Write-Host ""
-Write-Host "═══════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host " AgentSystem install complete" -ForegroundColor Cyan
 Write-Host "  Pass: $($Status.pass)  Warn: $($Status.warn)  Fail: $($Status.fail)" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host " Start working:"
-Write-Host "   claude @friday              — engineering tasks"
-Write-Host "   claude @jarvis              — strategy / cross-domain"
-Write-Host "   claude @nat                 — business / GTM"
+Write-Host "   claude @friday              - engineering tasks"
+Write-Host "   claude @jarvis              - strategy / cross-domain"
+Write-Host "   claude @nat                 - business / GTM"
 Write-Host ""
 Write-Host " New repo:"
 Write-Host "   powershell -File tools\bootstrap-repo.ps1"
@@ -170,9 +169,9 @@ Write-Host " After editing agents:"
 Write-Host "   powershell -File sync_agents_from_repo.ps1"
 Write-Host ""
 if ($Status.warn -gt 0) {
-    Write-Host " Warnings above — check output and re-run if needed." -ForegroundColor Yellow
+    Write-Host " Warnings above - check output and re-run if needed." -ForegroundColor Yellow
 }
 if (-not $Runner) {
-    Write-Host " Runner not set up — CI workflows won't run until you do:" -ForegroundColor Yellow
+    Write-Host " Runner not set up - CI workflows wont run until you do:" -ForegroundColor Yellow
     Write-Host "   Run PowerShell as Administrator, then: .\install.ps1 -Runner" -ForegroundColor Yellow
 }

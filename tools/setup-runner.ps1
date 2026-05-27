@@ -81,8 +81,8 @@ Write-Host "  Configuring runner..." -ForegroundColor Gray
 
 # Install as Windows service
 Write-Host "  Installing as Windows service..." -ForegroundColor Gray
-& .\svc.sh install
-& .\svc.sh start
+& .\svc.cmd install
+& .\svc.cmd start
 Pop-Location
 
 Write-Host ""
