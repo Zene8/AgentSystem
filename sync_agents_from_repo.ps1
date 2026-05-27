@@ -193,20 +193,21 @@ function Add-CopilotYamlFrontmatter {
 
     # Tier 3 (complex reasoning): gpt-5.2-codex
     # Tier 2 (standard work):    gpt-5-mini
-    # Tier 1 (simple/fast):      gpt-5.4-mini
+    # Tier 1 (cheapest):         gpt-5-mini   (gpt-5-mini << gpt-5.4-mini in cost)
+    # Tier 2 (standard):         gpt-5.4-mini
     switch ($AgentName.ToLower()) {
         'jarvis'   { $copilotModel = 'gpt-5.2-codex' }
         'sam'      { $copilotModel = 'gpt-5.2-codex' }
-        'friday'   { $copilotModel = 'gpt-5-mini' }
-        'nat'      { $copilotModel = 'gpt-5-mini' }
-        'ultron'   { $copilotModel = 'gpt-5-mini' }
-        'pym'      { $copilotModel = 'gpt-5-mini' }
-        'leo'      { $copilotModel = 'gpt-5-mini' }
-        'astra'    { $copilotModel = 'gpt-5-mini' }
-        'wanda'    { $copilotModel = 'gpt-5.4-mini' }
-        'threepio' { $copilotModel = 'gpt-5.4-mini' }
-        'r2d2'     { $copilotModel = 'gpt-5.4-mini' }
-        default    { $copilotModel = 'gpt-5-mini' }
+        'friday'   { $copilotModel = 'gpt-5.4-mini' }
+        'nat'      { $copilotModel = 'gpt-5.4-mini' }
+        'ultron'   { $copilotModel = 'gpt-5.4-mini' }
+        'pym'      { $copilotModel = 'gpt-5.4-mini' }
+        'leo'      { $copilotModel = 'gpt-5.4-mini' }
+        'astra'    { $copilotModel = 'gpt-5.4-mini' }
+        'wanda'    { $copilotModel = 'gpt-5-mini' }
+        'threepio' { $copilotModel = 'gpt-5-mini' }
+        'r2d2'     { $copilotModel = 'gpt-5-mini' }
+        default    { $copilotModel = 'gpt-5.4-mini' }
     }
 
     $yaml = @"

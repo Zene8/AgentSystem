@@ -38,8 +38,8 @@ behavior: |
   | Task complexity | Claude | Gemini | Copilot | Signals |
   |----------------|--------|--------|---------|---------|
   | COMPLEX | claude-opus-4-7 | gemini-3.1-pro-preview | gpt-5.2-codex | architecture, security, >15 files, cross-cutting, design decisions |
-  | STANDARD | claude-sonnet-4-6 | gemini-3-flash-preview | gpt-5-mini | feature implementation, bug fix, 1-15 files (default) |
-  | SIMPLE | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview | gpt-5.4-mini | docs, read-only, grep/search, single file |
+  | STANDARD | claude-sonnet-4-6 | gemini-3-flash-preview | gpt-5.4-mini | feature implementation, bug fix, 1-15 files (default) |
+  | SIMPLE | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview | gpt-5-mini | docs, read-only, grep/search, single file |
 
   Spawn pattern: `claude -p "<scoped task with full issue context + user brain preferences>" --agent=ultron --model=<tier-model>`
   Rule: spawn only when tasks touch different files/modules — no concurrent writes to same file.
