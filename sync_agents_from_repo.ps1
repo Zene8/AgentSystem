@@ -1,4 +1,4 @@
-# sync_agents_from_repo.ps1 — Unified agent definition sync from master to all CLIs
+﻿# sync_agents_from_repo.ps1 â€” Unified agent definition sync from master to all CLIs
 
 param(
     [string]$LogFile = ".agents/sync.log"
@@ -54,7 +54,7 @@ function Get-MasterAgentDefinition {
     if ($content -match '^name:\s*(.+)$') {
         $agentNameValue = $Matches[1].Trim()
         if ([string]::IsNullOrWhiteSpace($agentNameValue)) {
-            Write-Status "ERROR: 'name:' field is empty in $mastePath — must be a non-empty slug" "ERROR"
+            Write-Status "ERROR: 'name:' field is empty in $mastePath â€” must be a non-empty slug" "ERROR"
             return $null
         }
     }
@@ -63,7 +63,7 @@ function Get-MasterAgentDefinition {
     if ($content -match 'behavior:\s*\|') {
         $behaviorMatch = [regex]::Match($content, 'behavior:\s*\|\s*\n([\s\S]+?)(?=\n[a-z\-]+:|\z)')
         if (-not $behaviorMatch.Success -or [string]::IsNullOrWhiteSpace($behaviorMatch.Groups[1].Value)) {
-            Write-Status "ERROR: 'behavior:' section is empty in $mastePath — agent body required" "ERROR"
+            Write-Status "ERROR: 'behavior:' section is empty in $mastePath â€” agent body required" "ERROR"
             return $null
         }
     }
@@ -87,24 +87,22 @@ function Get-GeminiModel {
         [string]$AgentName
     )
 
-    # Default mapping by Claude model
-    $defaultMap = @{
-        "claude-opus-4-7" = "gemini-3.1-pro-preview"
-        "claude-sonnet-4-6" = "gemini-2.5-pro"
-        "claude-haiku-4-5-20251001" = "gemini-3-flash-preview"
-    }
-
-    # Agent-specific overrides
+    # Tier 3 (complex reasoning): gemini-3.1-pro-preview
+    # Tier 2 (standard work):    gemini-3-flash-preview
+    # Tier 1 (simple/fast):      gemini-3.1-flash-lite-preview
     switch ($AgentName.ToLower()) {
-        'jarvis' { return 'gemini-3.1-pro-preview' }
-        'friday' { return 'gemini-3-flash-preview' }
-        'nat'    { return 'gemini-3-flash-preview' }
-        'sam'    { return 'gemini-3-flash-preview' }
+        'jarvis'   { return 'gemini-3.1-pro-preview' }
+        'sam'      { return 'gemini-3.1-pro-preview' }
+        'friday'   { return 'gemini-3-flash-preview' }
+        'nat'      { return 'gemini-3-flash-preview' }
+        'ultron'   { return 'gemini-3-flash-preview' }
+        'pym'      { return 'gemini-3-flash-preview' }
+        'leo'      { return 'gemini-3-flash-preview' }
+        'astra'    { return 'gemini-3-flash-preview' }
+        'wanda'    { return 'gemini-3.1-flash-lite-preview' }
         'threepio' { return 'gemini-3.1-flash-lite-preview' }
-        default {
-            if ($defaultMap.ContainsKey($ClaudeModel)) { return $defaultMap[$ClaudeModel] }
-            return 'gemini-3-flash-preview'
-        }
+        'r2d2'     { return 'gemini-3.1-flash-lite-preview' }
+        default    { return 'gemini-3-flash-preview' }
     }
 }
 
@@ -193,17 +191,24 @@ function Add-CopilotYamlFrontmatter {
     $name = if ($metadata.name) { $metadata.name } else { $AgentName }
     $description = if ($metadata.description) { $metadata.description } else { "" }
 
-    # Determine Copilot (gpt) model by agent role
+    # Tier 3 (complex reasoning): gpt-5.2-codex
+    # Tier 2 (standard work):    gpt-5-mini
+    # Tier 1 (cheapest):         gpt-5-mini   (gpt-5-mini << gpt-5.4-mini in cost)
+    # Tier 2 (standard):         gpt-5.4-mini
     switch ($AgentName.ToLower()) {
-        'jarvis' { $copilotModel = 'gpt-5.2-codex' }
-        'friday' { $copilotModel = 'gpt-5.4-mini' }
-        'nat'    { $copilotModel = 'gpt-5.4-mini' }
-        'sam'    { $copilotModel = 'gpt-5.4-mini' }
+        'jarvis'   { $copilotModel = 'gpt-5.2-codex' }
+        'sam'      { $copilotModel = 'gpt-5.2-codex' }
+        'friday'   { $copilotModel = 'gpt-5.4-mini' }
+        'nat'      { $copilotModel = 'gpt-5.4-mini' }
+        'ultron'   { $copilotModel = 'gpt-5.4-mini' }
+        'pym'      { $copilotModel = 'gpt-5.4-mini' }
+        'leo'      { $copilotModel = 'gpt-5.4-mini' }
+        'astra'    { $copilotModel = 'gpt-5.4-mini' }
+        'wanda'    { $copilotModel = 'gpt-5-mini' }
         'threepio' { $copilotModel = 'gpt-5-mini' }
-        default { $copilotModel = 'gpt-5-mini' }
+        'r2d2'     { $copilotModel = 'gpt-5-mini' }
+        default    { $copilotModel = 'gpt-5.4-mini' }
     }
-
-    Write-Host "DEBUG Add-CopilotYamlFrontmatter: AgentName=$AgentName, copilotModel=$copilotModel" -ForegroundColor Cyan
 
     $yaml = @"
 ---
@@ -382,12 +387,18 @@ function Add-GeminiYamlFrontmatter {
 
     # Determine Gemini model by agent role
     switch ($AgentName.ToLower()) {
-        'jarvis' { $geminiModel = 'gemini-3.1-pro-preview' }
-        'friday' { $geminiModel = 'gemini-3-flash-preview' }
-        'nat'    { $geminiModel = 'gemini-3-flash-preview' }
-        'sam'    { $geminiModel = 'gemini-3-flash-preview' }
+        'jarvis'   { $geminiModel = 'gemini-3.1-pro-preview' }
+        'sam'      { $geminiModel = 'gemini-3.1-pro-preview' }
+        'friday'   { $geminiModel = 'gemini-3-flash-preview' }
+        'nat'      { $geminiModel = 'gemini-3-flash-preview' }
+        'ultron'   { $geminiModel = 'gemini-3-flash-preview' }
+        'pym'      { $geminiModel = 'gemini-3-flash-preview' }
+        'leo'      { $geminiModel = 'gemini-3-flash-preview' }
+        'astra'    { $geminiModel = 'gemini-3-flash-preview' }
+        'wanda'    { $geminiModel = 'gemini-3.1-flash-lite-preview' }
         'threepio' { $geminiModel = 'gemini-3.1-flash-lite-preview' }
-        default { $geminiModel = 'gemini-3-flash-preview' }
+        'r2d2'     { $geminiModel = 'gemini-3.1-flash-lite-preview' }
+        default    { $geminiModel = 'gemini-3-flash-preview' }
     }
 
     $yaml = @"
@@ -656,4 +667,19 @@ if ($memoryWarnings -eq 0) {
     Write-Status "Memory validation: $memoryWarnings agents missing files" INFO
 }
 
+# Sync config files to ~/.claude/agents/config/ so agent-context-inject.js hook picks them up
+$configSrcDir  = "config"
+$configDestDir = "$env:USERPROFILE\.claude\agents\config"
+if (Test-Path $configSrcDir) {
+    if (-not (Test-Path $configDestDir)) {
+        New-Item -ItemType Directory -Path $configDestDir -Force | Out-Null
+    }
+    foreach ($file in Get-ChildItem "$configSrcDir\*.yml" -ErrorAction SilentlyContinue) {
+        $dest = "$configDestDir\$($file.Name)"
+        Copy-Item -Path $file.FullName -Destination $dest -Force
+        Write-Status "Synced config: $($file.Name) â†’ $dest" "SUCCESS"
+    }
+}
+
 Write-Status 'Agent definition sync complete' SUCCESS
+
