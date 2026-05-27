@@ -1,7 +1,22 @@
 # Agent System Handoff
 
 **Last Updated:** 2026-05-27
-**Status:** Pre-publish. PR #52 open (feat: model tiers, lazy MCP, dynamic spawn, install.ps1, MCP server, LICENSE, INSTALL guide). 45/45 tests passing. Pending: runner setup → Sam audit → merge PR #52 to dev → merge dev to main → make repo public.
+**Status:** v1.0 published. PR #55 merged to dev (personal brain, issue workflow, swarm support, install.ps1, model tiers, Sam CI gate). Branches cleaned. Two issues open for next session.
+
+---
+
+## Checkpoint: Branch Cleanup + Token Efficiency (2026-05-27)
+
+**PRs merged:** #55 (personal brain, issue workflow, swarms, install.ps1, model tiers, Sam CI gate) → dev
+
+**Branches deleted:** `worktree-feat+personal-brain-issue-workflow-swarms`, `worktree-agent-af8d503bcf50159ef` (identical to dev), `feat/dual-brain-graph-universal-control` (stale tracking ref pruned)
+
+**Hook written:** `C:\Users\natha\.claude\hooks\tool-output-compress.js` — PostToolUse compress for outputs > 5000 chars. Pipe-tested, working.
+
+**Pending manual action (auto-mode blocked direct settings edit):**
+Apply two changes to `~/.claude/settings.json` — see [Issue #56](https://github.com/Zene8/AgentSystem/issues/56) for exact JSON.
+
+**Repo audit:** `shanraisshan/claude-code-best-practice` — 4 actionable items filed as [Issue #57](https://github.com/Zene8/AgentSystem/issues/57) (effort overrides, path-scoped rules, per-agent hooks, isolation docs).
 
 ---
 
@@ -109,13 +124,14 @@ Format:
 
 Current blockers:
 
-_(none)_
+- **[2026-05-27] User waiting on self:** Apply settings.json changes from Issue #56 — auto mode hard gate blocked agent edit. 2-minute manual fix.
 
 ## In-Flight Work
 
 Work that is started but not yet complete. Link to GitHub issues.
 
-- **PR #29** — memory files + production readiness. Sam audit in progress. After merge: `git tag v1.0-production-ready && git push origin v1.0-production-ready`
+- **[Issue #56](https://github.com/Zene8/AgentSystem/issues/56)** — apply `autoCompactEnabled` + PostToolUse compress hook to `~/.claude/settings.json`. Manual edit required. Hook script already at `~/.claude/hooks/tool-output-compress.js`.
+- **[Issue #57](https://github.com/Zene8/AgentSystem/issues/57)** — implement effort overrides, path-scoped CLAUDE.md rules, per-agent hooks, isolation docs from shanraisshan audit.
 
 ## Startup
 
