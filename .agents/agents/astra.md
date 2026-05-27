@@ -1,9 +1,10 @@
 ---
 name: Astra
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-4-6
 description: Frontend Dev, component logic, browser testing, domain authority under Friday (escalates to Friday)
 argument-hint: --component-review, --e2e-test, --perf-audit
 tools: github-cli, bash, git, npm, docker
+mcps: [github, playwright, figma, context7]
 ---
 
 behavior: |

@@ -1,19 +1,26 @@
 # Agent model assignments
-# Edit here to change model/effort for any role.
-# gemini_equivalents used by ~/.gemini/agents/ files.
+# Tiers:
+#   3 = complex reasoning  → claude-opus-4-7          / gemini-3.1-pro-preview        / gpt-5.2-codex
+#   2 = standard work      → claude-sonnet-4-6         / gemini-3-flash-preview        / gpt-5.4-mini
+#   1 = simple/cheapest    → claude-haiku-4-5-20251001 / gemini-3.1-flash-lite-preview / gpt-5-mini  (gpt-5-mini << gpt-5.4-mini in cost)
 agents:
-  ceo:              { model: claude-opus-4-7,   effort: high   }
-  cio:              { model: claude-sonnet-4-6, effort: high   }
-  architect:        { model: claude-sonnet-4-6, effort: high   }
-  tdd-test-writer:  { model: claude-sonnet-4-6, effort: normal }
-  backend-dev:      { model: claude-sonnet-4-6, effort: normal }
-  frontend-dev:     { model: claude-sonnet-4-6, effort: normal }
-  database-dev:     { model: claude-sonnet-4-6, effort: normal }
-  code-reviewer:    { model: claude-sonnet-4-6, effort: normal }
-  security-auditor: { model: claude-sonnet-4-6, effort: high   }
-  devops:           { model: claude-sonnet-4-6, effort: high   }
-  coo:              { model: claude-haiku-4-5-20251001, effort: normal }
+  jarvis:   { claude: claude-opus-4-7,          gemini: gemini-3.1-pro-preview,       copilot: gpt-5.2-codex,  tier: 3 }
+  sam:      { claude: claude-sonnet-4-6,        gemini: gemini-3.1-pro-preview,       copilot: gpt-5.2-codex,  tier: 3 }
+  friday:   { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  nat:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  ultron:   { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  pym:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  leo:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  astra:    { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  wanda:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
+  threepio: { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
+  r2d2:     { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
 
-gemini_equivalents:
-  ceo:     gemini-3.1-pro-preview
-  default: gemini-3-flash-preview
+# Dynamic spawn tiers (Friday uses when spawning workers)
+spawn_tiers:
+  complex:  { signals: "architecture, security, >15 files, cross-cutting, design decisions",
+              claude: claude-opus-4-7, gemini: gemini-3.1-pro-preview, copilot: gpt-5.2-codex }
+  standard: { signals: "feature implementation, bug fix, 1-15 files",
+              claude: claude-sonnet-4-6, gemini: gemini-3-flash-preview, copilot: gpt-5.4-mini }
+  simple:   { signals: "docs, read-only, grep/search, single file",
+              claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini }

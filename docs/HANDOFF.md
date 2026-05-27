@@ -1,7 +1,7 @@
 # Agent System Handoff
 
-**Last Updated:** 2026-05-25
-**Status:** Dual-brain graph + universal bootstrap + remote control complete on `feat+dual-brain-graph-universal-control`. 51/51 tests passing. Pending: runner setup (one-time, requires elevation) + Sam audit + PR merge.
+**Last Updated:** 2026-05-27
+**Status:** Pre-publish. PR #52 open (feat: model tiers, lazy MCP, dynamic spawn, install.ps1, MCP server, LICENSE, INSTALL guide). 45/45 tests passing. Pending: runner setup → Sam audit → merge PR #52 to dev → merge dev to main → make repo public.
 
 ---
 
