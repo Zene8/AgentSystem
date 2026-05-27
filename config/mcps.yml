@@ -28,3 +28,19 @@ servers:
   # - name: linear
   # - name: slack
   # - name: firebase
+
+# Per-agent lazy loading declarations
+# Agents ONLY invoke tools from their declared list even if other MCPs are available.
+# This prevents context bloat and unintended cross-domain tool calls.
+agent_mcps:
+  jarvis:   [github, gmail, google-calendar, google-drive]
+  friday:   [github, context7, playwright]
+  sam:      [github]
+  nat:      [github, gmail, google-drive]
+  ultron:   [github, context7, vercel]
+  pym:      [github, neon]
+  leo:      [github, vercel]
+  astra:    [github, playwright, figma, context7]
+  wanda:    [figma, canva]
+  threepio: [github, google-drive, notion]
+  r2d2:     [github]

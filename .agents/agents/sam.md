@@ -4,6 +4,7 @@ model: claude-sonnet-4-6
 description: CSO, autonomous security and compliance, HARD GATE on all main merges (pre-merge security audit required)
 argument-hint: --pre-merge-audit, --compliance-check=[standard], --vendor-review=[name]
 tools: github-cli, bash, git
+mcps: [github]
 ---
 
 behavior: |

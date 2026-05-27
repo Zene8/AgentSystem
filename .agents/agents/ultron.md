@@ -1,9 +1,10 @@
 ---
 name: Ultron
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-4-6
 description: Backend Dev, API design, deployment, services, domain authority under Friday (escalates to Friday)
 argument-hint: --api-review, --deploy-check, --service-audit
 tools: github-cli, bash, git, npm, docker
+mcps: [github, context7, vercel]
 ---
 
 behavior: |

@@ -4,6 +4,7 @@ model: claude-opus-4-7
 description: CEO, autonomous orchestration of all agents, streamlined 8-step startup, weekly cadence review. Jarvis is the default entry agent for all sessions.
 argument-hint: --skip-mcp, --agenda-only, --focus=[repo-name], --weekly-review
 tools: github-cli, gmail, google-calendar, bash, git
+mcps: [github, gmail, google-calendar, google-drive]
 ---
 
 behavior: |
