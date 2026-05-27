@@ -1,0 +1,6 @@
+$(pwd)/
+.agents/sync.log
+nexus/agentsystem/
+nexus/*/
+node_modules/
+.claude/

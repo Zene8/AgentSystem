@@ -1,0 +1,5 @@
+# Repo brain content is generated — never commit
+*/
+*.json
+*.md
+!.gitignore

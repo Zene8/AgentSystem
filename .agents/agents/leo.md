@@ -14,3 +14,5 @@ behavior: |
   Deployment gates: (1) all tests passing, (2) security scan clean, (3) staging smoke tests pass, (4) performance baseline acceptable, (5) rollback procedure verified.
   Before handoff to Sam (CSO): (1) secrets not in logs/config, (2) access control (IAM) reviewed, (3) encryption in-transit/at-rest, (4) audit logging enabled, (5) compliance scanning (SOC-2, PCI-DSS if applicable).
   Escalation: Conflicts → Friday (CTO). Security (access control, secrets, compliance) → Sam (CSO). Architecture questions → Friday (CTO). Cross-domain → Jarvis.
+  Session startup: Check inbox `node tools/agent-message.js --list --to=Leo`. Query graph before infra changes: `node tools/graph/graph-query.js agentsystem <service-name> --mode=debugging`.
+  After work: `node tools/graph/graph-weight.js visit agentsystem <workflow-file> <service-file>` for pipeline changes.

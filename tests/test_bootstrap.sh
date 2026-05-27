@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PASS=0; FAIL=0
+ok()   { echo "[PASS] $1"; PASS=$((PASS+1)); }
+fail() { echo "[FAIL] $1"; FAIL=$((FAIL+1)); }
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_REPO_DIR="/tmp/test-bootstrap-repo-$(date +%s)"
+export REGISTRY
+REGISTRY=$(node -e "const os=require('os'),p=require('path');process.stdout.write(p.join(os.homedir(),'.claude','agent-memory','nexus','known-repos.json'))" 2>/dev/null)
+
+# Detect PowerShell executable (pwsh preferred, fallback to powershell.exe on Windows)
+if command -v pwsh &>/dev/null; then
+  PWSH="pwsh"
+elif command -v powershell.exe &>/dev/null; then
+  PWSH="powershell.exe"
+else
+  echo "ERROR: No PowerShell executable found (pwsh or powershell.exe)"
+  exit 1
+fi
+
+cleanup() {
+  rm -rf "$TEST_REPO_DIR"
+  if [ -f "$REGISTRY" ]; then
+    node -e "
+      const fs=require('fs');
+      const reg=process.env.REGISTRY;
+      try {
+        const data=JSON.parse(fs.readFileSync(reg,'utf8'));
+        data.repos=data.repos.filter(r=>r.slug!=='test-bootstrap-target');
+        fs.writeFileSync(reg,JSON.stringify(data,null,2)+'\n','utf8');
+      } catch(e){}
+    " 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+echo "=== Setup: create minimal test repo ==="
+mkdir -p "$TEST_REPO_DIR"
+cd "$TEST_REPO_DIR"
+git init -q
+git config user.email "test@test.com"
+git config user.name "Test"
+echo "# Test Repo" > README.md
+echo "console.log('hello')" > index.js
+git add . && git commit -q -m "initial"
+cd "$REPO_ROOT"
+
+# Convert paths to Windows-native format for PowerShell (cygpath available in Git Bash on Windows)
+if command -v cygpath &>/dev/null; then
+  WIN_TEST_REPO_DIR="$(cygpath -w "$TEST_REPO_DIR")"
+  WIN_REPO_ROOT="$(cygpath -w "$REPO_ROOT")"
+else
+  WIN_TEST_REPO_DIR="$TEST_REPO_DIR"
+  WIN_REPO_ROOT="$REPO_ROOT"
+fi
+
+echo "=== Test: bootstrap-repo.ps1 runs without error ==="
+$PWSH -File "$WIN_REPO_ROOT\\tools\\bootstrap-repo.ps1" \
+  -RepoPath "$WIN_TEST_REPO_DIR" \
+  -Slug "test-bootstrap-target" \
+  -PrimaryCli "claude" 2>/dev/null \
+  && ok "bootstrap exits 0" || fail "bootstrap exited non-zero"
+
+echo "=== Test: repo brain created ==="
+[ -f "$TEST_REPO_DIR/nexus/test-bootstrap-target/graph.json" ] \
+  && ok "repo brain graph.json created" \
+  || fail "repo brain graph.json missing"
+
+echo "=== Test: CLAUDE.md injected ==="
+[ -f "$TEST_REPO_DIR/CLAUDE.md" ] && ok "CLAUDE.md exists" || fail "CLAUDE.md missing"
+grep -q "AGENT-SYSTEM-BOOTSTRAP" "$TEST_REPO_DIR/CLAUDE.md" \
+  && ok "CLAUDE.md has agent block" || fail "CLAUDE.md missing agent block"
+
+echo "=== Test: registry entry created ==="
+node -e "
+  const fs=require('fs');
+  const reg=JSON.parse(fs.readFileSync(process.env.REGISTRY,'utf8'));
+  const entry=reg.repos.find(r=>r.slug==='test-bootstrap-target');
+  if (!entry) { process.exit(1); }
+  console.log('found');
+" 2>/dev/null && ok "registry entry exists" || fail "registry entry missing"
+
+echo "=== Test: bootstrap is idempotent ==="
+$PWSH -File "$WIN_REPO_ROOT\\tools\\bootstrap-repo.ps1" \
+  -RepoPath "$WIN_TEST_REPO_DIR" \
+  -Slug "test-bootstrap-target" \
+  -PrimaryCli "claude" 2>/dev/null \
+  && ok "second run exits 0" || fail "second run failed"
+
+# Count only the opening marker (with colon) to detect duplicate block injection
+BLOCK_COUNT=$(grep -c "AGENT-SYSTEM-BOOTSTRAP:" "$TEST_REPO_DIR/CLAUDE.md" 2>/dev/null || echo "0")
+[ "$BLOCK_COUNT" -eq 1 ] && ok "CLAUDE.md block not duplicated" || fail "CLAUDE.md block duplicated ($BLOCK_COUNT times)"
+
+REGISTRY_COUNT=$(node -e "
+  const fs=require('fs');
+  const reg=JSON.parse(fs.readFileSync(process.env.REGISTRY,'utf8'));
+  process.stdout.write(String(reg.repos.filter(r=>r.slug==='test-bootstrap-target').length));
+" 2>/dev/null)
+[ "$REGISTRY_COUNT" -eq 1 ] && ok "registry entry not duplicated" || fail "registry entry duplicated ($REGISTRY_COUNT times)"
+
+echo ""
+echo "========================================"
+printf "  PASSED: %d\n" $PASS
+printf "  FAILED: %d\n" $FAIL
+echo "========================================"
+[ $FAIL -eq 0 ] && echo "RESULT: PASSED" && exit 0 || echo "RESULT: FAILED" && exit 1

@@ -5,7 +5,7 @@
 
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { agentMemoryRoot } from './graph/graph-lib.js';
 
 const args = process.argv.slice(2);
 const flags = {};
@@ -18,7 +18,7 @@ for (const a of args) {
 
 const name = flags.name || 'User';
 const email = flags.email || '';
-const brainDir = join(homedir(), '.claude', 'agent-memory', 'nexus', 'personal-brain');
+const brainDir = join(agentMemoryRoot(), 'nexus', 'personal-brain');
 const brainPath = join(brainDir, 'user-brain.md');
 
 if (existsSync(brainPath)) {

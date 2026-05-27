@@ -1,0 +1,108 @@
+name: Agent Dispatch
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+# Only one agent dispatch per issue at a time
+concurrency:
+  group: agent-dispatch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: self-hosted
+    # Trigger on agent:* label OR /agent <name> comment
+    if: |
+      (github.event_name == 'issues' &&
+       startsWith(github.event.label.name, 'agent:')) ||
+      (github.event_name == 'issue_comment' &&
+       startsWith(github.event.comment.body, '/agent ') &&
+       github.event.comment.user.login == github.repository_owner)
+
+    steps:
+      - name: Parse agent + task
+        id: parse
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "issues") {
+            $agent = "${{ github.event.label.name }}" -replace "^agent:", ""
+            $task  = @"
+          ${{ github.event.issue.body }}
+          "@
+          } else {
+            $comment = @"
+          ${{ github.event.comment.body }}
+          "@
+            $parts = $comment.Trim() -split '\s+', 3
+            $agent = $parts[1]
+            $task  = if ($parts.Count -gt 2) { $parts[2] } else { "${{ github.event.issue.body }}" }
+          }
+          echo "agent=$agent" >> $env:GITHUB_OUTPUT
+          $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+
+      - name: Post "running" acknowledgement
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `⚙️ **Agent \`${{ steps.parse.outputs.agent }}\` is running...** (started ${new Date().toISOString()})`
+            });
+
+      - name: Run agent (claude)
+        id: run_claude
+        shell: pwsh
+        if: steps.parse.outputs.agent != ''
+        run: |
+          $task = Get-Content "$env:RUNNER_TEMP\task.txt" -Raw
+          # claude -p runs in non-interactive print mode
+          $result = claude -p $task 2>&1
+          $result | Out-File -FilePath "$env:RUNNER_TEMP\result.txt" -Encoding utf8
+          echo "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Post result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const agent = '${{ steps.parse.outputs.agent }}';
+            let result = '';
+            try {
+              result = fs.readFileSync(process.env.RUNNER_TEMP + '/result.txt', 'utf8');
+            } catch (e) {
+              result = `Error reading result: ${e.message}`;
+            }
+            // Truncate if too long for a comment (GitHub limit ~65535 chars)
+            if (result.length > 60000) {
+              result = result.slice(0, 60000) + '\n\n... (truncated — output exceeded limit)';
+            }
+            const exitCode = '${{ steps.run_claude.outputs.exit_code }}';
+            const status = exitCode === '0' ? '✅' : '⚠️';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${status} **Agent \`${agent}\` result:**\n\n\`\`\`\n${result}\n\`\`\``
+            });
+
+      - name: Remove dispatch label (reset for next use)
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                name: '${{ github.event.label.name }}'
+              });
+            } catch (e) {
+              // Label already removed — ignore
+            }
