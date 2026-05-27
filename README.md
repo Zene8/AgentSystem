@@ -1,43 +1,105 @@
-# AgentSystem — Unified AI Agent Registry
+# AgentSystem
 
-This repository is the single source of truth for an AI agent fleet that runs across multiple CLIs (Claude Code, Gemini CLI, Copilot). It contains canonical agent definitions, memory, sync automation, and governance docs.
+A multi-agent orchestration system that runs a fleet of 11 specialized AI agents across Claude Code, Gemini CLI, and GitHub Copilot — sharing memory, routing work intelligently, and executing full engineering workflows autonomously.
 
-Top-level docs
-- [AGENTS.md](AGENTS.md) — roster, roles, and decision authority (primary agent WIKI)
-- [CLAUDE.md](CLAUDE.md) — Claude-specific configuration and memory guidance
-- [docs/HANDOFF.md](docs/HANDOFF.md) — current state, blockers, and next steps
-- [.agents/](.agents/) — canonical agent definitions (master files)
-- `sync_agents_from_repo.ps1` — syncs `.agents/` → user CLI folders (`%USERPROFILE%\.claude`, `\.copilot`, `\.gemini`)
+[![Tests](https://img.shields.io/badge/tests-45%20passing-brightgreen)](#)
+[![License](https://img.shields.io/badge/license-Source%20Available-blue)](LICENSE)
 
-Quick start
+---
+
+## What it does
+
+- **11 specialized agents** — CEO (Jarvis), CTO (Friday), CSO (Sam), Backend (Ultron), DB (Pym), DevOps (Leo), Frontend (Astra), Design (Wanda), Docs (Threepio), Business (Nat), Fallback (r2d2)
+- **Three CLIs, one brain** — Claude Code, Gemini CLI, and GitHub Copilot all load the same agents and share the same graph memory
+- **Autonomous issue workflow** — label a GitHub issue `agent:friday` from your phone → agents branch, code, PR, audit, and ping you to merge
+- **Bayesian graph memory** — Ebbinghaus decay, spreading activation, context-adaptive weight profiles
+- **Dynamic model selection** — Friday classifies task complexity (COMPLEX/STANDARD/SIMPLE) and spawns workers on the right model tier
+- **Lazy MCP loading** — each agent only loads the MCPs it needs, declared in frontmatter
+
+## Architecture
+
+```
+Jarvis (CEO / Opus)
+  └── Friday (CTO / Sonnet) ── dispatches ──→ Ultron · Pym · Leo · Astra · Wanda · Threepio
+                                              (parallel swarms in Claude Code)
+  └── Nat (CBO / Sonnet)
+  └── Sam (CSO / Sonnet) ── hard gate on all main merges
+```
+
+Memory: `~/agent-memory/nexus/` — neutral path, readable by all three CLIs.
+
+---
+
+## Quick start
 
 **First time on a new machine:**
 ```powershell
-.\install.ps1                          # checks prereqs, inits brain, syncs agents, creates labels
-.\install.ps1 -Runner                  # also sets up self-hosted runner (requires admin)
+git clone https://github.com/Zene8/AgentSystem.git
+cd AgentSystem
+.\install.ps1
 ```
 
-**New repo (add AgentSystem to any project):**
+**With self-hosted runner** (enables autonomous GitHub issue workflow — run as Administrator):
 ```powershell
-cd C:\path\to\your\repo
+.\install.ps1 -Runner
+```
+
+**MCP server** (exposes agent tools natively in Claude Code sessions):
+```powershell
+npm install
+claude mcp add agentsystem -- node C:\full\path\to\AgentSystem\tools\mcp-server.js
+```
+
+**New repo:**
+```powershell
+cd C:\path\to\your-repo
 powershell -File C:\path\to\AgentSystem\tools\bootstrap-repo.ps1
 ```
 
 **After editing agents:**
 ```powershell
-powershell -File .\sync_agents_from_repo.ps1
+.\sync_agents_from_repo.ps1
 ```
 
-**MCP server (exposes agent tools natively in Claude Code):**
-```powershell
-npm install
-claude mcp add agentsystem -- node C:\path\to\AgentSystem\tools\mcp-server.js
+See [docs/INSTALL.md](docs/INSTALL.md) for the full step-by-step guide (per CLI, per platform, verification checklist).
+
+---
+
+## Using agents
+
+```bash
+claude @friday     # engineering tasks (CTO — dispatches workers)
+claude @jarvis     # strategy / cross-domain
+claude @nat        # business / GTM
+claude @sam        # security audit
 ```
-MCP tools available after install: `agent_send_message`, `agent_list_inbox`, `graph_query`, `memory_read_brain`, `memory_read_agent`
 
-Design principles
-- Single source of truth: keep agent definitions in `.agents/` and sync to user CLI folders
-- Per-agent model mappings are handled by the sync script to match each platform's model ids
-- Memory is stored in `agents-memory/` and indexed by `MEMORY.md`
+Or just tell Friday to `do work` — it reads open issues and picks the highest priority one automatically.
 
-If you want a developer walkthrough or to propose doc deletions, open an issue referencing this README and the `AGENTS.md` entry for the affected agent.
+---
+
+## File layout
+
+```
+.agents/agents/        canonical agent definitions (edit here)
+.agents/memory/        agent runtime memory
+config/
+  models.yml           per-agent model assignments for all 3 CLIs
+  mcps.yml             MCP server list + per-agent lazy declarations
+tools/
+  mcp-server.js        MCP server (6 tools for Claude Code)
+  bootstrap-repo.ps1   per-repo setup
+  agent-message.js     inter-agent inbox messaging
+  graph/               Bayesian graph memory engine
+docs/
+  INSTALL.md           full installation guide
+  HANDOFF.md           current state and open work
+install.ps1            first-time machine setup
+sync_agents_from_repo.ps1   sync agents → all 3 CLIs
+```
+
+---
+
+## License
+
+[Source Available](LICENSE) — free to use, no redistribution or commercial sale.
