@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // agent-brain-init.js — one-time setup of the global agent brain scaffold
-// Idempotent — safe to re-run. Creates ~/.claude/agent-memory/nexus/agent-brain/
+// Idempotent — safe to re-run. Creates ~/agent-memory/nexus/agent-brain/ (cross-CLI neutral path)
 // Usage: node tools/graph/agent-brain-init.js
+// Override path: AGENT_MEMORY_ROOT env var
 
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { emptyGraph, readGraph, writeGraph, addNode, serializeFrontmatter } from './graph-lib.js';
+import { emptyGraph, readGraph, writeGraph, addNode, serializeFrontmatter, agentMemoryRoot } from './graph-lib.js';
 
-const brainDir = join(homedir(), '.claude', 'agent-memory', 'nexus', 'agent-brain');
+const brainDir = join(agentMemoryRoot(), 'nexus', 'agent-brain');
 const nodesDir = join(brainDir, 'nodes');
 const graphPath = join(brainDir, 'graph.json');
 
@@ -46,7 +46,7 @@ for (const agent of AGENTS) {
 writeGraph(graphPath, graph);
 
 const nodeCount = graph.nodes.length;
-const indexContent = `# Agent Brain Index — Global\n\nInitialized: ${today}\nNodes: ${nodeCount} | Edges: ${graph.edges.length}\n\n## Purpose\n\nLong-term agent memory. Compounds across all projects.\nRepo brains decay; agent brain persists forever.\n\n## Node Types\n- Agent identity: ${graph.nodes.filter(n => n.startsWith('agent-')).length}\n- Decision patterns: ${graph.nodes.filter(n => n.startsWith('pattern-')).length}\n- Task outcomes: ${graph.nodes.filter(n => n.startsWith('outcome-')).length}\n- Cross-domain: ${graph.nodes.filter(n => n.startsWith('xdomain-')).length}\n\n## Usage\n\n\`\`\`\nnode tools/graph/graph-query.js global <keywords> --brain-path="$HOME/.claude/agent-memory/nexus/agent-brain"\nnode tools/graph/graph-weight.js confidence global <source> <target> <+0.1|-0.15>\n\`\`\`\n`;
+const indexContent = `# Agent Brain Index — Global\n\nInitialized: ${today}\nNodes: ${nodeCount} | Edges: ${graph.edges.length}\n\n## Purpose\n\nLong-term agent memory. Compounds across all projects.\nShared across ALL CLIs (Claude, Gemini, Copilot) via neutral path ~/agent-memory/nexus/.\nRepo brains decay; agent brain persists forever.\n\n## Node Types\n- Agent identity: ${graph.nodes.filter(n => n.startsWith('agent-')).length}\n- Decision patterns: ${graph.nodes.filter(n => n.startsWith('pattern-')).length}\n- Task outcomes: ${graph.nodes.filter(n => n.startsWith('outcome-')).length}\n- Cross-domain: ${graph.nodes.filter(n => n.startsWith('xdomain-')).length}\n\n## Usage\n\n\`\`\`\nnode tools/graph/graph-query.js global <keywords> --brain-path="$HOME/agent-memory/nexus/agent-brain"\nnode tools/graph/graph-weight.js confidence global <source> <target> <+0.1|-0.15>\n\`\`\`\n`;
 
 writeFileSync(join(brainDir, 'INDEX.md'), indexContent, 'utf8');
 console.log(`agent-brain-init: ${nodeCount} nodes → ${brainDir}`);

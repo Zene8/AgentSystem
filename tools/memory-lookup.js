@@ -18,7 +18,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { agentMemoryRoot } from './graph/graph-lib.js';
 
 // Synonym groups — any word in a group matches any other word in the group.
 // Add domain-specific synonyms here as the system grows.
@@ -121,7 +121,7 @@ const topN = parseInt(flags.top || '5');
 const showAll = !!flags.all;
 const memoryRoot = flags['memory-root']
   ? resolve(flags['memory-root'])
-  : join(homedir(), '.claude', 'agent-memory', agentName);
+  : join(agentMemoryRoot(), agentName);
 
 if (!existsSync(memoryRoot)) {
   console.error(`No memory directory for agent "${agentName}" at ${memoryRoot}`);

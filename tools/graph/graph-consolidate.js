@@ -17,7 +17,6 @@
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
 import {
   readGraph,
   writeGraph,
@@ -25,6 +24,7 @@ import {
   serializeFrontmatter,
   decayedVisitScore,
   computeSalience,
+  agentMemoryRoot,
 } from './graph-lib.js';
 
 const args = process.argv.slice(2);
@@ -56,7 +56,7 @@ const nexusDir = flags['brain-path']
 
 const agentBrainDir = flags['agent-brain-path']
   ? resolve(flags['agent-brain-path'])
-  : join(homedir(), '.claude', 'agent-memory', 'nexus', 'agent-brain');
+  : join(agentMemoryRoot(), 'nexus', 'agent-brain');
 
 const graphPath = join(nexusDir, 'graph.json');
 const agentGraphPath = join(agentBrainDir, 'graph.json');

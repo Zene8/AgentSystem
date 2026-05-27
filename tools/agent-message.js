@@ -18,13 +18,14 @@
 //   node tools/agent-message.js --list --to=Friday   (print inbox)
 //   node tools/agent-message.js --archive --to=Friday (archive read messages)
 //
-// Message appended to: ~/.claude/agent-memory/nexus/inbox/<To>.md
+// Message appended to: ~/agent-memory/nexus/inbox/<To>.md (cross-CLI neutral path)
+// Override with AGENT_MEMORY_ROOT env var.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { agentMemoryRoot } from './graph/graph-lib.js';
 
-const INBOX_ROOT = join(homedir(), '.claude', 'agent-memory', 'nexus', 'inbox');
+const INBOX_ROOT = join(agentMemoryRoot(), 'nexus', 'inbox');
 
 const VALID_AGENTS = [
   'Jarvis', 'Friday', 'Sam', 'Ultron', 'Pym', 'Leo',

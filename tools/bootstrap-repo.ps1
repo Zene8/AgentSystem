@@ -27,7 +27,7 @@ if (-not $Slug) {
 }
 
 $ScriptDir       = $PSScriptRoot
-$RegistryPath    = Join-Path $env:USERPROFILE ".claude\agent-memory\nexus\known-repos.json"
+$RegistryPath    = if ($env:AGENT_MEMORY_ROOT) { Join-Path $env:AGENT_MEMORY_ROOT "nexus\known-repos.json" } else { Join-Path $env:USERPROFILE "agent-memory\nexus\known-repos.json" }
 $TemplateFile    = Join-Path $ScriptDir "claude-md-block.txt"
 $GraphInitScript = Join-Path $ScriptDir "graph\graph-init.js"
 $ClaudeMdPath    = Join-Path $RepoPath "CLAUDE.md"

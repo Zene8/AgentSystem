@@ -1,6 +1,13 @@
 // graph-lib.js — core graph library, zero npm dependencies
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+
+// Cross-CLI shared memory root. Neutral path — readable by Claude, Gemini, Copilot, any CLI.
+// Override with AGENT_MEMORY_ROOT env var if needed.
+export function agentMemoryRoot() {
+  return process.env.AGENT_MEMORY_ROOT || join(homedir(), 'agent-memory');
+}
 
 // --- Fix 2: Context-adaptive weight profiles ---
 // Different task modes weight graph dimensions differently.

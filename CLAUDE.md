@@ -51,13 +51,74 @@ Contact / Escalation
 - For sync script or model mapping issues, raise an issue and tag `friday` and `sam` for review.
 - Full agent documentation: see AGENTS.md
 
+## Shared Memory Root (cross-CLI)
+
+All CLIs read/write the same memory at `~/agent-memory/nexus/`.
+This is neutral — not CLI-specific. Claude, Gemini, and Copilot all use the same path.
+
+Initialize: `node tools/personal-brain-init.js --name="Your Name" --email="you@example.com"`
+Migrate existing data: `node tools/migrate-memory.js` (moves `~/.claude/agent-memory/` → `~/agent-memory/`)
+
+| Memory type | Path |
+|-------------|------|
+| User brain | `~/agent-memory/nexus/personal-brain/user-brain.md` |
+| Agent inboxes | `~/agent-memory/nexus/inbox/<AgentName>.md` |
+| Agent brain | `~/agent-memory/nexus/agent-brain/` |
+| SONA patterns | `~/agent-memory/nexus/sona-patterns.md` |
+| Shared outcomes | `~/agent-memory/nexus/shared/` |
+| Known repos | `~/agent-memory/nexus/known-repos.json` |
+
+Override path: set `AGENT_MEMORY_ROOT` env var.
+
+## Autonomous Mode ("do work")
+
+Tell any agent "do work", "continue", or "keep going" and they will:
+1. Read user brain: `~/agent-memory/nexus/personal-brain/user-brain.md`
+2. Check open GitHub issues (`gh issue list --state=open`)
+3. Pick highest priority by label (priority:high > priority:medium > unlabeled)
+4. Execute the full issue workflow without further prompting
+
+No confirmation needed for reversible actions.
+
+## Standard Issue Workflow (all agents follow this)
+
+Every task, from any entry point (Jarvis, Friday, direct agent), follows this pattern:
+
+| Step | Command |
+|------|---------|
+| Check issues | `gh issue list --state=open` |
+| Create (complex task) | `gh issue create` × 2 — Design + Implementation |
+| Create (simple task) | `gh issue create` × 1 |
+| Branch from dev | `git checkout dev && git checkout -b issue-{N}-{slug}` |
+| Do work | Dispatch to workers |
+| PR to dev | `gh pr create --base dev` |
+| Merge | `gh pr merge {N} --squash --delete-branch` |
+| Close | `gh issue close {N} --comment "Resolved in PR #{pr}"` |
+
+## Hierarchical Swarms (Claude Code only)
+
+Jarvis can spawn multiple Friday instances; Friday can spawn multiple workers.
+Use `claude -p "<task>" --agent=<name>` for parallel execution.
+Gemini/Copilot: same agent definitions, same memory, execute sequentially.
+
+## Phone Workflow
+
+GitHub mobile → New Issue → "Agent Task" template → Add label: `agent:friday`
+Runner picks up → `claude -p "$task"` runs → result posted as comment → push notification
+
+## SONA Patterns
+
+All agents log patterns to `~/agent-memory/nexus/sona-patterns.md` after significant work.
+Format: S (situation) → O (observation) → N (nodes) → A (action taken) + success flag.
+Agents read this file to avoid repeating past mistakes and reuse winning approaches.
+
 <!-- AGENT-SYSTEM-BOOTSTRAP: do not remove this block -->
 ## Agent System Context (auto-injected by bootstrap-repo.ps1)
 
 - Agent routing: see `~/.claude/CLAUDE.md`
-- Agent brain: `~/.claude/agent-memory/nexus/agent-brain/`
+- Agent brain: `~/agent-memory/nexus/agent-brain/`
 - Repo brain: `nexus/agentsystem/` (run `node tools/graph/graph-init.js agentsystem .` to refresh)
 - Query graph: `node tools/graph/graph-query.js agentsystem <keywords>`
 - Update weights: `node tools/graph/graph-weight.js visit agentsystem <source> <target>`
-- Known repos: `~/.claude/agent-memory/nexus/known-repos.json`
+- Known repos: `~/agent-memory/nexus/known-repos.json`
 <!-- END AGENT-SYSTEM-BOOTSTRAP -->
