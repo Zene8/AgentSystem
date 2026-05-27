@@ -10,11 +10,30 @@ Top-level docs
 - `sync_agents_from_repo.ps1` — syncs `.agents/` → user CLI folders (`%USERPROFILE%\.claude`, `\.copilot`, `\.gemini`)
 
 Quick start
-1. Edit or add an agent under `.agents/agents/` (follow the existing master format)
-2. Run the sync to push user copies:
+
+**First time on a new machine:**
+```powershell
+.\install.ps1                          # checks prereqs, inits brain, syncs agents, creates labels
+.\install.ps1 -Runner                  # also sets up self-hosted runner (requires admin)
+```
+
+**New repo (add AgentSystem to any project):**
+```powershell
+cd C:\path\to\your\repo
+powershell -File C:\path\to\AgentSystem\tools\bootstrap-repo.ps1
+```
+
+**After editing agents:**
 ```powershell
 powershell -File .\sync_agents_from_repo.ps1
 ```
+
+**MCP server (exposes agent tools natively in Claude Code):**
+```powershell
+npm install
+claude mcp add agentsystem -- node C:\path\to\AgentSystem\tools\mcp-server.js
+```
+MCP tools available after install: `agent_send_message`, `agent_list_inbox`, `graph_query`, `memory_read_brain`, `memory_read_agent`
 
 Design principles
 - Single source of truth: keep agent definitions in `.agents/` and sync to user CLI folders
