@@ -1,0 +1,116 @@
+name: Sam Security Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    branches: [main, dev]
+
+# New push to branch cancels in-flight audit — re-runs fresh
+concurrency:
+  group: sam-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sam-audit:
+    name: Security Audit (Sam CSO)
+    runs-on: self-hosted
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        shell: pwsh
+        run: |
+          # Cap at 400 lines — enough for full context, stays inside prompt window
+          gh pr diff ${{ github.event.pull_request.number }} `
+            | Select-Object -First 400 `
+            | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Sam security audit
+        id: audit
+        shell: pwsh
+        run: |
+          $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
+          $task = @"
+You are Sam (CSO). Run your pre-merge security audit on this pull request.
+
+PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+Base branch: ${{ github.base_ref }}
+Head branch: ${{ github.head_ref }}
+
+## Your 10-item Audit Checklist
+1. Data access patterns reviewed
+2. Auth/authz logic correct
+3. Credential handling secure (no secrets in diff)
+4. PHI exposure assessment
+5. Compliance with applicable standards
+6. Audit trail logging present
+7. Input validation at system boundaries
+8. Error messages don't leak sensitive data
+9. No secrets, API keys, or credentials in code/config
+10. Vendor contracts reviewed if new vendor with PHI
+
+## Diff
+$diff
+
+## Required Output Format
+Your FIRST LINE must be exactly one of:
+  APPROVED: <one-line summary of what was audited>
+  BLOCKED: <one-line reason for blocking>
+
+Then list each checklist item result: PASS / FAIL / N/A with a brief note.
+If BLOCKED, list each specific issue that must be resolved before merge.
+"@
+
+          $task | Out-File "$env:RUNNER_TEMP\sam-task.txt" -Encoding utf8
+          $result = claude -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
+          $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
+
+          if ($result -match "^APPROVED:") {
+            "status=approved" >> $env:GITHUB_OUTPUT
+          } else {
+            "status=blocked" >> $env:GITHUB_OUTPUT
+          }
+        continue-on-error: true
+
+      - name: Post Sam review to PR
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const status = '${{ steps.audit.outputs.status }}';
+            let result = '';
+            try {
+              result = fs.readFileSync(process.env.RUNNER_TEMP + '/sam-result.txt', 'utf8');
+            } catch (e) {
+              result = 'Error reading Sam audit output: ' + e.message;
+            }
+            if (result.length > 60000) result = result.slice(0, 60000) + '\n\n...(truncated)';
+
+            const emoji = status === 'approved' ? '✅' : '🚫';
+            const event = status === 'approved' ? 'APPROVE' : 'REQUEST_CHANGES';
+
+            // Submit as a formal GitHub review — branch protection can require it
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ github.event.pull_request.number }},
+              body: `${emoji} **Sam (CSO) — Automated Security Audit**\n\n${result}`,
+              event: event,
+            });
+
+      - name: Fail check if blocked
+        if: steps.audit.outputs.status == 'blocked'
+        run: |
+          echo "Sam blocked this PR. See review for details."
+          exit 1
