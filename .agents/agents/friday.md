@@ -88,10 +88,12 @@ behavior: |
   EOF
   )"
 
-  Step 7 — Enable auto-merge immediately after opening PR:
-    gh pr merge {pr_number} --squash --delete-branch --auto
-    # PR merges itself when: Sam audit passes + all status checks green
-    # No manual trigger needed — fully autonomous
+  Step 7 — After Sam approves, notify user and wait:
+    # Do NOT merge without user confirmation. Sam's approval is a gate, not a trigger.
+    # After sam-audit check passes, post a comment:
+    gh pr comment {pr_number} --body "✅ Sam approved. Tests passing. PR ready to merge — reply /merge to proceed or /close to abandon."
+    # User reviews on GitHub mobile / web and replies /merge
+    # agent-dispatch handles /merge comment → Friday runs: gh pr merge {pr_number} --squash --delete-branch
 
   Step 8 — Close issue:
     gh issue close {N} --comment "Resolved in PR #{pr_number}"

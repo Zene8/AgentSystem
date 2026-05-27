@@ -5,53 +5,100 @@ on:
     types: [labeled]
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
 
-# Only one agent dispatch per issue at a time
+# Only one agent dispatch per issue/PR at a time
 concurrency:
-  group: agent-dispatch-${{ github.event.issue.number }}
+  group: agent-dispatch-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   dispatch:
     runs-on: self-hosted
-    # Trigger on agent:* label OR /agent <name> comment
+    # Trigger on:
+    #   agent:* label on issue
+    #   /agent <name> comment (issue or PR) from repo owner
+    #   /merge comment on PR from repo owner → Friday merges
+    #   /close comment on PR from repo owner → Friday closes
     if: |
       (github.event_name == 'issues' &&
        startsWith(github.event.label.name, 'agent:')) ||
       (github.event_name == 'issue_comment' &&
-       startsWith(github.event.comment.body, '/agent ') &&
-       github.event.comment.user.login == github.repository_owner)
+       github.event.comment.user.login == github.repository_owner &&
+       (startsWith(github.event.comment.body, '/agent ') ||
+        github.event.comment.body == '/merge' ||
+        github.event.comment.body == '/close'))
 
     steps:
-      - name: Parse agent + task
+      - name: Parse command + task
         id: parse
         shell: pwsh
         run: |
-          if ("${{ github.event_name }}" -eq "issues") {
+          $eventName = "${{ github.event_name }}"
+          $body = @"
+          ${{ github.event.comment.body }}
+          "@
+          $body = $body.Trim()
+
+          if ($eventName -eq "issues") {
+            # Label dispatch
             $agent = "${{ github.event.label.name }}" -replace "^agent:", ""
             $task  = @"
           ${{ github.event.issue.body }}
           "@
+            "agent=$agent" >> $env:GITHUB_OUTPUT
+            "command=agent" >> $env:GITHUB_OUTPUT
+
+          } elseif ($body -eq "/merge") {
+            # Merge command on PR
+            "agent=friday" >> $env:GITHUB_OUTPUT
+            "command=merge" >> $env:GITHUB_OUTPUT
+            $prNumber = "${{ github.event.issue.number }}"
+            $task = "Be Friday (CTO). Merge PR #$prNumber with squash and delete branch. Run: gh pr merge $prNumber --squash --delete-branch"
+            $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+
+          } elseif ($body -eq "/close") {
+            # Close command on PR
+            "agent=friday" >> $env:GITHUB_OUTPUT
+            "command=close" >> $env:GITHUB_OUTPUT
+            $prNumber = "${{ github.event.issue.number }}"
+            $task = "Be Friday (CTO). Close PR #$prNumber without merging. Run: gh pr close $prNumber"
+            $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+
           } else {
-            $comment = @"
-          ${{ github.event.comment.body }}
-          "@
-            $parts = $comment.Trim() -split '\s+', 3
+            # /agent <name> <task>
+            $parts = $body -split '\s+', 3
             $agent = $parts[1]
             $task  = if ($parts.Count -gt 2) { $parts[2] } else { "${{ github.event.issue.body }}" }
+            "agent=$agent" >> $env:GITHUB_OUTPUT
+            "command=agent" >> $env:GITHUB_OUTPUT
+            $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
           }
-          echo "agent=$agent" >> $env:GITHUB_OUTPUT
-          $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+
+          if (-not (Test-Path "$env:RUNNER_TEMP\task.txt")) {
+            # Fallback write for label dispatch
+            @"
+          ${{ github.event.issue.body }}
+          "@ | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+          }
 
       - name: Post "running" acknowledgement
         uses: actions/github-script@v7
         with:
           script: |
+            const cmd = '${{ steps.parse.outputs.command }}';
+            const agent = '${{ steps.parse.outputs.agent }}';
+            const msg = cmd === 'merge'
+              ? `🔀 **Merging PR...** (Friday dispatched ${new Date().toISOString()})`
+              : cmd === 'close'
+              ? `🚫 **Closing PR...** (Friday dispatched ${new Date().toISOString()})`
+              : `⚙️ **Agent \`${agent}\` is running...** (started ${new Date().toISOString()})`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `⚙️ **Agent \`${{ steps.parse.outputs.agent }}\` is running...** (started ${new Date().toISOString()})`
+              body: msg
             });
 
       - name: Run agent (claude)
@@ -60,7 +107,6 @@ jobs:
         if: steps.parse.outputs.agent != ''
         run: |
           $task = Get-Content "$env:RUNNER_TEMP\task.txt" -Raw
-          # claude -p runs in non-interactive print mode
           $result = claude -p $task 2>&1
           $result | Out-File -FilePath "$env:RUNNER_TEMP\result.txt" -Encoding utf8
           echo "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
@@ -72,23 +118,24 @@ jobs:
           script: |
             const fs = require('fs');
             const agent = '${{ steps.parse.outputs.agent }}';
+            const cmd = '${{ steps.parse.outputs.command }}';
             let result = '';
             try {
               result = fs.readFileSync(process.env.RUNNER_TEMP + '/result.txt', 'utf8');
             } catch (e) {
               result = `Error reading result: ${e.message}`;
             }
-            // Truncate if too long for a comment (GitHub limit ~65535 chars)
             if (result.length > 60000) {
-              result = result.slice(0, 60000) + '\n\n... (truncated — output exceeded limit)';
+              result = result.slice(0, 60000) + '\n\n... (truncated)';
             }
             const exitCode = '${{ steps.run_claude.outputs.exit_code }}';
             const status = exitCode === '0' ? '✅' : '⚠️';
+            const label = cmd === 'merge' ? 'Merge' : cmd === 'close' ? 'Close' : `Agent \`${agent}\``;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `${status} **Agent \`${agent}\` result:**\n\n\`\`\`\n${result}\n\`\`\``
+              body: `${status} **${label} result:**\n\n\`\`\`\n${result}\n\`\`\``
             });
 
       - name: Remove dispatch label (reset for next use)

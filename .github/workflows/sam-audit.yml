@@ -109,6 +109,19 @@ If BLOCKED, list each specific issue that must be resolved before merge.
               event: event,
             });
 
+      - name: Post merge-ready ping (approved only)
+        if: steps.audit.outputs.status == 'approved'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.pull_request.number }},
+              body: `✅ Sam approved. Tests passing. **Ready to merge** — reply \`/merge\` to proceed or \`/close\` to abandon.`
+            });
+
       - name: Fail check if blocked
         if: steps.audit.outputs.status == 'blocked'
         run: |
