@@ -38,7 +38,7 @@
 - [ ] Identify any recurring conflict between agents — does routing need refinement?
 
 ### 2. Model Fit Review (20 min)
-- [ ] Are the assigned models (claude-opus-4-7 for Jarvis, etc.) still appropriate for each agent's workload?
+- [ ] Are the assigned models (claude-opus-4-8 for Jarvis, etc.) still appropriate for each agent's workload?
 - [ ] Any new model capabilities that should be adopted?
 - [ ] Any cost/performance tradeoffs worth adjusting?
 

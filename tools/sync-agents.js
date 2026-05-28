@@ -18,7 +18,7 @@ const HOME       = homedir();
 
 // Model assignments per CLI (mirrors config/models.yml)
 const MODELS = {
-  claude:  { jarvis:'claude-opus-4-7', sam:'claude-sonnet-4-6', friday:'claude-sonnet-4-6', nat:'claude-sonnet-4-6', ultron:'claude-sonnet-4-6', pym:'claude-sonnet-4-6', leo:'claude-sonnet-4-6', astra:'claude-sonnet-4-6', wanda:'claude-haiku-4-5-20251001', threepio:'claude-haiku-4-5-20251001', r2d2:'claude-haiku-4-5-20251001' },
+  claude:  { jarvis:'claude-opus-4-8', sam:'claude-sonnet-4-6', friday:'claude-sonnet-4-6', nat:'claude-sonnet-4-6', ultron:'claude-sonnet-4-6', pym:'claude-sonnet-4-6', leo:'claude-sonnet-4-6', astra:'claude-sonnet-4-6', wanda:'claude-haiku-4-5-20251001', threepio:'claude-haiku-4-5-20251001', r2d2:'claude-haiku-4-5-20251001' },
   gemini:  { jarvis:'gemini-3.1-pro-preview', sam:'gemini-3.1-pro-preview', friday:'gemini-3-flash-preview', nat:'gemini-3-flash-preview', ultron:'gemini-3-flash-preview', pym:'gemini-3-flash-preview', leo:'gemini-3-flash-preview', astra:'gemini-3-flash-preview', wanda:'gemini-3.1-flash-lite-preview', threepio:'gemini-3.1-flash-lite-preview', r2d2:'gemini-3.1-flash-lite-preview' },
   copilot: { jarvis:'gpt-5.2-codex', sam:'gpt-5.2-codex', friday:'gpt-5.4-mini', nat:'gpt-5.4-mini', ultron:'gpt-5.4-mini', pym:'gpt-5.4-mini', leo:'gpt-5.4-mini', astra:'gpt-5.4-mini', wanda:'gpt-5-mini', threepio:'gpt-5-mini', r2d2:'gpt-5-mini' },
 };
