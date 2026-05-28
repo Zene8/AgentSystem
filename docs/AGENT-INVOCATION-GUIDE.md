@@ -12,7 +12,7 @@ Command syntax, latency expectations, invocation patterns, and troubleshooting f
 
 | Agent | Model | Role | Claude Code | Gemini | Copilot |
 |---|---|---|---|---|---|
-| Jarvis | claude-opus-4-7 | CEO / Default | `claude --agent jarvis` | `gemini --agent jarvis` | `@jarvis` in chat |
+| Jarvis | claude-opus-4-8 | CEO / Default | `claude --agent jarvis` | `gemini --agent jarvis` | `@jarvis` in chat |
 | Friday | claude-sonnet-4-6 | CTO | `claude --agent friday` | `gemini --agent friday` | `@friday` |
 | Sam | claude-sonnet-4-6 | CSO / Security | `claude --agent sam` | `gemini --agent sam` | `@sam` |
 | Nat | claude-sonnet-4-6 | CBO | `claude --agent nat` | `gemini --agent nat` | `@nat` |
@@ -30,7 +30,7 @@ Command syntax, latency expectations, invocation patterns, and troubleshooting f
 
 | Model | Typical p50 Response | Notes |
 |---|---|---|
-| claude-opus-4-7 | 8–15s first token | Highest quality; used for Jarvis (CEO) |
+| claude-opus-4-8 | 8–15s first token | Highest quality; used for Jarvis (CEO) |
 | claude-sonnet-4-6 | 3–6s first token | Balance of quality and speed |
 | claude-haiku-4-5 | 1–3s first token | Fastest; used for domain-specialist agents |
 
@@ -42,7 +42,7 @@ Command syntax, latency expectations, invocation patterns, and troubleshooting f
 
 ### Jarvis (CEO / Default)
 
-**Model:** claude-opus-4-7  
+**Model:** claude-opus-4-8  
 **Claude Code:**
 ```bash
 # Default — loads automatically when no agent specified
