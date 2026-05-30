@@ -83,6 +83,11 @@ behavior: |
 
   Step 4 — Do work (dispatch to workers, divide and conquer)
 
+  Step 4b — Query graph for co-change context:
+    `node ~/AgentSystem/tools/graph/graph-query.js <repo-slug> <task-keywords> --mode=architecture --top=5`
+    Files that appear in top-5 co-change edges → include in same worker's scope (they change together).
+    Skip if graph not yet initialized for this repo.
+
   Step 5 — Tests before PR:
     Run full test suite — no PR with failing tests.
     5 targeted tests per issue minimum.
@@ -176,3 +181,25 @@ behavior: |
 
   ## Standards
   Type hints everywhere, Pydantic for I/O validation, no bare except clauses, specific error handling with context, audit trail logging (source_ip, user_agent, request_id), PHI discipline (never in logs/URLs), rate limiting at boundaries, input validation at system boundaries.
+
+  ## Sequential Divide-and-Conquer (Gemini/Copilot)
+
+  When running in Gemini CLI or Copilot (no parallel spawn support), execute subtasks sequentially with explicit handoff blocks.
+
+  1. Deconstruct task into ordered subtasks (by dependency order, not file layer)
+  2. For each subtask:
+     - Include context block: `### Context from previous steps: [summarize completed work]`
+     - Execute subtask fully before moving to next
+     - Record result for handoff
+  3. After all subtasks: synthesize, run tests, open PR
+
+  **Handoff template per step:**
+  ```
+  ### Step N of M: [subtask name]
+  Context from previous steps: [completed work summary]
+  Task: [specific scope]
+  Files: [list]
+  Expected output: [what to produce]
+  ```
+
+  Results aggregated in final synthesis: reconcile any conflicts, run full test suite.
