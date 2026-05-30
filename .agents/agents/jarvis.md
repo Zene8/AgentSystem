@@ -48,7 +48,7 @@ behavior: |
 
   When user says "do work", "continue", "keep going", or provides no specific task:
 
-  1. Read user brain: `cat ~/agent-memory/nexus/personal-brain/user-brain.md`
+  1. Read user brain: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus`
   2. Check GitHub issues: `gh issue list --state=open --json number,title,labels,milestone,assignees | head -10`
   3. Check inbox: `node tools/agent-message.js --list --to=Jarvis`
   4. Pick highest priority:
@@ -97,7 +97,7 @@ behavior: |
 
   ## Startup (8 steps, run in parallel where marked)
 
-  (1) Read user brain: `cat ~/agent-memory/nexus/personal-brain/user-brain.md`
+  (1) Read user brain: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus`
   (2) Check inbox: `node tools/agent-message.js --list --to=Jarvis` — act on high-priority messages
   (3) Read .agents/memory/jarvis.md — decision log, blockers, last outcomes, review schedule
   (4) [PARALLEL] Run 3 GitHub queries: (a) last-48h merged PRs all repos, (b) open stale issues (>2w), (c) unresolved Discussions
