@@ -185,3 +185,79 @@
 [2026-05-26 23:32:46] [INFO] Validating agent memory files
 [2026-05-26 23:32:46] [SUCCESS] Memory validation complete
 [2026-05-26 23:32:46] [SUCCESS] Agent definition sync complete
+[2026-05-30 17:14:18] [INFO] Starting agent definition sync...
+[2026-05-30 17:14:18] [INFO] Syncing agent: jarvis
+[2026-05-30 17:14:18] [INFO] DEBUG: jarvis metadata - name: Jarvis, model: claude-opus-4-8, description: CEO, autonomous orchestration of all agents, streamlined 8-step startup, weekly cadence review. Jarvis is the default entry agent for all sessions.
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\jarvis\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\jarvis.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\jarvis.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\jarvis.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: friday
+[2026-05-30 17:14:19] [INFO] DEBUG: friday metadata - name: Friday, model: claude-sonnet-4-6, description: CTO, autonomous engineering architecture and decisions, CANNOT merge to main without Sam's pre-merge security audit (hard gate)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\friday\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\friday.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\friday.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\friday.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: nat
+[2026-05-30 17:14:19] [INFO] DEBUG: nat metadata - name: Nat, model: claude-sonnet-4-6, description: CBO, autonomous business strategy, GTM, sales, pricing, financial commitments, revenue targets, budget allocation
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\nat\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\nat.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\nat.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\nat.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: sam
+[2026-05-30 17:14:19] [INFO] DEBUG: sam metadata - name: Sam, model: claude-sonnet-4-6, description: CSO, autonomous security and compliance, HARD GATE on all main merges (pre-merge security audit required)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\sam\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\sam.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\sam.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\sam.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: wanda
+[2026-05-30 17:14:19] [INFO] DEBUG: wanda metadata - name: Wanda, model: claude-haiku-4-5-20251001, description: Design, UX/UI, design systems, components, domain authority (escalates to Jarvis for cross-domain)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\wanda\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\wanda.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\wanda.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\wanda.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: threepio
+[2026-05-30 17:14:19] [INFO] DEBUG: threepio metadata - name: Threepio, model: claude-haiku-4-5-20251001, description: Comms & Docs — README, CHANGELOG, HANDOFF, Notion syncs, PR descriptions, release notes, email drafts, announcements. Target audiences: engineers, users, non-technical stakeholders.
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\threepio\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\threepio.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\threepio.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\threepio.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: ultron
+[2026-05-30 17:14:19] [INFO] DEBUG: ultron metadata - name: Ultron, model: claude-sonnet-4-6, description: Backend Dev, API design, deployment, services, domain authority under Friday (escalates to Friday)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\ultron\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\ultron.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\ultron.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\ultron.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: astra
+[2026-05-30 17:14:19] [INFO] DEBUG: astra metadata - name: Astra, model: claude-sonnet-4-6, description: Frontend Dev, component logic, browser testing, domain authority under Friday (escalates to Friday)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\astra\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\astra.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\astra.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\astra.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: pym
+[2026-05-30 17:14:19] [INFO] DEBUG: pym metadata - name: Pym, model: claude-sonnet-4-6, description: Database Dev, schema, migrations, pressure-testing, domain authority under Friday (escalates to Friday)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\pym\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\pym.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\pym.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\pym.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: leo
+[2026-05-30 17:14:19] [INFO] DEBUG: leo metadata - name: Leo, model: claude-sonnet-4-6, description: DevOps, CI/CD, infrastructure, observability, domain authority under Friday (escalates to Friday)
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\leo\agent.json
+[2026-05-30 17:14:19] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\leo.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\leo.md
+[2026-05-30 17:14:19] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\leo.md
+[2026-05-30 17:14:19] [INFO] Syncing agent: r2d2
+[2026-05-30 17:14:19] [INFO] DEBUG: r2d2 metadata - name: r2d2, model: claude-haiku-4-5-20251001, description: Fallback coding agent for tasks that don't fit a specialist. Use ONLY if no other agent matches. Covers prototyping, exploration, and cross-domain code tasks.
+[2026-05-30 17:14:19] [SUCCESS] Synced to Antigravity: C:\Users\natha\.gemini\antigravity-cli\agent\r2d2\agent.json
+[2026-05-30 17:14:20] [SUCCESS] Synced to Claude Code: C:\Users\natha\.claude\agents\r2d2.md
+[2026-05-30 17:14:20] [SUCCESS] Synced to Copilot: C:\Users\natha\.copilot\agents\r2d2.md
+[2026-05-30 17:14:20] [SUCCESS] Synced to Gemini: C:\Users\natha\.gemini\agents\r2d2.md
+[2026-05-30 17:14:20] [SUCCESS] Verification: All 11 agents synced to all platforms (Claude: 11, Copilot: 11, Gemini: 11, Antigravity: 11)
+[2026-05-30 17:14:20] [SUCCESS] Spot-check (jarvis): Files present (Claude: 8129 bytes, Copilot: 8115 bytes, Gemini: 8124 bytes, Antigravity: 8063 bytes).
+[2026-05-30 17:14:20] [SUCCESS] Spot-check (friday): Files present (Claude: 13451 bytes, Copilot: 13434 bytes, Gemini: 13444 bytes, Antigravity: 13386 bytes).
+[2026-05-30 17:14:20] [INFO] Validating agent memory files
+[2026-05-30 17:14:20] [SUCCESS] Memory validation complete
+[2026-05-30 17:14:20] [SUCCESS] Synced config: mcps.yml â†’ C:\Users\natha\.claude\agents\config\mcps.yml
+[2026-05-30 17:14:20] [SUCCESS] Synced config: models.yml â†’ C:\Users\natha\.claude\agents\config\models.yml
+[2026-05-30 17:14:20] [SUCCESS] Synced config: tools.yml â†’ C:\Users\natha\.claude\agents\config\tools.yml
+[2026-05-30 17:14:20] [SUCCESS] Agent definition sync complete
