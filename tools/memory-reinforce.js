@@ -2,6 +2,7 @@
 // memory-reinforce.js — CLI tool to reinforce or contradict edges in agent memory graph
 
 import { join } from 'node:path';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import {
   agentMemoryRoot,
   readGraph,
@@ -103,6 +104,17 @@ function main() {
     graph = addNode(graph, source);
     graph = addNode(graph, target);
     graph = addEdge(graph, source, target);
+
+    // Write stub .md files for new nodes
+    const nodesDir = join(agentMemoryRoot(), 'nexus', brain, 'nodes');
+    mkdirSync(nodesDir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    for (const nodeId of [source, target]) {
+      const stubPath = join(nodesDir, `${nodeId}.md`);
+      if (!existsSync(stubPath)) {
+        writeFileSync(stubPath, `---\nid: ${nodeId}\ntype: user-fact\nbrain: ${brain}\ncreated: ${today}\nrelevance_keywords: []\nhot: false\n---\n\n${nodeId}\n`);
+      }
+    }
   }
 
   // Verify edge exists
