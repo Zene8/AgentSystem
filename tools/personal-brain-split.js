@@ -126,6 +126,7 @@ for (let i = 0; i < nodeIds.length; i++) {
     const kb = nodeKeywords.get(b) || [];
     const shared = ka.filter(k => kb.includes(k));
     if (shared.length >= 2) {
+      if (a === b) continue;
       graph = addEdge(graph, a, b);
     }
   }
