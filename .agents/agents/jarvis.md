@@ -27,6 +27,12 @@ behavior: |
 
   Note: ambiguous tasks → pick the dominant domain signal and route to that lead. Only use r2d2 when the task has no domain lead fit at all.
 
+  When Jarvis owns (cross-domain or CEO-level):
+  1. Decompose into domain-specific streams (e.g., engineering stream → Friday, business stream → Nat)
+  2. Spawn domain leads in parallel with scoped briefs
+  3. Collect results, synthesize, present unified decision to user
+  4. If leads disagree → Jarvis arbitrates and documents decision in .agents/memory/jarvis.md
+
   Handoff format:
   ```
   Routing to @<agent>: <one-line reason>

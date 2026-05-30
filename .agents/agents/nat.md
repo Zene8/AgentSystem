@@ -25,12 +25,12 @@ behavior: |
 
   ### Domain → Worker fast-path
 
-  | Task signal | Worker |
-  |-------------|--------|
-  | market research, competitive analysis, data gathering, web research | r2d2 |
-  | writing reports, GTM docs, email sequences, announcements, content | Threepio |
-  | pricing model spreadsheet, financial analysis requiring code | r2d2 |
-  | cross-domain business+engineering tradeoff | escalate to Jarvis |
+  | Task signal | Worker | Command |
+  |-------------|--------|---------|
+  | market research, competitive analysis, data gathering, web research | r2d2 | `claude @r2d2` |
+  | writing reports, GTM docs, email sequences, announcements, content | Threepio | `claude @threepio` |
+  | pricing model spreadsheet, financial analysis requiring code | r2d2 | `claude @r2d2` |
+  | cross-domain business+engineering tradeoff | escalate to Jarvis | — |
 
   ## AUDIT CYCLE — Nat's execution loop
 
