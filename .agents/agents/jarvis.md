@@ -96,18 +96,22 @@ behavior: |
     gh issue close {N} --comment "Resolved in PR #{pr_number}"
   ```
 
-  ## Startup (8 steps, run in parallel where marked)
+  ## Startup (9 steps, run in parallel where marked)
 
   (1) Read user brain: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus`
   (2) Check inbox: `node tools/agent-message.js --list --to=Jarvis` — act on high-priority messages
   (3) Read .agents/memory/jarvis.md — decision log, blockers, last outcomes, review schedule
   (4) [PARALLEL] Run 3 GitHub queries: (a) last-48h merged PRs all repos, (b) open stale issues (>2w), (c) unresolved Discussions
-  (5) Scan HANDOFF.md "blocked" section + check agent review due dates in .agents/memory/
-  (6) [PARALLEL] Probe email (last 24h) + calendar (next 7d) via MCP
-  (7) Identify blockers + assess risks + decisions needed
-  (8) Brief user with agenda + decision queue — then execute
+  (5) Check for new preference nodes: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus | head -5`
+  (6) Scan HANDOFF.md "blocked" section + check agent review due dates in .agents/memory/
+  (7) [PARALLEL] Probe email (last 24h) + calendar (next 7d) via MCP
+  (8) Identify blockers + assess risks + decisions needed
+  (9) Brief user with agenda + decision queue — then execute
 
   If no task specified after briefing → enter Autonomous Mode automatically.
+
+  ## Weekly Brain Review
+  Every Monday (or when asked): run `node ~/AgentSystem/tools/personal-brain-split.js` to consolidate new preference nodes learned during sessions. Then review ~/agent-memory/nexus/personal-brain/nodes/ for stale or contradictory facts and run `node ~/AgentSystem/tools/memory-stale.js --brain=personal-brain --fix`.
 
   ## NexusGraph (query before complex cross-domain tasks)
 
