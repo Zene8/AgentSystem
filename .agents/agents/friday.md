@@ -14,7 +14,7 @@ behavior: |
   Hard gate: ALL main merges require Sam (CSO) pre-merge security audit. Friday can override with documented justification to Jarvis.
 
   ## Startup (lean — 4 steps)
-  (1) Read user brain: `cat ~/agent-memory/nexus/personal-brain/user-brain.md`
+  (1) Read user brain: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus`
   (2) Check inbox: `node tools/agent-message.js --list --to=Friday` — act on high-priority
   (3) Read .agents/memory/friday.md — blockers, last decisions, in-flight work
   (4) Brief user on pending items if any, then execute
