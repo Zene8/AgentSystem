@@ -107,7 +107,19 @@ jobs:
         if: steps.parse.outputs.agent != ''
         run: |
           $task = Get-Content "$env:RUNNER_TEMP\task.txt" -Raw
-          $result = claude -p $task 2>&1
+
+          # Classify task complexity → select model
+          $taskLen = $task.Length
+          $complexKeywords = @('architecture','security','design','cross-cutting','migration','refactor','multi-file','system','infrastructure')
+          $isComplex = ($taskLen -gt 500) -or ($complexKeywords | Where-Object { $task -match $_ } | Measure-Object).Count -gt 0
+          $isSimple  = ($taskLen -lt 200) -and -not ($task -match 'file|function|class|module|import')
+
+          $model = if ($isComplex) { 'claude-opus-4-8' }
+                   elseif ($isSimple) { 'claude-haiku-4-5-20251001' }
+                   else { 'claude-sonnet-4-6' }
+
+          "model=$model" >> $env:GITHUB_OUTPUT
+          $result = claude -p $task --model $model 2>&1
           $result | Out-File -FilePath "$env:RUNNER_TEMP\result.txt" -Encoding utf8
           echo "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
         continue-on-error: true
@@ -136,6 +148,46 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: `${status} **${label} result:**\n\n\`\`\`\n${result}\n\`\`\``
+            });
+
+      - name: Write run log
+        if: always()
+        shell: pwsh
+        run: |
+          $logDir = Join-Path $env:USERPROFILE "agent-memory\nexus\run-log"
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $issueNum = "${{ github.event.issue.number }}"
+          $logFile = Join-Path $logDir "$date-issue-$issueNum.json"
+          $result = ''
+          try { $result = Get-Content "$env:RUNNER_TEMP\result.txt" -Raw } catch {}
+          if ($result.Length -gt 10240) { $result = $result.Substring(0, 10240) + '...(truncated)' }
+          $log = @{
+            issue     = [int]$issueNum
+            agent     = "${{ steps.parse.outputs.agent }}"
+            command   = "${{ steps.parse.outputs.command }}"
+            model     = "${{ steps.run_claude.outputs.model }}"
+            exit_code = "${{ steps.run_claude.outputs.exit_code }}"
+            timestamp = (Get-Date -Format o)
+            result    = $result
+          } | ConvertTo-Json -Depth 3
+          $log | Out-File -FilePath $logFile -Encoding utf8
+
+      - name: Post failure detail
+        if: steps.run_claude.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let result = '';
+            try { result = fs.readFileSync(process.env.RUNNER_TEMP + '/result.txt', 'utf8'); } catch(e) {}
+            const last20 = result.split('\n').slice(-20).join('\n');
+            const date = new Date().toISOString().slice(0,10);
+            const issue = context.issue.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: issue,
+              body: `❌ **Agent run failed.** Last 20 lines:\n\`\`\`\n${last20}\n\`\`\`\nRun log: \`~/agent-memory/nexus/run-log/${date}-issue-${issue}.json\``
             });
 
       - name: Remove dispatch label (reset for next use)
