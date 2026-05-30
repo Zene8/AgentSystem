@@ -5,7 +5,7 @@
 
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { agentMemoryRoot } from './graph/graph-lib.js';
+import { agentMemoryRoot, emptyGraph, writeGraph } from './graph/graph-lib.js';
 
 const args = process.argv.slice(2);
 const flags = {};
@@ -108,3 +108,12 @@ writeFileSync(brainPath, content, 'utf8');
 console.log(`personal-brain-init: created ${brainPath}`);
 console.log(`Edit this file to add your preferences and goals.`);
 console.log(`Agents will read it at every session startup.`);
+
+const graphPath = join(brainDir, 'graph.json');
+if (!existsSync(graphPath)) {
+  writeGraph(graphPath, emptyGraph('agent', 'personal-brain'));
+  console.log('Created empty personal-brain graph.json — run personal-brain-split.js to populate.');
+}
+// After populating user-brain.md, run:
+//   node tools/personal-brain-split.js
+// to split into graph nodes.
