@@ -117,7 +117,7 @@ function main() {
   }
 
   // Apply --fix if requested
-  if (shouldFix && orphanedNodes.length > 0) {
+  if (shouldFix) {
     let updated = {
       ...graph,
       nodes: graph.nodes.filter(n => !orphanedNodes.includes(n)),

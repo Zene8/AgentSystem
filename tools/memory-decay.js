@@ -86,6 +86,13 @@ function main() {
   const now = Date.now();
   const archivedIds = [];
 
+  const centralityMap = new Map();
+  for (const nodeId of graph.nodes) {
+    const edgeCount = graph.edges.filter(e => e.source === nodeId || e.target === nodeId).length;
+    const centrality = graph.nodes.length <= 1 ? 0 : Math.min(1, edgeCount / (graph.nodes.length - 1));
+    centralityMap.set(nodeId, centrality);
+  }
+
   // Process each edge
   const updatedEdges = graph.edges.map(edge => {
     // Only consider active edges (valid_until is null)
@@ -93,8 +100,8 @@ function main() {
       return edge;
     }
 
-    // Compute degree centrality for source node
-    const degreeCentrality = computeDegreeCentrality(graph, edge.source);
+    // Use cached degree centrality for source node
+    const degreeCentrality = centralityMap.get(edge.source) ?? 0;
 
     // Compute decayed visit score
     const decayedVisit = decayedVisitScore(
