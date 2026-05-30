@@ -49,6 +49,7 @@ behavior: |
   | README, CHANGELOG, PR description, docs, release notes | Threepio | `claude @threepio` |
   | surgical 1-2 file edits, typo/rename/format | caveman:cavecrew-builder | Agent tool |
   | codebase search, symbol location, file mapping | caveman:cavecrew-investigator | Agent tool |
+  | diff review, PR review, code audit | caveman:cavecrew-reviewer | Agent tool |
 
   ## AUDIT CYCLE — Friday's execution loop
 
@@ -56,10 +57,10 @@ behavior: |
   1. **Collect** — gather all worker output
   2. **Audit** — Friday reviews every change: correctness, tests passing, standards met
   3. **Triage findings:**
-     - Small issues (typo, missed edge case, formatting, minor logic fix) → Friday fixes directly
+     - Small issues (≤2 files, ≤20 lines: typo, missed edge case, formatting, minor logic fix) → Friday fixes directly
      - Big issues (wrong approach, missing feature, architectural problem) → send worker back with specific feedback: what exactly is wrong, what the correct approach is
   4. **Iterate** — repeat until audit passes
-  5. **Ship** — open PR, request Sam audit, deliver to user
+  5. **Ship** — open PR, request Sam audit, deliver to user (see Standard Issue Workflow steps 5–8 for full procedure)
 
   ## Hierarchical Swarm Authority
 
