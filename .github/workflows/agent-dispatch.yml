@@ -7,6 +7,8 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  pull_request_review:
+    types: [submitted]
 
 # Only one agent dispatch per issue/PR at a time
 concurrency:
@@ -205,3 +207,47 @@ jobs:
             } catch (e) {
               // Label already removed — ignore
             }
+
+  auto-merge:
+    runs-on: self-hosted
+    if: |
+      github.event_name == 'pull_request_review' &&
+      github.event.review.state == 'approved' &&
+      github.event.review.user.login == github.repository_owner &&
+      contains(github.event.pull_request.labels.*.name, 'auto-merge-ok')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Check path safety
+        id: path_check
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = gh pr view ${{ github.event.pull_request.number }} --json files --jq '.files[].path' 2>&1
+          $unsafe = $files | Where-Object {
+            $_ -notmatch '^docs/' -and
+            $_ -notmatch '\.md$' -and
+            $_ -notmatch '^tests/' -and
+            $_ -notmatch '\.test\.js$'
+          }
+          if ($unsafe) {
+            Write-Host 'UNSAFE files detected -- skipping auto-merge:'
+            $unsafe | ForEach-Object { Write-Host "  $_" }
+            'safe=false' >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host 'All files in safe paths -- proceeding with auto-merge'
+            'safe=true' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Auto-merge
+        if: steps.path_check.outputs.safe == 'true'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr merge ${{ github.event.pull_request.number }} --squash --delete-branch
+          gh pr comment ${{ github.event.pull_request.number }} --body 'Auto-merged: docs/test-only PR, Sam approved, all checks passed.'
