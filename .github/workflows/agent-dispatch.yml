@@ -9,6 +9,8 @@ on:
     types: [created]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [ready_for_review]
 
 # Only one agent dispatch per issue/PR at a time
 concurrency:
@@ -207,6 +209,76 @@ jobs:
             } catch (e) {
               // Label already removed — ignore
             }
+
+  ambient-sam-review:
+    runs-on: self-hosted
+    # Quick Haiku-tier security scan on every PR marked ready for review.
+    # Full Sonnet audit by Sam is still required before any merge to main.
+    # Trigger on ready_for_review only (not opened) to avoid draft noise.
+    if: github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Generate diff summary
+        id: diff
+        shell: pwsh
+        run: |
+          $base = "${{ github.event.pull_request.base.sha }}"
+          $head = "${{ github.event.pull_request.head.sha }}"
+          $diff = git diff $base $head --stat 2>&1
+          $diffFull = git diff $base $head -- '*.js' '*.ts' '*.py' '*.yml' '*.yaml' '*.json' 2>&1
+          # Truncate to avoid token limits — Haiku context window is sufficient for 8k chars
+          if ($diffFull.Length -gt 8000) { $diffFull = $diffFull.Substring(0, 8000) + "`n...(truncated)" }
+          $diffFull | Out-File -FilePath "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+          "stat=$diff" >> $env:GITHUB_OUTPUT
+
+      - name: Sam ambient scan (Haiku)
+        id: sam_scan
+        shell: pwsh
+        run: |
+          $prUrl = "${{ github.event.pull_request.html_url }}"
+          $prTitle = "${{ github.event.pull_request.title }}"
+          $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
+          $prompt = @"
+          You are Sam (CSO). Perform a quick security scan of this PR diff.
+          Focus only on: (1) secrets or credentials in code, (2) auth bypasses or missing auth checks, (3) unsafe user input handling or injection risks.
+          Be concise. If clean, respond with exactly: "Sam: clean scan"
+          If issues found, list them briefly with file:line if visible.
+          PR: $prUrl
+          Title: $prTitle
+
+          Diff:
+          $diff
+          "@
+          $prompt | Out-File -FilePath "$env:RUNNER_TEMP\sam-prompt.txt" -Encoding utf8
+          $result = claude -p (Get-Content "$env:RUNNER_TEMP\sam-prompt.txt" -Raw) --model claude-haiku-4-5-20251001 2>&1
+          $result | Out-File -FilePath "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
+          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Post scan result as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let result = '';
+            try { result = fs.readFileSync(process.env.RUNNER_TEMP + '/sam-result.txt', 'utf8').trim(); }
+            catch (e) { result = `Error reading scan result: ${e.message}`; }
+            const isClean = result.toLowerCase().includes('clean scan');
+            const icon = isClean ? 'Sam: clean scan' : 'Sam: issues found';
+            const body = isClean
+              ? `Sam (ambient scan): clean scan — no secrets, auth bypasses, or injection risks detected. Full audit still required before merge to main.`
+              : `**Sam (ambient scan) — issues detected:**\n\n${result}\n\n> Full Sam audit required before merge to main.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
 
   auto-merge:
     runs-on: self-hosted

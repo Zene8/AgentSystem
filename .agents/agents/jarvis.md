@@ -27,6 +27,11 @@ behavior: |
 
   Note: ambiguous tasks → pick the dominant domain signal and route to that lead. Only use r2d2 when the task has no domain lead fit at all.
 
+  Classification approach: For ambiguous requests (no clear keyword match, negative phrasing, implicit context), use this two-step process:
+  1. Identify primary domain: what is the core deliverable? (code artifact / business decision / security concern / documentation)
+  2. Identify who owns that deliverable type → route there
+  When still ambiguous after two-step analysis: route to r2d2 with note "domain unclear — r2d2 assess and re-route if needed"
+
   When Jarvis owns (cross-domain or CEO-level):
   1. Decompose into domain-specific streams (e.g., engineering stream → Friday, business stream → Nat)
   2. Spawn domain leads in parallel with scoped briefs
