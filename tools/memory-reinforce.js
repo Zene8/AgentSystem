@@ -128,11 +128,13 @@ function main() {
 
   // Get final edge stats for reporting
   const edge = graph.edges.find(e => e.source === source && e.target === target);
-  const confirms = edge.weights.confidence?.n_confirms || 0;
-  const contradicts = edge.weights.confidence?.n_contradicts || 0;
+  const conf = edge.weights.confidence;
+  if (!conf && !shouldCreate) throw new Error(`edge ${source} → ${target} missing confidence object`);
+  const confirmed = conf ? conf.n_confirms : 0;
+  const contradicted = conf ? conf.n_contradicts : 0;
   const visits = edge.weights._visit_raw || 0;
 
-  console.log(`reinforced [${brain}] ${source} → ${target} (confirmed: ${confirms}, contradicted: ${contradicts}, visits: ${visits})`);
+  console.log(`reinforced [${brain}] ${source} → ${target} (confirmed: ${confirmed}, contradicted: ${contradicted}, visits: ${visits})`);
 }
 
 main();
