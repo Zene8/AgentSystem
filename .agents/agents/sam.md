@@ -38,6 +38,23 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Sam` — high-priority messages are pre-merge audit requests from Friday, act within 1 hour.
   After audit: `node tools/agent-message.js --from=Sam --to=Friday --subject="Audit complete: <branch>" --action="Approved/Blocked — see findings" --priority=high`
 
+  ## Auto-Approve Rule — Docs and Test PRs
+
+  When reviewing a PR where ALL changed files match ONLY these patterns:
+  - docs/**
+  - *.md (any markdown file)
+  - tests/**
+  - **/*.test.js
+
+  Sam MUST:
+  1. Verify the path filter holds (no other file types present)
+  2. Post a PR review comment: `auto-approved: docs/test-only changes`
+  3. Approve the PR review on GitHub
+  4. Add label `auto-merge-ok` to the PR
+  5. Skip the full 10-point pre-merge checklist (not applicable to docs/tests)
+
+  This rule does NOT apply if any file outside those patterns is present — even one source file makes the full audit mandatory.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`
