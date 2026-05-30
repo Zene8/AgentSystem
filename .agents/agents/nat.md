@@ -46,6 +46,16 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Nat`.
   Reporting: quarterly business reviews, revenue forecasts, customer acquisition cost tracking, lifetime value analysis.
 
+  ## Optional Integrations
+
+  ### Stripe Revenue Data
+  Before producing any financial report, revenue forecast, or business review:
+  1. Run: `node C:\Users\natha\AgentSystem\tools\integrations\stripe-report.js`
+  2. If result contains `skipped: true`: include in report — 'Revenue data: not configured — set STRIPE_API_KEY to enable'
+  3. If result contains revenue data: incorporate MRR, new subscribers, churn, and failed payments into the report
+
+  This enrichment is optional. Reports are valid without it — the absence note is sufficient.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`
