@@ -113,6 +113,36 @@ test('decayedVisitScore with degreeCentrality=1 decays slower than default', () 
   assert.ok(centralScore > 0.5, 'centralScore should be > 0.5 at 30 days');
 });
 
+// 5a. enforceEdgeCap never evicts the protectedEdge even when its composite is 0.0
+test('enforceEdgeCap does not evict protectedEdge even at composite 0.0', () => {
+  let g = emptyGraph('test', 'test');
+  g = addNode(g, 'hub');
+  for (let i = 1; i <= 16; i++) g = addNode(g, `p${i}`);
+  // 15 existing edges with composite 1..15, plus one new edge at composite 0.0
+  const edges = [];
+  for (let i = 1; i <= 15; i++) {
+    edges.push({
+      source: 'hub', target: `p${i}`,
+      weights: { last_visited: new Date().toISOString() },
+      composite: i,
+    });
+  }
+  // The "newly added" edge has composite 0.0 — would normally be evicted first
+  edges.push({ source: 'hub', target: 'p16', weights: { last_visited: null }, composite: 0.0 });
+  g = { ...g, edges };
+
+  g = enforceEdgeCap(g, 'hub', 15, { source: 'hub', target: 'p16' });
+
+  const hubEdges = g.edges.filter(e => e.source === 'hub' || e.target === 'hub');
+  assert.strictEqual(hubEdges.length, 15, `Expected 15 edges, got ${hubEdges.length}`);
+
+  // p16 (composite 0.0, protected) must survive; p1 (composite 1, lowest non-protected) removed
+  const hasP16 = g.edges.some(e => e.target === 'p16');
+  const hasP1 = g.edges.some(e => e.target === 'p1');
+  assert.strictEqual(hasP16, true, 'p16 (protected, composite 0.0) must not be evicted');
+  assert.strictEqual(hasP1, false, 'p1 (lowest non-protected composite) should be removed');
+});
+
 // 5. enforceEdgeCap removes lowest-composite edge when node exceeds 15 edges
 test('enforceEdgeCap removes lowest-composite edges to maintain cap', () => {
   let g = emptyGraph('test', 'test');

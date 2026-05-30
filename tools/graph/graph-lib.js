@@ -59,9 +59,10 @@ export function addEdge(graph, source, target) {
     },
     composite: 0.0,
   };
+  const protectedEdge = { source, target };
   let updated = { ...graph, edges: [...graph.edges, edge] };
-  updated = enforceEdgeCap(updated, source);
-  updated = enforceEdgeCap(updated, target);
+  updated = enforceEdgeCap(updated, source, 15, protectedEdge);
+  updated = enforceEdgeCap(updated, target, 15, protectedEdge);
   return updated;
 }
 
@@ -147,15 +148,25 @@ export function recomputeComposite(weights, config = {}) {
 }
 
 // Enforce a maximum edge count per node. Removes lowest-composite edges until count <= cap.
-// The newly added edge is not protected; lowest composite overall is removed.
-export function enforceEdgeCap(graph, nodeId, cap = 15) {
+// protectedEdge: { source, target } — this edge is excluded from removal candidates.
+// Tie-breaking: when composite values are equal, null last_visited is oldest (remove first).
+export function enforceEdgeCap(graph, nodeId, cap = 15, protectedEdge = null) {
   const nodeEdges = graph.edges.filter(e => e.source === nodeId || e.target === nodeId);
   if (nodeEdges.length <= cap) return graph;
-  // Sort ascending by composite — lowest first
-  const sorted = [...nodeEdges].sort((a, b) => (a.composite || 0) - (b.composite || 0));
+  const isProtected = e => protectedEdge &&
+    e.source === protectedEdge.source && e.target === protectedEdge.target;
+  const candidates = nodeEdges.filter(e => !isProtected(e));
+  // Stable sort: ascending composite, then null last_visited first (oldest)
+  const sorted = [...candidates].sort((a, b) => {
+    const diff = (a.composite || 0) - (b.composite || 0);
+    if (diff !== 0) return diff;
+    const aTime = a.weights?.last_visited ? new Date(a.weights.last_visited).getTime() : -Infinity;
+    const bTime = b.weights?.last_visited ? new Date(b.weights.last_visited).getTime() : -Infinity;
+    return aTime - bTime;
+  });
   const toRemove = new Set();
   for (let i = 0; i < nodeEdges.length - cap; i++) {
-    toRemove.add(sorted[i]);
+    if (sorted[i]) toRemove.add(sorted[i]);
   }
   const edges = graph.edges.filter(e => !toRemove.has(e));
   return { ...graph, edges };
