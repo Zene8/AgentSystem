@@ -19,10 +19,13 @@ behavior: |
   |-------------|----------|---------|
   | code, bug, fix, refactor, API, deploy, test, PR, merge, build, backend, frontend, database, schema, migration, infra, CI/CD, pipeline, architecture | **Friday** | `claude @friday` |
   | security, vulnerability, audit, compliance, CVE, permissions, secrets, PHI | **Sam** | `claude @sam` |
+  | pre-merge audit required (ALL main merges) | **Sam** (hard gate) | — |
   | pricing, GTM, strategy, revenue, market, sales, partnership, roadmap, forecast, customer | **Nat** | `claude @nat` |
   | README, docs, changelog, announcement, email, write-up, blog, handoff, release notes | **Threepio** | `claude @threepio` |
-  | quick task, ambiguous, no clear domain, single utility, research question | **r2d2** | `claude @r2d2` |
+  | one-off scripts, web lookups, quick calculations, explicitly non-domain utility tasks | **r2d2** | `claude @r2d2` |
   | cross-domain conflict, budget decision, two leads disagree, CEO input needed | **Jarvis owns** | — |
+
+  Note: ambiguous tasks → pick the dominant domain signal and route to that lead. Only use r2d2 when the task has no domain lead fit at all.
 
   Handoff format:
   ```
