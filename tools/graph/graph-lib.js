@@ -52,19 +52,22 @@ export function addEdge(graph, source, target) {
       semantic: 0.0,
       _visit_raw: 0,
       visit_count: 0.0,
-      last_visited: null,      // Fix 1: timestamp for temporal decay
-      confidence: 0.0,
-      _confidence_trials: 0,   // Fix 4: Bayesian — track sample size
+      last_visited: null,
+      confidence: { n_confirms: 0, n_contradicts: 0 },
+      valid_from: new Date().toISOString(),
+      valid_until: null,
     },
     composite: 0.0,
   };
-  return { ...graph, edges: [...graph.edges, edge] };
+  const protectedEdge = { source, target };
+  let updated = { ...graph, edges: [...graph.edges, edge] };
+  updated = enforceEdgeCap(updated, source, 15, protectedEdge);
+  updated = enforceEdgeCap(updated, target, 15, protectedEdge);
+  return updated;
 }
 
 // Fix 1: Temporal decay — visit_count decays over time without reinforcement.
 // Half-life: 30 days. An edge not touched in 30 days has half its normalized visit strength.
-// Stored visit_count remains the normalized base value. Decay applied at query time via
-// decayedVisitScore(). last_visited timestamp updated here on every increment.
 export function updateVisitCount(graph, source, target) {
   const now = new Date().toISOString();
   const edges = graph.edges.map(e => {
@@ -89,38 +92,35 @@ export function updateVisitCount(graph, source, target) {
   return { ...graph, edges: recomputed };
 }
 
-// Fix 1: Apply Ebbinghaus decay to a visit_count score at query time.
-// decayed = visit_count * 0.5^(daysSinceLast / halfLifeDays)
-// last_visited null (never visited) → returns 0.
-export function decayedVisitScore(visit_count, last_visited, now = Date.now(), halfLifeDays = 30) {
+// Apply Ebbinghaus decay to a visit_count score at query time.
+// decayed = visit_count * 0.5^(daysSinceLast / effectiveHalfLife)
+// degreeCentrality: hub nodes decay slower (more connections = more durable memory)
+export function decayedVisitScore(visit_count, last_visited, now = Date.now(), halfLifeDays = 30, degreeCentrality = 0) {
   if (!last_visited || !visit_count) return 0;
+  const alpha = 0.5;
+  const effectiveHalfLife = halfLifeDays * (1 + alpha * degreeCentrality);
   const msPerDay = 1000 * 60 * 60 * 24;
   const daysSince = (now - new Date(last_visited).getTime()) / msPerDay;
-  const decay = Math.pow(0.5, daysSince / halfLifeDays);
+  const decay = Math.pow(0.5, daysSince / effectiveHalfLife);
   return parseFloat((visit_count * decay).toFixed(4));
 }
 
-// Fix 4: Bayesian confidence updates — learning rate shrinks as evidence accumulates.
-// High-certainty patterns (many trials) barely move on a single outcome.
-// Low-certainty patterns (few trials) update aggressively — every datapoint is informative.
-// learningRate = 1.0 / (1 + n * 0.1)
-// At n=0:  rate=1.00 (full delta)
-// At n=10: rate=0.50 (half delta)
-// At n=50: rate=0.17 (small nudge)
+// Bayesian confidence updates using n_confirms / n_contradicts counts.
+// delta > 0 → increment n_confirms; delta < 0 → increment n_contradicts
+// Posterior mean = (n_confirms + 1) / (n_confirms + n_contradicts + 2)  [Laplace smoothing]
 export function updateConfidence(graph, source, target, delta) {
   const edges = graph.edges.map(e => {
     if (e.source === source && e.target === target) {
-      const n = e.weights._confidence_trials || 0;
-      const learningRate = 1.0 / (1 + n * 0.1);
-      const adjustedDelta = delta * learningRate;
-      const raw = (e.weights.confidence || 0) + adjustedDelta;
-      const clamped = parseFloat(Math.min(1.0, Math.max(0.0, raw)).toFixed(4));
+      const conf = e.weights.confidence && typeof e.weights.confidence === 'object'
+        ? { ...e.weights.confidence }
+        : { n_confirms: 0, n_contradicts: 0 };
+      if (delta > 0) conf.n_confirms += 1;
+      else if (delta < 0) conf.n_contradicts += 1;
       const updated = {
         ...e,
         weights: {
           ...e.weights,
-          confidence: clamped,
-          _confidence_trials: n + 1,
+          confidence: conf,
         },
       };
       return { ...updated, composite: recomputeComposite(updated.weights) };
@@ -130,25 +130,49 @@ export function updateConfidence(graph, source, target, delta) {
   return { ...graph, edges };
 }
 
-// Fix 2: recomputeComposite accepts mode string OR weight config object.
-// Mode string → looked up in WEIGHT_PROFILES. Unknown mode → default.
-// Config object → used directly (for backwards compatibility and custom profiles).
+// recomputeComposite accepts mode string OR weight config object.
+// Handles Bayesian confidence object by computing posterior mean.
 export function recomputeComposite(weights, config = {}) {
   const profile = typeof config === 'string'
     ? (WEIGHT_PROFILES[config] || WEIGHT_PROFILES.default)
     : { ...WEIGHT_PROFILES.default, ...config };
+  const confVal = typeof weights.confidence === 'object' && weights.confidence !== null
+    ? (weights.confidence.n_confirms + 1) / (weights.confidence.n_confirms + weights.confidence.n_contradicts + 2)
+    : (weights.confidence || 0);
   return parseFloat((
     (weights.co_change || 0) * profile.co_change +
     (weights.semantic || 0) * profile.semantic +
     (weights.visit_count || 0) * profile.visit_count +
-    (weights.confidence || 0) * profile.confidence
+    confVal * profile.confidence
   ).toFixed(4));
 }
 
+// Enforce a maximum edge count per node. Removes lowest-composite edges until count <= cap.
+// protectedEdge: { source, target } — this edge is excluded from removal candidates.
+// Tie-breaking: when composite values are equal, null last_visited is oldest (remove first).
+export function enforceEdgeCap(graph, nodeId, cap = 15, protectedEdge = null) {
+  const nodeEdges = graph.edges.filter(e => e.source === nodeId || e.target === nodeId);
+  if (nodeEdges.length <= cap) return graph;
+  const isProtected = e => protectedEdge &&
+    e.source === protectedEdge.source && e.target === protectedEdge.target;
+  const candidates = nodeEdges.filter(e => !isProtected(e));
+  // Stable sort: ascending composite, then null last_visited first (oldest)
+  const sorted = [...candidates].sort((a, b) => {
+    const diff = (a.composite || 0) - (b.composite || 0);
+    if (diff !== 0) return diff;
+    const aTime = a.weights?.last_visited ? new Date(a.weights.last_visited).getTime() : -Infinity;
+    const bTime = b.weights?.last_visited ? new Date(b.weights.last_visited).getTime() : -Infinity;
+    return aTime - bTime;
+  });
+  const toRemove = new Set();
+  for (let i = 0; i < nodeEdges.length - cap; i++) {
+    if (sorted[i]) toRemove.add(sorted[i]);
+  }
+  const edges = graph.edges.filter(e => !toRemove.has(e));
+  return { ...graph, edges };
+}
+
 // Fix 7 (issue #38): Salience tagging — high-stakes events encode stronger memories.
-// Salience multiplies into edge influence during consolidation.
-// Pass a descriptor object; each true flag contributes to salience score.
-// Max salience = 1.0 (all flags set).
 export function computeSalience({ incident = false, durationMinutes = 0, firstTimeSolve = false, presolveConfidence = 1.0 } = {}) {
   let s = 0.0;
   if (incident) s += 0.40;
@@ -159,11 +183,6 @@ export function computeSalience({ incident = false, durationMinutes = 0, firstTi
 }
 
 // Fix 8 (issue #35): Episodic memory node builder.
-// Creates a node file content string for an episode-* node.
-// sequence: ordered array of step strings ("observed: X", "action: Y")
-// context_tags: array of tags for spreading activation seeding
-// salience: use computeSalience() output
-// outcome_ref: string like "[[outcome-1071]]"
 export function buildEpisodeNode({ id, sequence = [], contextTags = [], salience = 0.0, durationMinutes = 0, outcomeRef = null, connections = [] }) {
   const created = new Date().toISOString().slice(0, 10);
   const frontmatter = {
@@ -182,15 +201,11 @@ export function buildEpisodeNode({ id, sequence = [], contextTags = [], salience
   return serializeFrontmatter(frontmatter, body);
 }
 
-// Fix 9 (issue #39): Cross-agent memory propagation.
-// Returns true if outcome meets propagation threshold (auto-copy to nexus/shared/).
-// Callers must do the actual file write — this is the gate check only.
+// Fix 9 (issue #39): Cross-agent memory propagation gate check.
 export function shouldPropagate(confidence, salience) {
   return confidence >= 0.8 && salience >= 0.7;
 }
 
-// Build the shared memory entry content from an existing outcome node.
-// audience: array of agent slugs who should load this memory.
 export function buildSharedMemoryEntry({ id, body, confidence, salience, sourceAgent, audience = [] }) {
   const created = new Date().toISOString().slice(0, 10);
   const frontmatter = {
@@ -212,50 +227,61 @@ export function pruneOrphanedEdges(graph) {
   return { ...graph, edges };
 }
 
-// Fix 3: Spreading activation — multi-hop traversal with decay per hop.
-// Surfaces non-obvious connections that direct lookup misses.
-// seedNodes: array of node IDs to start from (each starts at strength 1.0)
-// maxHops: how many hops to traverse (default 3)
-// decayPerHop: strength multiplier per hop × edge composite (default 0.5)
-// threshold: stop spreading when activation < threshold (default 0.1)
-// Returns Map(nodeId → activation_strength), excluding seed nodes.
+// Spreading activation — multi-hop traversal with decay per hop.
+// lateralInhibition: after each hop, keep top M=7 nodes at full strength,
+// apply β=0.15 penalty to the rest to prevent hub nodes from dominating.
 export function spreadingActivation(graph, seedNodes, {
   maxHops = 3,
   decayPerHop = 0.5,
   threshold = 0.1,
+  lateralInhibition = true,
 } = {}) {
   const activation = new Map();
   const seedSet = new Set(seedNodes);
 
-  // Initialize frontier with seed nodes at full strength
   let frontier = new Map(seedNodes.map(n => [n, 1.0]));
 
   for (let hop = 0; hop < maxHops; hop++) {
     const nextFrontier = new Map();
 
     for (const [nodeId, strength] of frontier) {
-      // Find all edges connecting to this node (bidirectional)
       const edges = graph.edges.filter(
         e => e.source === nodeId || e.target === nodeId
       );
 
       for (const edge of edges) {
         const neighbor = edge.source === nodeId ? edge.target : edge.source;
-        // Strength decays by hop factor × edge composite strength
         const newStrength = strength * decayPerHop * (edge.composite || 0.01);
 
         if (newStrength < threshold) continue;
 
-        // Keep maximum activation if node reachable via multiple paths
         const existing = nextFrontier.get(neighbor) ?? 0;
         if (newStrength > existing) {
           nextFrontier.set(neighbor, newStrength);
         }
 
-        // Record in overall activation map (max across all hops)
         const globalExisting = activation.get(neighbor) ?? 0;
         if (newStrength > globalExisting) {
           activation.set(neighbor, parseFloat(newStrength.toFixed(4)));
+        }
+      }
+    }
+
+    // Lateral inhibition: keep top M=7 nodes at full strength, penalise rest
+    if (lateralInhibition && nextFrontier.size > 0) {
+      const M = 7;
+      const beta = 0.15;
+      const sorted = [...nextFrontier.entries()].sort((a, b) => b[1] - a[1]);
+      for (let i = M; i < sorted.length; i++) {
+        const [nodeId, str] = sorted[i];
+        const inhibited = str * (1 - beta);
+        nextFrontier.set(nodeId, inhibited);
+        // Update global activation map with inhibited value if it was previously set from this hop
+        const globalExisting = activation.get(nodeId) ?? 0;
+        if (inhibited < globalExisting) {
+          // Don't reduce global — global tracks max across hops; inhibition is frontier-local
+        } else {
+          activation.set(nodeId, parseFloat(inhibited.toFixed(4)));
         }
       }
     }
@@ -264,7 +290,6 @@ export function spreadingActivation(graph, seedNodes, {
     if (frontier.size === 0) break;
   }
 
-  // Remove seed nodes from results (they seeded the search, not the findings)
   for (const seed of seedSet) {
     activation.delete(seed);
   }

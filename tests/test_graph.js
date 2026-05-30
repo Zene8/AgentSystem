@@ -56,8 +56,12 @@ test('addEdge adds edge with zero weights if not present', () => {
   assert.equal(g2.edges[0].source, 'a');
   assert.equal(g2.edges[0].target, 'b');
   assert.equal(g2.edges[0].weights.co_change, 0.0);
-  assert.equal(g2.edges[0].weights.confidence, 0.0);
-  assert.equal(g2.edges[0].weights.last_visited, null); // Fix 1: new field
+  // Bayesian confidence: object with n_confirms/n_contradicts
+  assert.deepEqual(g2.edges[0].weights.confidence, { n_confirms: 0, n_contradicts: 0 });
+  assert.equal(g2.edges[0].weights.last_visited, null);
+  // Bitemporal: valid_from set, valid_until null
+  assert.ok(g2.edges[0].weights.valid_from, 'valid_from should be set');
+  assert.equal(g2.edges[0].weights.valid_until, null);
   const g3 = addEdge(g2, 'a', 'b');
   assert.equal(g3.edges.length, 1);
 });
@@ -80,16 +84,20 @@ test('updateVisitCount increments raw, renormalizes, and sets last_visited', () 
   assert.ok(ts >= before && ts <= after, 'last_visited should be current time');
 });
 
-test('updateConfidence clamps to [0,1]', () => {
+test('updateConfidence increments n_confirms or n_contradicts', () => {
   let g = emptyGraph('agent', 'test');
   g = addNode(addNode(g, 'a'), 'b');
   g = addEdge(g, 'a', 'b');
-  g.edges[0].weights.confidence = 0.9;
-  g = updateConfidence(g, 'a', 'b', 0.2);
-  assert.equal(g.edges[0].weights.confidence, 1.0);
-  g.edges[0].weights.confidence = 0.1;
-  g = updateConfidence(g, 'a', 'b', -0.15);
-  assert.equal(g.edges[0].weights.confidence, 0.0);
+  g = updateConfidence(g, 'a', 'b', 1);
+  assert.equal(g.edges[0].weights.confidence.n_confirms, 1);
+  assert.equal(g.edges[0].weights.confidence.n_contradicts, 0);
+  g = updateConfidence(g, 'a', 'b', -1);
+  assert.equal(g.edges[0].weights.confidence.n_confirms, 1);
+  assert.equal(g.edges[0].weights.confidence.n_contradicts, 1);
+  // Posterior mean: (1+1)/(1+1+2) = 2/4 = 0.5
+  const conf = g.edges[0].weights.confidence;
+  const posterior = (conf.n_confirms + 1) / (conf.n_confirms + conf.n_contradicts + 2);
+  assert.equal(posterior, 0.5);
 });
 
 test('recomputeComposite uses correct default formula', () => {
@@ -301,51 +309,50 @@ test('spreadingActivation: empty seed returns empty map', () => {
 
 // ── Fix 4: Bayesian confidence tests (#33) ───────────────────────────────────
 
-test('updateConfidence: first trial applies full delta', () => {
+test('updateConfidence: confirm increments n_confirms, posterior rises', () => {
   let g = emptyGraph('agent', 'test');
   g = addNode(addNode(g, 'a'), 'b');
   g = addEdge(g, 'a', 'b');
-  // n=0: learningRate = 1/(1+0*0.1) = 1.0 → full delta applied
-  g = updateConfidence(g, 'a', 'b', 0.2);
-  const edge = g.edges[0];
-  assert.equal(edge.weights._confidence_trials, 1);
-  // 0.0 + 0.2 * 1.0 = 0.2
-  assert.equal(edge.weights.confidence, 0.2);
+  g = updateConfidence(g, 'a', 'b', 1);
+  g = updateConfidence(g, 'a', 'b', 1);
+  const conf = g.edges[0].weights.confidence;
+  assert.equal(conf.n_confirms, 2);
+  assert.equal(conf.n_contradicts, 0);
+  // Posterior: (2+1)/(2+0+2) = 3/4 = 0.75
+  const posterior = (conf.n_confirms + 1) / (conf.n_confirms + conf.n_contradicts + 2);
+  assert.equal(posterior, 0.75);
 });
 
-test('updateConfidence: 10th trial applies half delta', () => {
+test('updateConfidence: contradict increments n_contradicts, posterior falls', () => {
   let g = emptyGraph('agent', 'test');
   g = addNode(addNode(g, 'a'), 'b');
   g = addEdge(g, 'a', 'b');
-  g.edges[0].weights._confidence_trials = 10;
-  g.edges[0].weights.confidence = 0.5;
-  // n=10: learningRate = 1/(1+10*0.1) = 1/2 = 0.5 → delta * 0.5
-  g = updateConfidence(g, 'a', 'b', 0.2);
-  const edge = g.edges[0];
-  assert.equal(edge.weights._confidence_trials, 11);
-  // 0.5 + 0.2 * 0.5 = 0.6
-  assert.equal(edge.weights.confidence, 0.6);
+  // seed 9 confirms first
+  for (let i = 0; i < 9; i++) g = updateConfidence(g, 'a', 'b', 1);
+  const beforeConf = g.edges[0].weights.confidence;
+  const beforePosterior = (beforeConf.n_confirms + 1) / (beforeConf.n_confirms + beforeConf.n_contradicts + 2);
+  g = updateConfidence(g, 'a', 'b', -1);
+  const conf = g.edges[0].weights.confidence;
+  const afterPosterior = (conf.n_confirms + 1) / (conf.n_confirms + conf.n_contradicts + 2);
+  assert.ok(afterPosterior < beforePosterior, 'posterior should decrease after contradiction');
+  assert.equal(conf.n_contradicts, 1);
 });
 
-test('updateConfidence: high-certainty pattern barely moves on failure', () => {
+test('updateConfidence: many confirms → posterior near 1, many contradicts → near 0', () => {
   let g = emptyGraph('agent', 'test');
   g = addNode(addNode(g, 'a'), 'b');
   g = addEdge(g, 'a', 'b');
-  g.edges[0].weights._confidence_trials = 50;
-  g.edges[0].weights.confidence = 0.9;
-  // n=50: learningRate = 1/(1+50*0.1) = 1/6 ≈ 0.167
-  g = updateConfidence(g, 'a', 'b', -0.15);
-  const edge = g.edges[0];
-  // 0.9 + (-0.15 * 0.167) ≈ 0.9 - 0.025 = 0.875 (barely moved)
-  assert.ok(edge.weights.confidence > 0.87, `Expected > 0.87, got ${edge.weights.confidence}`);
-  assert.ok(edge.weights.confidence < 0.9, 'Should have decreased slightly');
+  for (let i = 0; i < 20; i++) g = updateConfidence(g, 'a', 'b', 1);
+  const conf = g.edges[0].weights.confidence;
+  const posterior = (conf.n_confirms + 1) / (conf.n_confirms + conf.n_contradicts + 2);
+  assert.ok(posterior > 0.9, `Expected posterior > 0.9, got ${posterior}`);
 });
 
-test('addEdge: new edges have _confidence_trials = 0', () => {
+test('addEdge: new edges init with { n_confirms: 0, n_contradicts: 0 }', () => {
   let g = emptyGraph('agent', 'test');
   g = addNode(addNode(g, 'a'), 'b');
   g = addEdge(g, 'a', 'b');
-  assert.equal(g.edges[0].weights._confidence_trials, 0);
+  assert.deepEqual(g.edges[0].weights.confidence, { n_confirms: 0, n_contradicts: 0 });
 });
 
 // ── Fix 7: Salience tagging tests (#38) ──────────────────────────────────────
