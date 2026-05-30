@@ -104,6 +104,27 @@ behavior: |
   Step 1 — Read current issues:
     gh issue list --state=open --json number,title,labels,body | head -10
 
+  Step 1b — Memory search before ANY work:
+    node ~/AgentSystem/tools/memory-search.js --query="<task description keywords>" --top=3
+    Include top results in worker prompts as: "Prior context: [result summaries]"
+    If any result scores > 0.7: flag to user before proceeding ("Similar past work found: [summary]")
+
+  Step 1c — Spec smell-check (tasks touching >3 files):
+    Before spawning workers, evaluate the task spec for:
+    - Undefined edge cases (inputs with no error path)
+    - Missing rollback/undo path for destructive operations
+    - Implicit scope (spec implies changes beyond what's stated)
+    - Conflicts with recent decisions: node ~/AgentSystem/tools/decision-log.js --search --query="<task keywords>"
+    Output: list of concerns with confidence (high/medium/low).
+    High-confidence concern → resolve before spawning.
+    Medium → flag to user.
+    Low → note in PR description.
+
+  Step 1d — Decision log search (architecture tasks only, >5 files):
+    node ~/AgentSystem/tools/decision-log.js --search --query="<task keywords>"
+    If matching decision found: include in worker prompt.
+    If task contradicts a decision: flag to user before proceeding.
+
   Step 2 — Create issues (only if user gives new task, not existing issue):
     Complex (multiple concerns, >1 day work) → create 2 issues:
       gh issue create --title "[Feature]: Design" \
@@ -125,6 +146,9 @@ behavior: |
     b. Query co-change graph: `node ~/AgentSystem/tools/graph/graph-query.js <repo-slug> <task-keywords> --mode=architecture --top=5`
     c. Spawn all workers in ONE parallel batch — single message, multiple agent calls
     d. Include in each worker prompt: user brain prefs, issue number, full task scope, relevant co-change files
+    e. Initialize shared scratchpad:
+       node ~/AgentSystem/tools/task-scratchpad.js --init --issue={N} --workers="<worker-list>"
+       Include in each worker prompt: "Write discoveries to scratchpad: node ~/AgentSystem/tools/task-scratchpad.js --write --issue={N} --agent=<yourname> --message='<discovery>'. Check scratchpad before starting: node ~/AgentSystem/tools/task-scratchpad.js --read --issue={N}"
 
   Step 5 — Tests before PR:
     Run full test suite — no PR with failing tests.
