@@ -18,7 +18,15 @@
 - Never bypass permission checks with --no-verify flags.
 
 ## Memory (shared graph brain)
-- Retrieve, don't `ls`+read: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access` (~110 tokens, not 47k). `--record-access` strengthens recalled facts (reconsolidation).
-- Startup orientation (user + project + recent): `node ~/AgentSystem/tools/memory-context.js`.
-- Write-back: when you learn a durable fact about Nathan, persist it — `node ~/AgentSystem/tools/brain-remember.js --fact="..." --section="How I Like to Work"`. Dedups automatically. Don't store conversation-only trivia.
+- **Preferred interface:** `node ~/AgentSystem/tools/memory.js <cmd>` — unified entrypoint for all memory operations.
+  - `memory recall <keywords...>` — query graph brain, records access for reconsolidation
+  - `memory context [--core=N]` — startup orientation: user facts + project + recent SONA
+  - `memory remember --fact="..." [--section="..."]` — write a durable fact, deduped automatically
+  - `memory reflect [--top=N] [--dry-run]` — generative reflection pass (LLM)
+  - `memory maintain [--if-stale=N] [--quiet]` — full maintenance pass
+  - `memory help` — usage
+- **Underlying tools (still valid directly):**
+  - Retrieve: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access`
+  - Startup orientation: `node ~/AgentSystem/tools/memory-context.js`
+  - Write-back: `node ~/AgentSystem/tools/brain-remember.js --fact="..." --section="How I Like to Work"`
 - Maintenance (split/decay/consolidate/reflect) runs automatically on session start when stale; no manual step needed.
