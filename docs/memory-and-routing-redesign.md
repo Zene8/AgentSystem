@@ -165,3 +165,36 @@ Target: trivial query **47k → ~1-2k tokens**.
 **Harness:** Claude Code hooks [code.claude.com/docs/en/hooks-guide]; subagents [code.claude.com/docs/en/sub-agents].
 
 **Internal:** `tools/graph/graph-lib.js`, `graph-query.js`; `tools/personal-brain-split.js`; `tools/sona-append.js`, `decision-log.js`, `graph-consolidate.js` (orphaned); `.github/workflows/scheduled-tasks.yml`; `.agents/agents/jarvis.md`.
+
+---
+
+## 8. Router honest state + "who am I" manual check (2026-06-03)
+
+### What the hook actually does
+
+`~/.claude/hooks/memory-router.js` runs as a `UserPromptSubmit` hook. It classifies the prompt with a regex map and writes an advisory routing hint to stdout. The harness prepends that hint to the prompt before the main loop sees it.
+
+**Hard constraint:** the hook is advisory only. The harness passes the hint as context — it cannot reroute to a different agent. There is no `PreToolUse` intercept for routing.
+
+### Trust augmentation (added 2026-06-03)
+
+The hook now dynamically imports `tools/agent-trust.js` and appends the matched lead's trust score to the hint — e.g. `[trust: 82%]`. If trust < 0.60 it adds `— trust low: consider review or pair`. Falls back silently on file-not-found or parse error.
+
+Format note: `trust-scores.md` on disk uses the hand/`/task-outcome`-maintained format (Score column as 0–1 float). `compute-trust-scores.js` emits a different format (Success Rate column as percentage, from run-log JSON). The parser in `agent-trust.js` handles both. The generator/consumer divergence is a known gap — `compute-trust-scores.js` and the on-disk file are not yet unified.
+
+### Fresh-session "who am I" verification
+
+To confirm the identity-query short-circuit is working in a new session:
+
+1. Open a fresh Claude Code session (no prior context).
+2. Type: `who am I`
+3. Expected: response answers inline from the personal brain graph (~100-500 tokens). It should NOT spawn Jarvis or any subagent.
+4. If it spawns Jarvis or uses >2k tokens: the hook is not firing. Check `~/.claude/settings.json` — `hooks.UserPromptSubmit` must point to `memory-router.js`. Verify with: `node ~/.claude/hooks/memory-router.js` ← type `{"prompt":"who am I"}` on stdin.
+
+### To verify the trust annotation:
+
+```
+echo '{"prompt":"fix the bug in the auth api"}' | node ~/.claude/hooks/memory-router.js
+```
+
+Expected output contains `[trust: 82%]` (Friday's current score). No throw, exits 0.

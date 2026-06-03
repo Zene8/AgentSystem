@@ -149,9 +149,14 @@ behavior: |
     b. Query co-change graph: `node ~/AgentSystem/tools/graph/graph-query.js <repo-slug> <task-keywords> --mode=architecture --top=5`
     c. Spawn all workers in ONE parallel batch — single message, multiple agent calls
     d. Include in each worker prompt: user brain prefs, issue number, full task scope, relevant co-change files
-    e. Initialize shared scratchpad:
+    e. Initialize shared scratchpad and log cross-cutting decisions:
+       # Init scratchpad for shared worker state (run once per issue before spawning)
        node ~/AgentSystem/tools/task-scratchpad.js --init --issue={N} --workers="<worker-list>"
-       Include in each worker prompt: "Write discoveries to scratchpad: node ~/AgentSystem/tools/task-scratchpad.js --write --issue={N} --agent=<yourname> --message='<discovery>'. Check scratchpad before starting: node ~/AgentSystem/tools/task-scratchpad.js --read --issue={N}"
+       # Include in each worker prompt:
+       #   "Before starting: node ~/AgentSystem/tools/task-scratchpad.js --read --issue={N}"
+       #   "Write discoveries: node ~/AgentSystem/tools/task-scratchpad.js --write --issue={N} --agent=<yourname> --message='<finding>'"
+       # Log architectural decisions that affect multiple workers (run when deciding approach):
+       node ~/AgentSystem/tools/decision-log.js --write --title="<decision>" --decision="<what>" --rationale="<why>" --agent=Friday
 
   Step 5 — Tests before PR:
     Run full test suite — no PR with failing tests.

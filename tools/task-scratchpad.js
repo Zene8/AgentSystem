@@ -47,7 +47,7 @@ function deriveProjectSlug() {
 }
 
 const projectSlug = deriveProjectSlug();
-const nexusDir    = join(homedir(), 'agent-memory', 'nexus');
+const nexusDir    = process.env.AGENT_MEMORY_ROOT || join(homedir(), 'agent-memory', 'nexus');
 const tasksDir    = join(nexusDir, 'tasks', projectSlug, `issue-${issueN}`);
 const archiveBase = join(nexusDir, 'tasks', 'archive', projectSlug);
 const scratchpad  = join(tasksDir, 'scratchpad.md');
