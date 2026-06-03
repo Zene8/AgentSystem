@@ -8,7 +8,7 @@ param(
 function Write-Status {
     param(
         [string]$Message,
-        [ValidateSet("SUCCESS", "ERROR", "INFO")]
+        [ValidateSet("SUCCESS", "ERROR", "INFO", "WARNING")]
         [string]$Type = "INFO"
     )
 
@@ -16,6 +16,7 @@ function Write-Status {
     $color = switch ($Type) {
         "SUCCESS" { "Green" }
         "ERROR" { "Red" }
+        "WARNING" { "Yellow" }
         "INFO" { "Cyan" }
     }
 
@@ -69,6 +70,16 @@ function Get-MasterAgentDefinition {
     }
 
     return $content
+}
+
+# Helper: Compute SHA256 hash of a UTF-8 string (no BOM)
+function Get-StringHash {
+    param([string]$Text)
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Text)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $sha256.ComputeHash($bytes)
+    $sha256.Dispose()
+    return ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLower()
 }
 
 # Helper: Initialize log directory only (agent directories created by sync functions)
@@ -345,19 +356,26 @@ function Sync-AntigravityAgent {
         # Convert Markdown to JSON
         $jsonContent = ConvertTo-AgentJson -Content $Content
 
+        # Dirty-check: skip write if destination already matches
+        $expectedHash = Get-StringHash -Text $jsonContent
+        if ((Test-Path $targetPath) -and ((Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower() -eq $expectedHash)) {
+            Write-Status "Skipped (unchanged): $targetPath" "INFO"
+            return
+        }
+
         # Write JSON file
         [System.IO.File]::WriteAllText($targetPath, $jsonContent, [System.Text.UTF8Encoding]::new($false))
 
-        # Verify file was actually written
+        # Verify file was actually written with correct content
         if (-not (Test-Path $targetPath)) {
             Write-Status "ERROR: File not found after write: $targetPath" "ERROR"
             $SyncFailed.Value = $true
             return
         }
 
-        $writtenContent = Get-Content -Path $targetPath -Raw -Encoding UTF8
-        if ($writtenContent.Length -ne $jsonContent.Length) {
-            Write-Status "ERROR: Written content size mismatch for $targetPath (expected $($jsonContent.Length), got $($writtenContent.Length))" "ERROR"
+        $actualHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
+        if ($actualHash -ne $expectedHash) {
+            Write-Status "ERROR: Content hash mismatch after write for $targetPath (expected $expectedHash, got $actualHash)" "ERROR"
             $SyncFailed.Value = $true
             return
         }
@@ -434,10 +452,24 @@ function Sync-GeminiAgent {
 
         $contentWithFrontmatter = Add-GeminiYamlFrontmatter -AgentName $AgentName -Content $Content
 
+        # Dirty-check: skip write if destination already matches
+        $expectedHash = Get-StringHash -Text $contentWithFrontmatter
+        if ((Test-Path $targetPath) -and ((Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower() -eq $expectedHash)) {
+            Write-Status "Skipped (unchanged): $targetPath" "INFO"
+            return
+        }
+
         [System.IO.File]::WriteAllText($targetPath, $contentWithFrontmatter, [System.Text.UTF8Encoding]::new($false))
 
         if (-not (Test-Path $targetPath)) {
             Write-Status "ERROR: File not found after write: $targetPath" "ERROR"
+            $SyncFailed.Value = $true
+            return
+        }
+
+        $actualHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
+        if ($actualHash -ne $expectedHash) {
+            Write-Status "ERROR: Content hash mismatch after write for $targetPath (expected $expectedHash, got $actualHash)" "ERROR"
             $SyncFailed.Value = $true
             return
         }
@@ -470,18 +502,25 @@ function Sync-ClaudeCodeAgent {
         # Add YAML frontmatter for Claude Code format
         $contentWithFrontmatter = Add-ClaudeYamlFrontmatter -AgentName $AgentName -Content $Content
 
+        # Dirty-check: skip write if destination already matches
+        $expectedHash = Get-StringHash -Text $contentWithFrontmatter
+        if ((Test-Path $targetPath) -and ((Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower() -eq $expectedHash)) {
+            Write-Status "Skipped (unchanged): $targetPath" "INFO"
+            return
+        }
+
         [System.IO.File]::WriteAllText($targetPath, $contentWithFrontmatter, [System.Text.UTF8Encoding]::new($false))
 
-        # Verify file was actually written
+        # Verify file was actually written with correct content
         if (-not (Test-Path $targetPath)) {
             Write-Status "ERROR: File not found after write: $targetPath" "ERROR"
             $SyncFailed.Value = $true
             return
         }
 
-        $writtenContent = Get-Content -Path $targetPath -Raw -Encoding UTF8
-        if ($writtenContent.Length -ne $contentWithFrontmatter.Length) {
-            Write-Status "ERROR: Written content size mismatch for $targetPath (expected $($contentWithFrontmatter.Length), got $($writtenContent.Length))" "ERROR"
+        $actualHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
+        if ($actualHash -ne $expectedHash) {
+            Write-Status "ERROR: Content hash mismatch after write for $targetPath (expected $expectedHash, got $actualHash)" "ERROR"
             $SyncFailed.Value = $true
             return
         }
@@ -514,18 +553,25 @@ function Sync-CopilotAgent {
         # Add YAML frontmatter for GitHub Copilot format
         $contentWithFrontmatter = Add-CopilotYamlFrontmatter -AgentName $AgentName -Content $Content
 
+        # Dirty-check: skip write if destination already matches
+        $expectedHash = Get-StringHash -Text $contentWithFrontmatter
+        if ((Test-Path $targetPath) -and ((Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower() -eq $expectedHash)) {
+            Write-Status "Skipped (unchanged): $targetPath" "INFO"
+            return
+        }
+
         [System.IO.File]::WriteAllText($targetPath, $contentWithFrontmatter, [System.Text.UTF8Encoding]::new($false))
 
-        # Verify file was actually written
+        # Verify file was actually written with correct content
         if (-not (Test-Path $targetPath)) {
             Write-Status "ERROR: File not found after write: $targetPath" "ERROR"
             $SyncFailed.Value = $true
             return
         }
 
-        $writtenContent = Get-Content -Path $targetPath -Raw -Encoding UTF8
-        if ($writtenContent.Length -ne $contentWithFrontmatter.Length) {
-            Write-Status "ERROR: Written content size mismatch for $targetPath (expected $($contentWithFrontmatter.Length), got $($writtenContent.Length))" "ERROR"
+        $actualHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
+        if ($actualHash -ne $expectedHash) {
+            Write-Status "ERROR: Content hash mismatch after write for $targetPath (expected $expectedHash, got $actualHash)" "ERROR"
             $SyncFailed.Value = $true
             return
         }
@@ -598,7 +644,8 @@ if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $
     $geminiPath = "$env:USERPROFILE\.gemini\agents\jarvis.md"
 
     if ((Test-Path $masterPath) -and (Test-Path $claudePath) -and (Test-Path $copilotPath) -and (Test-Path $antigravityPath) -and (Test-Path $geminiPath)) {
-        $masterSize = (Get-Item $masterPath).Length
+        $claudeHash = (Get-FileHash -Path $claudePath -Algorithm SHA256).Hash.ToLower()
+        $copilotHash = (Get-FileHash -Path $copilotPath -Algorithm SHA256).Hash.ToLower()
         $claudeSize = (Get-Item $claudePath).Length
         $copilotSize = (Get-Item $copilotPath).Length
         $antigravitySize = (Get-Item $antigravityPath).Length
@@ -606,9 +653,14 @@ if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $
 
         # Verify files exist and are non-empty (frontmatter/body transformations may change size)
         if ($claudeSize -gt 0 -and $copilotSize -gt 0 -and $antigravitySize -gt 0 -and $geminiSize -gt 0) {
-            Write-Status "Spot-check (jarvis): Files present (Claude: $claudeSize bytes, Copilot: $copilotSize bytes, Gemini: $geminiSize bytes, Antigravity: $antigravitySize bytes)." "SUCCESS"
+            Write-Status "Spot-check (jarvis): Claude=$claudeHash Copilot=$copilotHash (sizes: Claude=$claudeSize, Copilot=$copilotSize, Gemini=$geminiSize, Antigravity=$antigravitySize)." "SUCCESS"
+            # Claude and Copilot have different frontmatter (different model keys) so hashes legitimately differ;
+            # warn only if they are unexpectedly identical (would indicate a frontmatter injection bug)
+            if ($claudeHash -eq $copilotHash) {
+                Write-Status "WARNING: Claude and Copilot hashes are identical for jarvis — frontmatter may not have been applied correctly" "WARNING"
+            }
         } else {
-            Write-Status "ERROR: Content verification failed for jarvis - Master: $masterSize, Claude: $claudeSize, Copilot: $copilotSize, Antigravity: $antigravitySize" "ERROR"
+            Write-Status "ERROR: Content verification failed for jarvis - Claude: $claudeSize bytes, Copilot: $copilotSize bytes, Antigravity: $antigravitySize bytes" "ERROR"
             $verificationPassed = $false
         }
     } else {
@@ -624,7 +676,8 @@ if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $
     $geminiPath = "$env:USERPROFILE\.gemini\agents\friday.md"
 
     if ((Test-Path $masterPath) -and (Test-Path $claudePath) -and (Test-Path $copilotPath) -and (Test-Path $antigravityPath) -and (Test-Path $geminiPath)) {
-        $masterSize = (Get-Item $masterPath).Length
+        $claudeHash = (Get-FileHash -Path $claudePath -Algorithm SHA256).Hash.ToLower()
+        $copilotHash = (Get-FileHash -Path $copilotPath -Algorithm SHA256).Hash.ToLower()
         $claudeSize = (Get-Item $claudePath).Length
         $copilotSize = (Get-Item $copilotPath).Length
         $antigravitySize = (Get-Item $antigravityPath).Length
@@ -632,9 +685,12 @@ if ($claudeCount -eq $expectedCount -and $copilotCount -eq $expectedCount -and $
 
         # Verify files exist and are non-empty (frontmatter/body transformations may change size)
         if ($claudeSize -gt 0 -and $copilotSize -gt 0 -and $antigravitySize -gt 0 -and $geminiSize -gt 0) {
-            Write-Status "Spot-check (friday): Files present (Claude: $claudeSize bytes, Copilot: $copilotSize bytes, Gemini: $geminiSize bytes, Antigravity: $antigravitySize bytes)." "SUCCESS"
+            Write-Status "Spot-check (friday): Claude=$claudeHash Copilot=$copilotHash (sizes: Claude=$claudeSize, Copilot=$copilotSize, Gemini=$geminiSize, Antigravity=$antigravitySize)." "SUCCESS"
+            if ($claudeHash -eq $copilotHash) {
+                Write-Status "WARNING: Claude and Copilot hashes are identical for friday — frontmatter may not have been applied correctly" "WARNING"
+            }
         } else {
-            Write-Status "ERROR: Content verification failed for friday - Master: $masterSize, Claude: $claudeSize, Copilot: $copilotSize, Antigravity: $antigravitySize, Gemini: $geminiSize" "ERROR"
+            Write-Status "ERROR: Content verification failed for friday - Claude: $claudeSize bytes, Copilot: $copilotSize bytes, Antigravity: $antigravitySize bytes, Gemini: $geminiSize bytes" "ERROR"
             $verificationPassed = $false
         }
     } else {
@@ -676,8 +732,13 @@ if (Test-Path $configSrcDir) {
     }
     foreach ($file in Get-ChildItem "$configSrcDir\*.yml" -ErrorAction SilentlyContinue) {
         $dest = "$configDestDir\$($file.Name)"
+        $srcHash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLower()
+        if ((Test-Path $dest) -and ((Get-FileHash -Path $dest -Algorithm SHA256).Hash.ToLower() -eq $srcHash)) {
+            Write-Status "Skipped (unchanged): $($file.Name)" "INFO"
+            continue
+        }
         Copy-Item -Path $file.FullName -Destination $dest -Force
-        Write-Status "Synced config: $($file.Name) â†’ $dest" "SUCCESS"
+        Write-Status "Synced config: $($file.Name) -> $dest" "SUCCESS"
     }
 }
 

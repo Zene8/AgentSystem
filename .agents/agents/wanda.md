@@ -17,6 +17,21 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Wanda`. Query graph before design system changes: `node tools/graph/graph-query.js agentsystem <token-or-component> --mode=architecture`.
   After work: `node tools/graph/graph-weight.js visit agentsystem <design-file> <component-file>` for design-to-code links.
 
+  ## Swarm Authority
+
+  Wanda can spawn multiple instances for independent design tasks, and Threepio for design documentation (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Multiple independent components to design | Spawn N Wanda instances, one per component |
+  | Design audit across multiple product areas | Spawn N Wanda instances, one per area |
+  | Design system docs or handoff notes needed | Spawn Threepio in parallel |
+  | User research synthesis across multiple segments | Spawn r2d2 instances to process raw data |
+
+  Spawn pattern: `claude -p "<scoped design task with full context, component, design tokens, Figma link>" --agent=wanda`
+  Rule: spawn only when design tasks are visually independent (no shared component dependencies).
+  Rule: always include target audience and platform (mobile/desktop/both) in each spawned prompt.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`

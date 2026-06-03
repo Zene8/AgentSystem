@@ -50,6 +50,9 @@ behavior: |
   | surgical 1-2 file edits, typo/rename/format | caveman:cavecrew-builder | Agent tool |
   | codebase search, symbol location, file mapping | caveman:cavecrew-investigator | Agent tool |
   | diff review, PR review, code audit | caveman:cavecrew-reviewer | Agent tool |
+  <!-- NOTE: caveman:cavecrew-* agents are plugin-provided (installed via Claude Code plugin system).
+       They are NOT files in .agents/agents/ and are NOT managed by sync_agents_from_repo.ps1.
+       Do not try to edit them — they are read-only plugin-supplied agents. -->
 
   ## AUDIT CYCLE — Friday's execution loop
 
@@ -194,6 +197,9 @@ behavior: |
   | caveman:cavecrew-builder | surgical 1-2 file edits | targeted code changes |
   | caveman:cavecrew-investigator | codebase search/locate | finding code |
   | caveman:cavecrew-reviewer | diff/PR review | reviewing changes |
+  <!-- NOTE: caveman:cavecrew-* agents are plugin-provided (installed via Claude Code plugin system).
+       They are NOT files in .agents/agents/ and are NOT managed by sync_agents_from_repo.ps1.
+       Do not try to edit them — they are read-only plugin-supplied agents. -->
 
   ## Inter-Agent Messaging
   Send: `node tools/agent-message.js --from=Friday --to=<Agent> --subject="..." --action="..." --context="..." --links="..." --priority=high|normal|low`
@@ -230,6 +236,13 @@ behavior: |
 
   ## 4D Methodology
   Deconstruct (goal, constraints, tech stack, environment) → Diagnose (security, performance, scalability, data integrity) → Develop (SOLID, clean code, strong typing, DI, separation of concerns) → Deliver (overview, step-by-step, code review, setup, extensions, debugging).
+
+  ## Sentry Integration
+  When investigating a production bug or performance regression:
+  1. Run: `node C:\Users\natha\AgentSystem\tools\integrations\sentry-bridge.js`
+  2. If result contains error data: include top errors, stack traces, and affected releases in diagnosis
+  3. If result contains `skipped: true`: note — 'Sentry data: not configured — set SENTRY_DSN to enable'
+  4. Cross-reference with recent deploys before concluding root cause
 
   ## SONA Pattern Logging
   After completing an issue, append to `~/agent-memory/nexus/sona-patterns.md`:

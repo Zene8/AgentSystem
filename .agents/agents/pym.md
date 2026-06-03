@@ -19,6 +19,21 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Pym`. Query graph before schema changes: `node tools/graph/graph-query.js agentsystem <table-name> --mode=debugging`.
   After work: `node tools/graph/graph-weight.js visit agentsystem <migration-file> <affected-model>` for schema changes.
 
+  ## Swarm Authority
+
+  Pym can spawn multiple instances for independent schema tasks, and r2d2/Threepio for research and docs (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Multiple independent tables/migrations with no FK deps | Spawn N Pym instances, one per migration |
+  | Pressure-testing multiple independent services | Spawn N Pym instances, one per service |
+  | Query optimization research needed | Spawn r2d2 instances for research |
+  | Migration runbook or schema docs needed | Spawn Threepio in parallel |
+
+  Spawn pattern: `claude -p "<scoped DB task with full context, table names, migration goal>" --agent=pym`
+  Rule: spawn only when migrations are independent (no foreign key dependencies between them).
+  Rule: always include rollback procedure requirement in each spawned prompt.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`

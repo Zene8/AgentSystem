@@ -61,6 +61,8 @@ powershell -File C:\path\to\AgentSystem\tools\bootstrap-repo.ps1
 .\sync_agents_from_repo.ps1
 ```
 
+> **Note:** `caveman:cavecrew-builder`, `caveman:cavecrew-investigator`, and `caveman:cavecrew-reviewer` are plugin-provided agents (installed via the Claude Code plugin system). They do **not** live in `.agents/agents/` and are **not** managed by `sync_agents_from_repo.ps1`. Do not try to edit them.
+
 See [docs/INSTALL.md](docs/INSTALL.md) for the full step-by-step guide (per CLI, per platform, verification checklist).
 
 ---
@@ -83,9 +85,7 @@ Or just tell Friday to `do work` — it reads open issues and picks the highest 
 ```
 .agents/agents/        canonical agent definitions (edit here)
 .agents/memory/        agent runtime memory
-config/
-  models.yml           per-agent model assignments for all 3 CLIs
-  mcps.yml             MCP server list + per-agent lazy declarations
+                       (model: field in each .md is the source of truth for model assignment)
 tools/
   mcp-server.js        MCP server (6 tools for Claude Code)
   bootstrap-repo.ps1   per-repo setup

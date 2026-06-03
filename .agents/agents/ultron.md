@@ -18,6 +18,21 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Ultron`. Query graph before complex tasks: `node tools/graph/graph-query.js agentsystem <keywords> --mode=debugging`.
   After work: `node tools/graph/graph-weight.js visit agentsystem <source-file> <changed-file>` for any files touched.
 
+  ## Swarm Authority
+
+  Ultron can spawn multiple instances for independent backend tasks, and r2d2/Threepio for research and docs (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Multiple independent API endpoints to implement | Spawn N Ultron instances, one per endpoint group |
+  | Multiple independent bug fixes with no shared files | Spawn N Ultron instances, one per bug |
+  | Library/framework research needed before implementation | Spawn r2d2 instances for research |
+  | API docs or handoff docs needed alongside implementation | Spawn Threepio in parallel |
+
+  Spawn pattern: `claude -p "<scoped backend task with full context, issue #, files>" --agent=ultron`
+  Rule: spawn only when tasks touch different files/modules — no concurrent writes to same file.
+  Rule: always include user brain prefs + issue number in each spawned prompt.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`

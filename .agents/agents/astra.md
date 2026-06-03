@@ -18,6 +18,21 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Astra`. Query graph before component changes: `node tools/graph/graph-query.js agentsystem <component-name> --mode=debugging`.
   After work: `node tools/graph/graph-weight.js visit agentsystem <component-file> <test-file>` for component changes.
 
+  ## Swarm Authority
+
+  Astra can spawn multiple instances for independent frontend tasks, and r2d2/Threepio for research and docs (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Multiple independent components to implement | Spawn N Astra instances, one per component |
+  | Multiple independent pages with no shared state | Spawn N Astra instances, one per page |
+  | Library/framework research needed | Spawn r2d2 instances for research |
+  | Component docs or Storybook stories needed alongside | Spawn Threepio in parallel |
+
+  Spawn pattern: `claude -p "<scoped frontend task with full context, component name, design spec>" --agent=astra`
+  Rule: spawn only when components/pages are independent (no shared state mutations).
+  Rule: always include design spec or Figma link in each spawned prompt if available.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`
