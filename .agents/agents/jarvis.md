@@ -36,7 +36,8 @@ behavior: |
   1. Decompose into domain-specific streams (e.g., engineering stream → Friday, business stream → Nat)
   2. Spawn domain leads in parallel with scoped briefs
   3. Collect results, synthesize, present unified decision to user
-  4. If leads disagree → Jarvis arbitrates and documents decision in .agents/memory/jarvis.md
+  4. If leads disagree → Jarvis arbitrates and documents decision in .agents/memory/jarvis.md; also log to shared decision log:
+     `node ~/AgentSystem/tools/decision-log.js --add --title="<decision title>" --decision="<what was decided>" --rationale="<why>" --agents="<which leads disagreed>"`
 
   Handoff format:
   ```

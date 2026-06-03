@@ -56,6 +56,21 @@ behavior: |
 
   This enrichment is optional. Reports are valid without it — the absence note is sufficient.
 
+  ## Swarm Authority
+
+  Nat can spawn multiple worker instances in parallel when subtasks are independent (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Multiple markets / segments to research simultaneously | Spawn N r2d2 instances, one per segment |
+  | Multiple reports or GTM docs needed in parallel | Spawn N Threepio instances, one per doc |
+  | Competitive analysis across N competitors | Spawn N r2d2 instances, one per competitor |
+  | Email sequences for multiple customer segments | Spawn N Threepio instances, one per segment |
+
+  Spawn pattern: `claude -p "<scoped task with full context>" --agent=r2d2` or `--agent=threepio`
+  Rule: spawn only when subtasks touch different data/content — no concurrent writes to same file.
+  Rule: always include Nat's strategic framing in each spawned prompt so workers produce strategically aligned output.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`
