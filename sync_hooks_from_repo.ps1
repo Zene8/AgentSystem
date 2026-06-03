@@ -58,7 +58,7 @@ if (-not (Test-Path $claudeHooks)) {
     New-Item -ItemType Directory -Path $claudeHooks -Force | Out-Null
 }
 
-$hookFiles = @("memory-context-inject.js", "memory-router.js")
+$hookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js")
 $copyFailed = $false
 
 foreach ($file in $hookFiles) {
@@ -148,6 +148,13 @@ $injectEntries = @(
         command       = "node `"$claudeHooksNorm/memory-router.js`""
         timeout       = 5
         statusMessage = 'Routing...'
+    },
+    [PSCustomObject]@{
+        event         = 'SessionEnd'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/memory-capture-hook.js`""
+        timeout       = 5
+        statusMessage = 'Capturing memory...'
     }
 )
 

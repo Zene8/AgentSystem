@@ -16,7 +16,7 @@ const TOOLS = process.env.AGENT_TOOLS_ROOT ||
 if (require.main === module) {
   let out = '';
   try {
-    out = execFileSync(process.execPath, [path.join(TOOLS, 'memory-context.js'), `--cwd=${process.cwd()}`], {
+    out = execFileSync(process.execPath, [path.join(TOOLS, 'memory-context.js'), `--cwd=${process.cwd()}`, '--core=7'], {
       timeout: 8000, encoding: 'utf8',
     });
   } catch { /* non-fatal — never block session start */ }
