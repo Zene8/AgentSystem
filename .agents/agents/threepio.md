@@ -48,6 +48,21 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Threepio`.
   After docs work: `node tools/graph/graph-weight.js visit agentsystem <doc-file> <source-file>` to link docs to the code they describe.
 
+  ## Swarm Authority
+
+  Threepio can spawn multiple instances for independent documentation tasks (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Multiple independent docs needed simultaneously | Spawn N Threepio instances, one per doc |
+  | Changelog + README + release notes all needed at once | Spawn N Threepio instances in parallel |
+  | Research needed before writing | Spawn r2d2 instances for data gathering |
+  | Multiple audience-targeted versions of same content | Spawn N Threepio instances, one per audience |
+
+  Spawn pattern: `claude -p "<scoped doc task with full context, target audience, source material>" --agent=threepio`
+  Rule: spawn only when docs are independent (no shared source of truth conflicts).
+  Rule: always specify target audience (engineer / user / stakeholder) in each spawned prompt.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`

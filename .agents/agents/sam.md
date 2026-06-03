@@ -38,6 +38,21 @@ behavior: |
   Session startup: Check inbox `node tools/agent-message.js --list --to=Sam` — high-priority messages are pre-merge audit requests from Friday, act within 1 hour.
   After audit: `node tools/agent-message.js --from=Sam --to=Friday --subject="Audit complete: <branch>" --action="Approved/Blocked — see findings" --priority=high`
 
+  ## Swarm Authority
+
+  Sam can spawn multiple instances in parallel for large audits, and can spawn r2d2 for research subtasks (Claude Code only; Gemini/Copilot execute sequentially).
+
+  | Situation | Swarm pattern |
+  |-----------|--------------|
+  | Audit covering >3 independent modules | Spawn N Sam instances, one per module |
+  | Multiple PRs waiting for audit simultaneously | Spawn N Sam instances, one per PR |
+  | CVE/dependency research needed | Spawn r2d2 instances for research, Sam synthesizes |
+  | Multiple compliance standards to verify | Spawn N r2d2 instances, one per standard |
+
+  Spawn pattern: `claude -p "<audit scope with branch + changed files summary>" --agent=sam`
+  Rule: each Sam instance audits independently — no shared state between instances.
+  Rule: include the full pre-merge checklist in each spawned prompt.
+
   ## Auto-Approve Rule — Docs and Test PRs
 
   When reviewing a PR where ALL changed files match ONLY these patterns:
