@@ -4,7 +4,23 @@ import {
   emptyGraph, addNode, addEdge,
   spreadingActivation, updateConfidence,
   decayedVisitScore, enforceEdgeCap, recomputeComposite,
+  parseFrontmatter, needProbabilityScore,
 } from './graph-lib.js';
+
+test('needProbabilityScore: importance 0 is neutral, higher importance boosts', () => {
+  assert.strictEqual(needProbabilityScore(0.4, 0), 0.4, 'importance 0 leaves score unchanged');
+  assert.strictEqual(needProbabilityScore(0.4, undefined), 0.4, 'absent importance is neutral');
+  assert.strictEqual(needProbabilityScore(0.4, 1, 0.5), 0.6, 'max importance with gain 0.5 → 1.5x');
+  assert.ok(needProbabilityScore(0.4, 0.5) > 0.4, 'mid importance boosts above base');
+  assert.strictEqual(needProbabilityScore(0.4, 5), 0.6, 'importance clamped to 1');
+});
+
+test('parseFrontmatter coerces unquoted true/false to booleans', () => {
+  const { frontmatter } = parseFrontmatter('---\nhot: true\ncold: false\nname: truevalue\n---\nbody');
+  assert.strictEqual(frontmatter.hot, true, 'hot:true must be boolean true');
+  assert.strictEqual(frontmatter.cold, false, 'cold:false must be boolean false');
+  assert.strictEqual(frontmatter.name, 'truevalue', 'non-boolean strings unchanged');
+});
 
 // Helper: build a graph with N nodes and edges from node0 to all others with given composite
 function hubGraph(hubCount = 20) {

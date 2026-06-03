@@ -182,6 +182,15 @@ export function computeSalience({ incident = false, durationMinutes = 0, firstTi
   return parseFloat(Math.min(1.0, s).toFixed(4));
 }
 
+// Need-probability (Anderson & Schooler): rank by relevance/recency × importance.
+// baseScore already encodes recency×frequency (decayed visit) + relevance (BM25), so this
+// only multiplies in the orthogonal importance signal. importance ∈ [0,1], default 0 = neutral.
+// Returns baseScore × (1 + gain × importance). No migration: absent importance leaves score unchanged.
+export function needProbabilityScore(baseScore, importance = 0, gain = 0.5) {
+  const imp = Math.max(0, Math.min(1, importance || 0));
+  return parseFloat((baseScore * (1 + gain * imp)).toFixed(4));
+}
+
 // Fix 8 (issue #35): Episodic memory node builder.
 export function buildEpisodeNode({ id, sequence = [], contextTags = [], salience = 0.0, durationMinutes = 0, outcomeRef = null, connections = [] }) {
   const created = new Date().toISOString().slice(0, 10);
@@ -332,7 +341,10 @@ function parseYaml(text) {
     }
     const scalar = line.match(/^([\w-]+):\s+(.+)$/);
     if (scalar) {
-      result[scalar[1]] = scalar[2].replace(/^["']|["']$/g, '');
+      const raw = scalar[2];
+      if (raw === 'true') result[scalar[1]] = true;
+      else if (raw === 'false') result[scalar[1]] = false;
+      else result[scalar[1]] = raw.replace(/^["']|["']$/g, '');
     }
     i++;
   }
