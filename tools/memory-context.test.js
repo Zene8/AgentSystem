@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectProject, selectCoreFacts } from './memory-context.js';
+import { detectProject, selectCoreFacts, relevantSona } from './memory-context.js';
 
 const reg = { repos: [
   { slug: 'agentsystem', path: 'C:/Users/natha/AgentSystem' },
@@ -53,4 +53,49 @@ test('selectCoreFacts does not mutate input array', () => {
   const original = [...facts];
   selectCoreFacts(facts, 7);
   assert.deepStrictEqual(facts, original);
+});
+
+// Part 2: relevantSona tests (stubbed scorer — no file IO)
+const STUB_ENTRIES = [
+  { id: 'auth-bug', text: 'auth bug oauth token session login', date: '2026-01-01', agent: 'Friday', raw: '' },
+  { id: 'deploy-pipeline', text: 'deploy pipeline ci cd github actions docker', date: '2026-01-02', agent: 'Leo', raw: '' },
+  { id: 'db-migration', text: 'database migration schema prisma postgres', date: '2026-01-03', agent: 'Pym', raw: '' },
+  { id: 'frontend-harvest', text: 'react component harvest typescript frontend tsx', date: '2026-01-04', agent: 'Astra', raw: '' },
+];
+
+// Deterministic stub scorer: returns 1.0 if entry id matches the "winning" keyword, else 0.1
+function makeStubScorer(winnerId) {
+  return (entry) => entry.id === winnerId ? 1.0 : 0.1;
+}
+
+test('relevantSona: returns top entry by score (stubbed scorer)', () => {
+  const results = relevantSona(STUB_ENTRIES, 'auth', { top: 1, scorer: makeStubScorer('auth-bug') });
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0], 'auth-bug');
+});
+
+test('relevantSona: returns top-N entries in descending score order', () => {
+  const scorer = (entry) => ({ 'db-migration': 0.9, 'deploy-pipeline': 0.7, 'auth-bug': 0.3, 'frontend-harvest': 0.1 }[entry.id] ?? 0);
+  const results = relevantSona(STUB_ENTRIES, 'schema', { top: 2, scorer });
+  assert.deepStrictEqual(results, ['db-migration', 'deploy-pipeline']);
+});
+
+test('relevantSona: empty entries returns []', () => {
+  assert.deepStrictEqual(relevantSona([], 'auth', { scorer: makeStubScorer('x') }), []);
+});
+
+test('relevantSona: empty query returns []', () => {
+  assert.deepStrictEqual(relevantSona(STUB_ENTRIES, '', { scorer: makeStubScorer('auth-bug') }), []);
+  assert.deepStrictEqual(relevantSona(STUB_ENTRIES, '   ', { scorer: makeStubScorer('auth-bug') }), []);
+});
+
+test('relevantSona: top bounded to entry count when fewer entries than top', () => {
+  const results = relevantSona(STUB_ENTRIES, 'any', { top: 10, scorer: () => 0.5 });
+  assert.strictEqual(results.length, STUB_ENTRIES.length);
+});
+
+test('relevantSona: does not mutate entries input', () => {
+  const entries = [...STUB_ENTRIES];
+  relevantSona(entries, 'auth', { top: 2, scorer: makeStubScorer('auth-bug') });
+  assert.strictEqual(entries.length, STUB_ENTRIES.length);
 });

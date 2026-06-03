@@ -191,6 +191,27 @@ export function needProbabilityScore(baseScore, importance = 0, gain = 0.5) {
   return parseFloat((baseScore * (1 + gain * imp)).toFixed(4));
 }
 
+// Adaptive importance — blends section-assigned static importance with a learned access signal.
+// accessSignal: normalised, RECENCY-FREE frequency derived from raw visit_count (not decayed),
+// so it measures durability/frequency without double-counting the recency already in baseScore.
+// Floor: static importance is a strict floor so hard-constraints never degrade.
+// Ceiling: 1.0. Formula: static + gain × accessSignal × (1 − static).
+// WHY gain*(1-static): boost room shrinks as static rises — high-static nodes need no help.
+export function effectiveImportance(staticImportance = 0, accessSignal = 0, { gain = 0.5 } = {}) {
+  const s = Math.max(0, Math.min(1, staticImportance || 0));
+  const a = Math.max(0, Math.min(1, accessSignal || 0));
+  return parseFloat(Math.min(1, s + gain * a * (1 - s)).toFixed(4));
+}
+
+// Derive the access signal for a single node from its incident edges.
+// Uses NORMALISED (not time-decayed) visit_count so recency is NOT included — this is
+// a pure frequency/durability signal. Returns max normalised visit_count across all incident edges.
+export function nodeAccessSignal(edges, nodeId) {
+  const incident = edges.filter(e => e.source === nodeId || e.target === nodeId);
+  if (incident.length === 0) return 0;
+  return Math.max(...incident.map(e => e.weights?.visit_count || 0));
+}
+
 // Fix 8 (issue #35): Episodic memory node builder.
 export function buildEpisodeNode({ id, sequence = [], contextTags = [], salience = 0.0, durationMinutes = 0, outcomeRef = null, connections = [] }) {
   const created = new Date().toISOString().slice(0, 10);

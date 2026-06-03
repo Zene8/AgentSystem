@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentMemoryRoot, readGraph, parseFrontmatter } from './graph/graph-lib.js';
+import { parseEntries, tfidfEmbedding, cosineSimilarity } from './memory-search.js';
 
 // Pure: find the repo whose path is a prefix of cwd (longest match wins). Returns slug or null.
 export function detectProject(cwd, registry) {
@@ -34,6 +35,22 @@ export function selectCoreFacts(facts, n) {
     .map(f => f.id);
 }
 
+// Pure: given parsed SONA entries + a query string, return top-N entry ids by TF-IDF relevance.
+// scorer is injected (default: real TF-IDF) so unit tests can stub it without file IO.
+// Falls back to empty array when no query or no entries.
+export function relevantSona(entries, query, { top = 3, scorer = null } = {}) {
+  if (!entries || entries.length === 0 || !query || !query.trim()) return [];
+  const scoreFn = scorer ?? ((entry, q) => {
+    const queryVec = tfidfEmbedding(q);
+    return cosineSimilarity(queryVec, tfidfEmbedding(entry.text));
+  });
+  return entries
+    .map(e => ({ id: e.id, score: scoreFn(e, query) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, top)
+    .map(r => r.id);
+}
+
 function hotUserFacts(nexus) {
   const dir = join(nexus, 'personal-brain');
   const graphPath = join(dir, 'graph.json');
@@ -58,7 +75,9 @@ function recentSona(nexus, n) {
     .map(l => l.replace(/^###\s+/, '').trim());
 }
 
-export function buildContext({ cwd = process.cwd(), recent = 3, core = 7 } = {}) {
+// keywords: optional string — when provided, sona is ranked by relevance to slug + keywords;
+// falls back to recency when no query signal is available.
+export function buildContext({ cwd = process.cwd(), recent = 3, core = 7, keywords = '' } = {}) {
   const nexus = join(agentMemoryRoot(), 'nexus');
   const registryPath = join(nexus, 'known-repos.json');
   const registry = existsSync(registryPath) ? JSON.parse(readFileSync(registryPath, 'utf8')) : { repos: [] };
@@ -70,7 +89,17 @@ export function buildContext({ cwd = process.cwd(), recent = 3, core = 7 } = {})
 
   const projectGraphPath = slug ? join(nexus, slug, 'graph.json') : null;
   const projectNodes = projectGraphPath && existsSync(projectGraphPath) ? readGraph(projectGraphPath).nodes.length : 0;
-  const sona = recentSona(nexus, recent);
+
+  const query = [slug, keywords].filter(Boolean).join(' ').trim();
+  let sona;
+  if (query) {
+    const sonaPath = join(nexus, 'sona-patterns.md');
+    const entries = existsSync(sonaPath) ? parseEntries(readFileSync(sonaPath, 'utf8')) : [];
+    const ids = relevantSona(entries, query, { top: recent });
+    sona = ids.length > 0 ? ids : recentSona(nexus, recent);
+  } else {
+    sona = recentSona(nexus, recent);
+  }
 
   return { slug, userCore, userTotal, projectNodes, sona };
 }

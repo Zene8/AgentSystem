@@ -5,6 +5,7 @@ import {
   spreadingActivation, updateConfidence,
   decayedVisitScore, enforceEdgeCap, recomputeComposite,
   parseFrontmatter, needProbabilityScore,
+  effectiveImportance, nodeAccessSignal,
 } from './graph-lib.js';
 
 test('needProbabilityScore: importance 0 is neutral, higher importance boosts', () => {
@@ -188,4 +189,50 @@ test('enforceEdgeCap removes lowest-composite edges to maintain cap', () => {
   const hasT2 = g.edges.some(e => e.target === 't2');
   assert.strictEqual(hasT1, false, 't1 (lowest composite) should be removed');
   assert.strictEqual(hasT2, false, 't2 (second lowest) should be removed');
+});
+
+// Part 1: effectiveImportance tests
+test('effectiveImportance: zero access returns static as floor', () => {
+  assert.strictEqual(effectiveImportance(0.3, 0), 0.3, 'no access → effective equals static');
+  assert.strictEqual(effectiveImportance(0.9, 0), 0.9, 'hard-constraint static unchanged with no access');
+});
+
+test('effectiveImportance: frequent access raises effective above static', () => {
+  const eff = effectiveImportance(0.2, 1.0);
+  assert.ok(eff > 0.2, `frequently-accessed low-static (${eff}) should exceed static (0.2)`);
+});
+
+test('effectiveImportance: hard-constraint (static 0.9) stays near top regardless of access', () => {
+  const eff = effectiveImportance(0.9, 1.0);
+  assert.ok(eff >= 0.9, `hard-constraint effective (${eff}) must not fall below floor 0.9`);
+  assert.ok(eff <= 1.0, 'must not exceed 1.0');
+});
+
+test('effectiveImportance: frequently-accessed beats never-accessed at same static importance', () => {
+  const frequent = effectiveImportance(0.4, 0.8);
+  const never = effectiveImportance(0.4, 0);
+  assert.ok(frequent > never, `frequent (${frequent}) must rank above never-accessed (${never})`);
+});
+
+test('effectiveImportance: clamped to [0,1]', () => {
+  assert.ok(effectiveImportance(1.0, 1.0) <= 1.0, 'max inputs stay at 1.0');
+  assert.ok(effectiveImportance(0, 0) >= 0, 'zero inputs stay at 0');
+  assert.ok(effectiveImportance(-0.5, 2.0) >= 0, 'negative static clamped to 0');
+});
+
+// Part 1: nodeAccessSignal tests
+test('nodeAccessSignal: returns 0 for node with no edges', () => {
+  const g = emptyGraph('test', 'test');
+  assert.strictEqual(nodeAccessSignal(g.edges, 'orphan'), 0);
+});
+
+test('nodeAccessSignal: returns max visit_count of incident edges', () => {
+  const edges = [
+    { source: 'a', target: 'b', weights: { visit_count: 0.3 } },
+    { source: 'c', target: 'a', weights: { visit_count: 0.7 } },
+    { source: 'x', target: 'y', weights: { visit_count: 0.9 } }, // not incident to 'a'
+  ];
+  assert.strictEqual(nodeAccessSignal(edges, 'a'), 0.7, 'max incident visit_count for a');
+  assert.strictEqual(nodeAccessSignal(edges, 'y'), 0.9, 'incident edge from x→y');
+  assert.strictEqual(nodeAccessSignal(edges, 'z'), 0, 'no incident edges returns 0');
 });

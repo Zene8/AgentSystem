@@ -21,6 +21,8 @@ import {
   spreadingActivation,
   recomputeComposite,
   needProbabilityScore,
+  effectiveImportance,
+  nodeAccessSignal,
 } from './graph-lib.js';
 
 // BM25 keyword scoring.
@@ -128,14 +130,17 @@ if (isMain) {
     process.exit(0);
   }
 
-  // Need-probability: per-node importance (frontmatter.importance, fallback salience), default 0 = neutral.
+  // Adaptive importance: blend section-assigned static importance with learned access signal
+  // (raw normalised visit_count, recency-free) so frequently-recalled low-importance facts rise.
   const importanceMap = new Map();
   for (const nodeId of graph.nodes) {
     const nodePath = join(nodesDir, `${nodeId}.md`);
     if (!existsSync(nodePath)) continue;
     const { frontmatter } = parseFrontmatter(readFileSync(nodePath, 'utf8'));
-    const imp = parseFloat(frontmatter.importance ?? frontmatter.salience ?? 0);
-    importanceMap.set(nodeId, Number.isFinite(imp) ? imp : 0);
+    const staticImp = parseFloat(frontmatter.importance ?? frontmatter.salience ?? 0);
+    const s = Number.isFinite(staticImp) ? staticImp : 0;
+    const accessSig = nodeAccessSignal(graph.edges, nodeId);
+    importanceMap.set(nodeId, effectiveImportance(s, accessSig));
   }
 
   // Fix 1: Build a time-decayed version of the graph for scoring.

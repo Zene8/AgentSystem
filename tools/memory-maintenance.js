@@ -44,6 +44,14 @@ export function runMaintenance({ reflect = false, quiet = false } = {}) {
   results.push(step('consolidate', 'graph/graph-consolidate.js', ['personal-brain', `--brain-path=${pbPath}`], quiet));
   results.push(step('agent-brain-seed', 'agent-brain-seed.js', ['--all'], quiet));
   if (reflect) results.push(step('reflect', 'memory-reflect.js', [], quiet));
+  // TIER-2 BLOCKER — cross-project promotion (issue: missing project attribution in SONA)
+  // SONA entry headers carry only: id, date, agent (e.g. "studio-harvest-4pr — 2026-05-29 — Friday").
+  // parseEntries() in memory-search.js extracts exactly these three fields — no project field.
+  // The **N:** (files touched) line exists in the entry body but inferring project from file paths
+  // is weak heuristic evidence; the task requires high precision and forbids promoting on weak evidence.
+  // Unblock requires: (1) add a `project: <slug>` field to the SONA template in CLAUDE.md/friday.md,
+  // (2) extend parseEntries() to capture it, (3) then a promotion step can group by project slug and
+  // promote entries confirmed in >=2 distinct project slugs into personal-brain "Cross-Project Patterns".
   return results;
 }
 
