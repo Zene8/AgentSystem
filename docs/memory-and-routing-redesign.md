@@ -208,7 +208,7 @@ Override persists to `~/agent-memory/nexus/routine-overrides.json`. Every enforc
 ```
 node tools/routines.js compile
 ```
-Generates `.agents/rules/routines.generated.md` with all enabled, non-bypassed agent-rule actions. This file is read by `agent-context-inject.js` at SessionStart when added to the rules directory.
+Generates `.agents/rules/routines.generated.md` with all enabled, non-bypassed agent-rule actions. This file is read by `hooks/routines-context-inject.js` at SessionStart. Note: the task spec assumed an existing rules-injection path via `agent-context-inject.js`; that path only reads specific YAML files (models.yml, mcps.yml, tools.yml) and does not scan the rules directory. A dedicated `routines-context-inject.js` SessionStart hook was added to fill this gap.
 
 **Hook dispatcher:** `hooks/routine-dispatch.js` — single hook wired to `UserPromptSubmit` + `PostToolUse`. Reads routines.yml + overrides at runtime. Adding a hook-routine = edit yaml only, no settings.json change.
 
