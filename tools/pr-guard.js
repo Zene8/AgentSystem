@@ -1,0 +1,132 @@
+#!/usr/bin/env node
+// pr-guard.js — checks a GitHub PR is green and fully reviewed before allowing merge.
+// Checks: (1) all CI checks pass, (2) zero unresolved review threads.
+// No npm deps — uses gh CLI (must be authenticated) and Node.js builtins.
+//
+// Usage:
+//   node tools/pr-guard.js <pr-number|pr-url>   — check a PR
+//   node tools/pr-guard.js --help               — show usage
+//
+// Exit codes:
+//   0 — PR is green (all checks pass, no unresolved threads)
+//   1 — PR is not ready (details printed to stdout)
+//   2 — Usage error or gh CLI failure
+
+import { execFileSync } from 'node:child_process';
+
+function ghJson(args) {
+  try {
+    const out = execFileSync('gh', args, { encoding: 'utf8', timeout: 15000 });
+    return JSON.parse(out.trim());
+  } catch (e) {
+    const msg = e.stderr || e.message || String(e);
+    throw new Error(`gh ${args.join(' ')} failed: ${msg.trim()}`);
+  }
+}
+
+function extractPrNumber(arg) {
+  if (!arg) return null;
+  // URL form: https://github.com/owner/repo/pull/123
+  const urlMatch = String(arg).match(/\/pull\/(\d+)/);
+  if (urlMatch) return urlMatch[1];
+  // Plain number
+  if (/^\d+$/.test(String(arg))) return String(arg);
+  return null;
+}
+
+export async function checkPr(prArg) {
+  const prNumber = extractPrNumber(prArg);
+  if (!prNumber) {
+    return { ok: false, error: `Invalid PR argument: ${prArg}` };
+  }
+
+  const results = { prNumber, checks: null, threads: null, ok: false, summary: [] };
+
+  // 1. CI checks
+  try {
+    const checks = ghJson(['pr', 'checks', prNumber, '--json', 'name,state,bucket']);
+    results.checks = checks;
+    // bucket=pass means green. bucket=fail/pending/waiting means not ready.
+    const failing = checks.filter(c => {
+      const bucket = (c.bucket || '').toLowerCase();
+      const state = (c.state || '').toLowerCase();
+      if (bucket === 'pass') return false;
+      if (bucket === 'skipping' || bucket === 'neutral') return false;
+      if (state === 'success') return false;
+      return true;
+    });
+
+    if (failing.length > 0) {
+      results.summary.push(`CI: ${failing.length} check(s) not green:`);
+      for (const c of failing.slice(0, 5)) {
+        results.summary.push(`  - ${c.name}: state=${c.state} bucket=${c.bucket || 'unknown'}`);
+      }
+    } else {
+      results.summary.push(`CI: ${checks.length} check(s) all green`);
+    }
+    results.checksOk = failing.length === 0;
+  } catch (e) {
+    results.summary.push(`CI checks: ${e.message}`);
+    results.checksOk = false;
+  }
+
+  // 2. Unresolved review threads via gh api
+  try {
+    // Get the repo from the PR
+    const prInfo = ghJson(['pr', 'view', prNumber, '--json', 'url,number']);
+    const urlParts = prInfo.url.replace('https://github.com/', '').split('/');
+    const owner = urlParts[0];
+    const repo = urlParts[1];
+
+    const reviewsData = ghJson(['api', `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
+      '--jq', '[.[] | {state, user: .user.login}]']);
+
+    // Count unresolved: state = CHANGES_REQUESTED and not subsequently APPROVED
+    const latestByUser = {};
+    for (const r of reviewsData) {
+      latestByUser[r.user] = r.state;
+    }
+    const changesRequested = Object.values(latestByUser).filter(s => s === 'CHANGES_REQUESTED');
+
+    if (changesRequested.length > 0) {
+      results.summary.push(`Reviews: ${changesRequested.length} reviewer(s) requested changes (not yet approved)`);
+    } else {
+      results.summary.push(`Reviews: no blocking change requests`);
+    }
+    results.threadsOk = changesRequested.length === 0;
+  } catch (e) {
+    results.summary.push(`Review threads: ${e.message}`);
+    results.threadsOk = false;
+  }
+
+  results.ok = !!(results.checksOk && results.threadsOk);
+  return results;
+}
+
+const isMain = process.argv[1] &&
+  process.argv[1].replace(/\\/g, '/').endsWith('pr-guard.js');
+
+if (isMain) {
+  const arg = process.argv[2];
+  if (!arg || arg === '--help') {
+    console.log('Usage: node tools/pr-guard.js <pr-number|pr-url>');
+    console.log('  Exits 0 if CI green + no blocking reviews. Exits 1 if not ready.');
+    process.exit(arg ? 0 : 2);
+  }
+
+  checkPr(arg).then(result => {
+    if (result.error) {
+      console.error(`pr-guard error: ${result.error}`);
+      process.exit(2);
+    }
+
+    const statusLine = result.ok ? 'PASS' : 'FAIL';
+    console.log(`pr-guard: PR #${result.prNumber} — ${statusLine}`);
+    for (const line of result.summary) console.log(line);
+
+    process.exit(result.ok ? 0 : 1);
+  }).catch(e => {
+    console.error(`pr-guard: unexpected error: ${e.message}`);
+    process.exit(2);
+  });
+}

@@ -58,7 +58,7 @@ if (-not (Test-Path $claudeHooks)) {
     New-Item -ItemType Directory -Path $claudeHooks -Force | Out-Null
 }
 
-$hookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js")
+$hookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js")
 $copyFailed = $false
 
 foreach ($file in $hookFiles) {
@@ -155,6 +155,41 @@ $injectEntries = @(
         command       = "node `"$claudeHooksNorm/memory-capture-hook.js`""
         timeout       = 5
         statusMessage = 'Capturing memory...'
+    },
+    [PSCustomObject]@{
+        event         = 'SubagentStop'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/sona-writeback-hook.js`""
+        timeout       = 5
+        statusMessage = 'Writing episodic memory...'
+    },
+    [PSCustomObject]@{
+        event         = 'Stop'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/sona-writeback-hook.js`""
+        timeout       = 5
+        statusMessage = 'Writing episodic memory...'
+    },
+    [PSCustomObject]@{
+        event         = 'UserPromptSubmit'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
+        timeout       = 5
+        statusMessage = 'Checking routines...'
+    },
+    [PSCustomObject]@{
+        event         = 'PostToolUse'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
+        timeout       = 5
+        statusMessage = 'Checking routines...'
+    },
+    [PSCustomObject]@{
+        event         = 'SessionStart'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routines-context-inject.js`""
+        timeout       = 5
+        statusMessage = 'Loading enforced routines...'
     }
 )
 

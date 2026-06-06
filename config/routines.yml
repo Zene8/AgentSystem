@@ -1,0 +1,54 @@
+# routines.yml — Agent routines registry.
+# Each routine is enforced by default (enforce: hard) unless bypassed at runtime.
+#
+# To bypass a routine without editing this file:
+#   node tools/routines.js bypass <id> [--session]
+#   node tools/routines.js unbypass <id>
+#
+# Mechanisms:
+#   agent-rule — compiled into .agents/rules/routines.generated.md (injected at SessionStart)
+#   hook       — enforced by hooks/routine-dispatch.js at runtime (no settings.json edit needed)
+#   cron       — registers a Windows Task Scheduler job
+#
+# To add a new routine: add an entry here, then run: node tools/routines.js compile
+
+- id: always-worktree
+  description: Feature work runs in an isolated git worktree
+  trigger: feature_work
+  mechanism: agent-rule
+  enforce: hard
+  enabled: true
+  action: "Before starting any feature work, create or enter a git worktree. Use the superpowers:using-git-worktrees skill. Never do feature work directly on the main branch clone."
+
+- id: fix-pr-until-green
+  description: Do not declare done until PR CI checks pass and all review threads are resolved
+  trigger: pr_open
+  mechanism: agent-rule
+  enforce: hard
+  enabled: true
+  action: "After opening a PR, do not declare DONE until pr-guard passes: run `node tools/pr-guard.js <pr-number>` — all CI checks must be green and all review threads resolved."
+
+- id: auto-resolve-pr-comments
+  description: 2-3 minutes after PR creation, respond to any review comments
+  trigger: pr_create
+  mechanism: hook
+  enforce: hard
+  enabled: true
+  action: "When a PR is created (PostToolUse: gh pr create), schedule a one-shot job (~+2min) that responds to any open review comments on that PR."
+
+- id: identity-query-inline
+  description: Answer identity/lookup queries inline from graph-query, never spawn Jarvis
+  trigger: identity_lookup
+  mechanism: agent-rule
+  enforce: hard
+  enabled: true
+  action: "For identity/memory queries (who am I, what do you know about me, my preferences), answer INLINE using: node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access. Do NOT spawn a heavyweight agent. This path returns ~110 tokens vs 47k for a subagent call."
+
+- id: teach-the-swarm
+  description: "[META] A prompt-match routine can teach new swarm behavior. Disabled example."
+  trigger: prompt_match
+  mechanism: agent-rule
+  enforce: hard
+  enabled: false
+  match_pattern: "security audit .*PR"
+  action: "When prompt matches 'security audit <PR>', spawn Sam (security agent) with: claude @sam --pr=<PR-number>. This demonstrates the prompt-match → swarm-spawn pattern. To add a new swarm behavior: add a routine with trigger=prompt_match and match_pattern=<your regex>, set mechanism=agent-rule, and describe the swarm spawn in action."

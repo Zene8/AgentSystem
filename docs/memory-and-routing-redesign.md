@@ -184,6 +184,48 @@ Three locations in friday.md claimed "SINGLE parallel batch — one message, mul
 
 Hook emits ~46 tokens advisory hint for identity queries. Hook is advisory-only (harness cannot reroute). Confirmed: regex matches and lightweight hint emitted, no heavyweight agent spawn forced.
 
+### Routines engine (BUILT — 2026-06-06)
+
+Hard-enforced, runtime-bypassable rules system for agent behavior.
+
+**Registry:** `config/routines.yml` — single source of truth. Five routines wired:
+- `always-worktree` (agent-rule) — feature work in a git worktree
+- `fix-pr-until-green` (agent-rule) — no DONE until pr-guard passes
+- `auto-resolve-pr-comments` (hook) — scheduled comment response ~2min after PR create
+- `identity-query-inline` (agent-rule) — inline graph-query for identity lookups
+- `teach-the-swarm` (agent-rule, disabled) — meta-routine showing prompt-match→swarm pattern
+
+**CLI:** `node tools/routines.js <list|compile|enable|disable|bypass|unbypass>`
+
+**Bypass (runtime, no registry edit):**
+```
+node tools/routines.js bypass always-worktree [--session]
+node tools/routines.js unbypass always-worktree
+```
+Override persists to `~/agent-memory/nexus/routine-overrides.json`. Every enforcement point checks this file first.
+
+**Compile → inject:**
+```
+node tools/routines.js compile
+```
+Generates `.agents/rules/routines.generated.md` with all enabled, non-bypassed agent-rule actions. This file is read by `agent-context-inject.js` at SessionStart when added to the rules directory.
+
+**Hook dispatcher:** `hooks/routine-dispatch.js` — single hook wired to `UserPromptSubmit` + `PostToolUse`. Reads routines.yml + overrides at runtime. Adding a hook-routine = edit yaml only, no settings.json change.
+
+**PR guard:** `tools/pr-guard.js <pr-number>` — checks `gh pr checks` + review CHANGES_REQUESTED. Exits 0=pass, 1=fail.
+
+**Auto-resolve:** `tools/auto-resolve-pr-comments.js` — posts acknowledgment replies to unanswered review comments. Intentionally does NOT dismiss Sam's change-request reviews (preserves security gate).
+
+**Tests:** 15 tests in `tools/routines.test.js` + `tools/pr-guard.test.js`. All passing.
+
+**Verification:**
+- `node tools/routines.js list` — shows all 5 routines
+- `node tools/routines.js compile` — generates .agents/rules/routines.generated.md
+- `node tools/routines.js bypass always-worktree && node tools/routines.js list` — shows [BYPASSED]
+- `node tools/pr-guard.js 76` → `PASS` (3 checks green, no blocking reviews)
+
+---
+
 ### P1 — Scheduled memory jobs (FIXED)
 
 Dead `self-hosted` GitHub Actions cron replaced with Windows Task Scheduler:
