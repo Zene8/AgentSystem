@@ -13,6 +13,16 @@
 
 import { readFileSync, existsSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+
+// Expand a leading ~ to the user's home directory.
+// Handles ~, ~/path, and ~\path. Never mutates paths without a leading tilde.
+export function expandTilde(p) {
+  if (!p) return p;
+  if (p === '~') return homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2));
+  return p;
+}
 import {
   readGraph,
   parseFrontmatter,
@@ -96,7 +106,7 @@ if (isMain) {
   }
 
   const nexusDir = flags['brain-path']
-    ? resolve(flags['brain-path'])
+    ? resolve(expandTilde(flags['brain-path']))
     : join(process.cwd(), 'nexus', slug);
 
   const graphPath = join(nexusDir, 'graph.json');

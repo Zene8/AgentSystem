@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeBM25 } from './graph-query.js';
+import { homedir } from 'node:os';
+import { computeBM25, expandTilde } from './graph-query.js';
 
 // Shared df/N/avgdl for tests
 const terms = ['foo', 'bar'];
@@ -19,6 +20,30 @@ function buildDf(termList, docList) {
   return df;
 }
 const df = buildDf(terms, docs);
+
+describe('expandTilde', () => {
+  it('expands bare tilde to homedir', () => {
+    assert.equal(expandTilde('~'), homedir());
+  });
+  it('expands ~/path to homedir + path', () => {
+    const result = expandTilde('~/agent-memory/nexus/personal-brain');
+    assert.ok(result.startsWith(homedir()), `expected ${result} to start with ${homedir()}`);
+    assert.ok(result.includes('agent-memory'), 'should include path suffix');
+  });
+  it('expands ~\\ path on Windows', () => {
+    const result = expandTilde('~\\agent-memory');
+    assert.ok(result.startsWith(homedir()));
+  });
+  it('does not modify paths without leading tilde', () => {
+    assert.equal(expandTilde('/absolute/path'), '/absolute/path');
+    assert.equal(expandTilde('relative/path'), 'relative/path');
+  });
+  it('handles null/undefined gracefully', () => {
+    assert.equal(expandTilde(null), null);
+    assert.equal(expandTilde(undefined), undefined);
+    assert.equal(expandTilde(''), '');
+  });
+});
 
 describe('computeBM25', () => {
   it('returns 0 for empty query', () => {

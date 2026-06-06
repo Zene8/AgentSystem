@@ -7,9 +7,33 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { agentMemoryRoot } from './graph/graph-lib.js';
+import { agentMemoryRoot, computeSalience } from './graph/graph-lib.js';
 import { splitPersonalBrain } from './personal-brain-split.js';
 import { reconcileFact, defaultLlm } from './memory-reconcile.js';
+
+// Stamp salience onto a node file written by splitPersonalBrain.
+// Called after remember() so the score encodes novelty (INSERT vs UPDATE → confidence proxy).
+// Non-fatal: if the node file is absent (slug mismatch etc.) we silently skip.
+function stampSalience(fact, action) {
+  const id = fact.replace(/^[-*]\s*/, '').toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '').trim()
+    .split(/\s+/).slice(0, 8).join('-');
+  if (!id) return;
+  const nodePath = join(agentMemoryRoot(), 'nexus', 'personal-brain', 'nodes', `${id}.md`);
+  if (!existsSync(nodePath)) return;
+  try {
+    const raw = readFileSync(nodePath, 'utf8');
+    // presolveConfidence proxy: UPDATE means prior fact existed (moderate confidence);
+    // ADD means brand-new (low confidence = high salience potential).
+    const presolveConfidence = action === 'UPDATE' ? 0.5 : 0.1;
+    const salience = computeSalience({ firstTimeSolve: action === 'ADD', presolveConfidence });
+    if (raw.includes('\nsalience:')) return; // already stamped by a prior run
+    const stamped = raw.replace(/^---\n/, `---\nsalience: ${salience}\n`);
+    writeFileSync(nodePath, stamped, 'utf8');
+  } catch {
+    // Non-fatal: salience stamping never blocks fact persistence.
+  }
+}
 
 // Pure: insert a fact bullet under `section` in markdown `raw`.
 // Dedup: skips if the same fact text already exists (case-insensitive). Creates section if missing.
@@ -57,7 +81,8 @@ export function remember({ fact, section = 'Session Notes', llm } = {}) {
 
   writeFileSync(brainPath, md, 'utf8');
   const split = splitPersonalBrain();
-  return { ok: true, added: true, action, section, supersededText, split };
+  stampSalience(fact, action);
+  return { ok: true, added: true, action, section, supersededText, split, salience: true };
 }
 
 const isMain = process.argv[1] &&

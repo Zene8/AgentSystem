@@ -1,6 +1,6 @@
 # Memory & Routing Redesign — Research + Design Doc
 
-**Author:** Friday (CTO), Jarvis oversight · **Date:** 2026-06-03 · **Status:** Design — no code yet
+**Author:** Friday (CTO), Jarvis oversight · **Date:** 2026-06-03 · **Status:** Wire-up complete 2026-06-06
 **Scope:** Two independent workstreams — (A) agent memory system, (B) lightweight routing.
 
 ---
@@ -165,6 +165,55 @@ Target: trivial query **47k → ~1-2k tokens**.
 **Harness:** Claude Code hooks [code.claude.com/docs/en/hooks-guide]; subagents [code.claude.com/docs/en/sub-agents].
 
 **Internal:** `tools/graph/graph-lib.js`, `graph-query.js`; `tools/personal-brain-split.js`; `tools/sona-append.js`, `decision-log.js`, `graph-consolidate.js` (orphaned); `.github/workflows/scheduled-tasks.yml`; `.agents/agents/jarvis.md`.
+
+---
+
+## 9. Implementation status — 2026-06-06 wire-up
+
+### P0 — Tilde expansion bug (FIXED)
+
+`--brain-path=~/...` was not expanded by Node's `path.resolve()` — treated `~` as a literal directory. Fixed in `graph-query.js` and `graph-consolidate.js` by adding an `expandTilde()` helper (exported, tested with 5 unit tests). Verified: `graph-query.js personal-brain --hot-stub "--brain-path=~/agent-memory/nexus/personal-brain"` returns real nodes.
+
+Note: the documented brain-path in jarvis.md/friday.md/system_instructions.md is CORRECT (`~/agent-memory/nexus/personal-brain`). The fix was in the tool, not the docs.
+
+### P0 — Friday parallel-spawn prose (FIXED)
+
+Three locations in friday.md claimed "SINGLE parallel batch — one message, multiple agent calls" with an implication of concurrent threads. Corrected to "single response turn — issue multiple agent invocations in one message. The harness serializes tool calls within a turn." Also fixed the "Claude Code only" distinction — same mechanism works across runtimes.
+
+### P0 — UserPromptSubmit identity short-circuit (CONFIRMED)
+
+Hook emits ~46 tokens advisory hint for identity queries. Hook is advisory-only (harness cannot reroute). Confirmed: regex matches and lightweight hint emitted, no heavyweight agent spawn forced.
+
+### P1 — Scheduled memory jobs (FIXED)
+
+Dead `self-hosted` GitHub Actions cron replaced with Windows Task Scheduler:
+- `AgentSystem-WeeklyBrainConsolidation` — Monday 08:00, `memory-maintenance.js --reflect`
+- `AgentSystem-WeeklyMemoryDecay` — Sunday 00:00, `memory-decay.js` for both brains
+- Registered via `tools/setup-scheduled-tasks.ps1` (idempotent, supports `-Uninstall`)
+- Skipped: daily-standup (needs active claude session), weekly-trust-scores (`compute-trust-scores.js` has pre-existing ESM/CJS bug — uses `require` in ESM scope)
+- Verified: both tasks state=Ready in Task Scheduler. `memory-maintenance.js` verified clean manually.
+
+### P2 — computeSalience at encode (FIXED)
+
+`brain-remember.js`'s `remember()` now calls `stampSalience()` after every successful fact write. Salience is computed from: `firstTimeSolve=true` for ADD actions, `presolveConfidence=0.1` for new facts (→ salience 0.40), `presolveConfidence=0.5` for UPDATE (→ salience 0.20). Verified: a live test fact got `salience: 0.4` in its node frontmatter.
+
+`sona-append.js` status: remains an agent-invoked tool (not a hook). It requires structured args (issue/branch/agent/files) that can't be derived from a Stop hook. Agents should call it explicitly after completing issues, as documented in friday.md's SONA Pattern Logging section.
+
+`graph-consolidate.js` is already included in `memory-maintenance.js` step 5 (`consolidate`). Now that the cron actually runs (Task Scheduler), consolidation happens weekly.
+
+### P2b — Wikilink sync (FIXED)
+
+New tool: `tools/graph/wikilink-sync.js`
+- Walks `graph.json` edges → writes `connections: [[nodeA]], [[nodeB]]` into each node's frontmatter
+- Undirected: both source→target and target→source are written
+- Idempotent: second run shows 0 updated
+- Wired into `memory-maintenance.js` step 6 (runs after consolidate, before agent-brain-seed)
+- Verified live: 41 nodes updated, second run 0 updated. Sample: `solo-founder-developer.md` → `connections: [[subscriptions-claude-max-gemini-pro-github-copilot-use]]`
+- 7 unit tests covering: adjacency building, undirected links, isolated nodes, idempotency, stats
+
+### P3 — Obsidian vault setup
+
+Open `~/agent-memory/nexus/` as an Obsidian vault. Obsidian reads `connections: [[wikilink]]` from frontmatter to build its graph view. No code changes needed — just open the directory. After wikilink-sync runs, the graph view will show all edges from graph.json.
 
 ---
 
