@@ -6,7 +6,21 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { agentMemoryRoot, readGraph, writeGraph, addNode, addEdge, emptyGraph } from './graph/graph-lib.js';
+import { agentMemoryRoot, readGraph, writeGraph, addNode, addEdge, emptyGraph, parseFrontmatter } from './graph/graph-lib.js';
+
+// Extract fields from existing node file that downstream steps own (salience, connections).
+// Returns {} if file does not exist or has no frontmatter.
+function readPreservedFields(nodeFile) {
+  if (!existsSync(nodeFile)) return {};
+  try {
+    const raw = readFileSync(nodeFile, 'utf8');
+    const { frontmatter } = parseFrontmatter(raw);
+    const out = {};
+    if (frontmatter.salience !== undefined) out.salience = frontmatter.salience;
+    if (frontmatter.connections !== undefined) out.connections = frontmatter.connections;
+    return out;
+  } catch { return {}; }
+}
 
 function slugify(text) {
   return text
@@ -87,6 +101,12 @@ export function splitPersonalBrain({ dryRun = false } = {}) {
     const keywords = extractKeywords(text);
     const importance = sectionImportance(section);
     const nodeFile = join(nodesDir, `${id}.md`);
+
+    // Carry forward fields owned by downstream steps so they survive re-split.
+    const preserved = readPreservedFields(nodeFile);
+    const salienceLine = preserved.salience !== undefined ? `\nsalience: ${preserved.salience}` : '';
+    const connectionsLine = preserved.connections !== undefined ? `\nconnections: ${preserved.connections}` : '';
+
     const nodeContent = `---
 id: ${id}
 type: user-fact
@@ -95,7 +115,7 @@ created: ${today}
 source_section: ${section}
 relevance_keywords: [${keywords.join(', ')}]
 importance: ${importance}
-hot: true
+hot: true${salienceLine}${connectionsLine}
 ---
 
 ${text}
