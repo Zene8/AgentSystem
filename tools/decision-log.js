@@ -26,7 +26,7 @@ const args = Object.fromEntries(
     })
 );
 
-const nexusDir     = join(homedir(), 'agent-memory', 'nexus');
+const nexusDir     = process.env.AGENT_MEMORY_ROOT || join(homedir(), 'agent-memory', 'nexus');
 const decisionsDir = join(nexusDir, 'decisions');
 const archiveDir   = join(nexusDir, 'decisions', 'archive');
 

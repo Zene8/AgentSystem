@@ -11,8 +11,18 @@
 // Fix 3: --spread enables multi-hop spreading activation to surface non-obvious connections
 // Fix 6 (issue #36): --primed=node1,node2 adds priming_bonus to neighbors of active nodes
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+
+// Expand a leading ~ to the user's home directory.
+// Handles ~, ~/path, and ~\path. Never mutates paths without a leading tilde.
+export function expandTilde(p) {
+  if (!p) return p;
+  if (p === '~') return homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2));
+  return p;
+}
 import {
   readGraph,
   parseFrontmatter,
@@ -20,6 +30,9 @@ import {
   decayedVisitScore,
   spreadingActivation,
   recomputeComposite,
+  needProbabilityScore,
+  effectiveImportance,
+  nodeAccessSignal,
 } from './graph-lib.js';
 
 // BM25 keyword scoring.
@@ -78,6 +91,7 @@ if (isMain) {
   const spreadHops = parseInt(flags['spread-hops'] || '3');
   const spreadDecay = parseFloat(flags['spread-decay'] || '0.5');
   const hotStub = !!flags['hot-stub'];
+  const recordAccess = !!flags['record-access'];
 
   // Fix 6 (issue #36): Working memory priming.
   const primedNodes = flags.primed
@@ -92,7 +106,7 @@ if (isMain) {
   }
 
   const nexusDir = flags['brain-path']
-    ? resolve(flags['brain-path'])
+    ? resolve(expandTilde(flags['brain-path']))
     : join(process.cwd(), 'nexus', slug);
 
   const graphPath = join(nexusDir, 'graph.json');
@@ -124,6 +138,19 @@ if (isMain) {
       }
     }
     process.exit(0);
+  }
+
+  // Adaptive importance: blend section-assigned static importance with learned access signal
+  // (raw normalised visit_count, recency-free) so frequently-recalled low-importance facts rise.
+  const importanceMap = new Map();
+  for (const nodeId of graph.nodes) {
+    const nodePath = join(nodesDir, `${nodeId}.md`);
+    if (!existsSync(nodePath)) continue;
+    const { frontmatter } = parseFrontmatter(readFileSync(nodePath, 'utf8'));
+    const staticImp = parseFloat(frontmatter.importance ?? frontmatter.salience ?? 0);
+    const s = Number.isFinite(staticImp) ? staticImp : 0;
+    const accessSig = nodeAccessSignal(graph.edges, nodeId);
+    importanceMap.set(nodeId, effectiveImportance(s, accessSig));
   }
 
   // Fix 1: Build a time-decayed version of the graph for scoring.
@@ -204,9 +231,10 @@ if (isMain) {
       }
     }
 
-    const score = keywords.length > 0
-      ? parseFloat((edgeScore * 0.4 + keywordScore * 0.6).toFixed(4))
-      : parseFloat(edgeScore.toFixed(4));
+    const base = keywords.length > 0
+      ? edgeScore * 0.4 + keywordScore * 0.6
+      : edgeScore;
+    const score = needProbabilityScore(base, importanceMap.get(nodeId));
 
     return { nodeId, score, edgeScore, keywordScore, primed };
   });
@@ -215,6 +243,13 @@ if (isMain) {
     .filter(r => r.score > 0 || keywords.length === 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, topN);
+
+  // Reconsolidation-on-access: append accessed node IDs to an append-only log (no graph
+  // rewrite on the read path → safe under parallel queries). memory-reconsolidate folds it in.
+  if (recordAccess && directResults.length > 0) {
+    const logLine = JSON.stringify({ ts: new Date().toISOString(), nodes: directResults.map(r => r.nodeId) }) + '\n';
+    try { appendFileSync(join(nexusDir, 'visits.log'), logLine, 'utf8'); } catch { /* non-fatal */ }
+  }
 
   // Fix 3: Spreading activation
   let spreadResults = [];

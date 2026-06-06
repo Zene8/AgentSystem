@@ -125,6 +125,39 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'memory_remember',
+    description: 'Write a durable fact about the user into the personal brain (dedup + re-split).',
+    inputSchema: {
+      type: 'object',
+      required: ['fact'],
+      properties: {
+        fact:    { type: 'string', description: 'The fact to store (plain text, no bullet prefix)' },
+        section: { type: 'string', description: 'Brain section to write under (default: Session Notes)' },
+      },
+    },
+  },
+  {
+    name: 'memory_context',
+    description: 'Return three-layer memory context: top user facts, active project nodes, recent SONA patterns.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        core: { type: 'number', description: 'Number of top user facts to surface (default 7)', default: 7 },
+      },
+    },
+  },
+  {
+    name: 'memory_reflect',
+    description: 'Run a generative reflection pass: reads top facts, asks LLM for higher-level insights, writes them back.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        top:     { type: 'number', description: 'Number of top facts to reflect on (default 10)', default: 10 },
+        dry_run: { type: 'boolean', description: 'Return prompt only, do not call LLM', default: false },
+      },
+    },
+  },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -223,6 +256,43 @@ async function handleTool(name, input) {
       return err(`No memory file found for agent: ${agent}`);
     }
 
+    case 'memory_remember': {
+      const scriptPath = join(TOOLS_DIR, 'brain-remember.js');
+      const args = [`--fact=${input.fact}`];
+      if (input.section) args.push(`--section=${input.section}`);
+      try {
+        const { stdout, stderr } = await exec('node', [scriptPath, ...args], { cwd: REPO_ROOT, env: process.env });
+        return ok((stdout + (stderr ? `\n${stderr}` : '')).trim());
+      } catch (e) {
+        return err(e.message);
+      }
+    }
+
+    case 'memory_context': {
+      const scriptPath = join(TOOLS_DIR, 'memory-context.js');
+      const args = [];
+      if (input.core != null) args.push(`--core=${input.core}`);
+      try {
+        const { stdout, stderr } = await exec('node', [scriptPath, ...args], { cwd: REPO_ROOT, env: process.env });
+        return ok((stdout + (stderr ? `\n${stderr}` : '')).trim());
+      } catch (e) {
+        return err(e.message);
+      }
+    }
+
+    case 'memory_reflect': {
+      const scriptPath = join(TOOLS_DIR, 'memory-reflect.js');
+      const args = [];
+      if (input.top != null) args.push(`--top=${input.top}`);
+      if (input.dry_run) args.push('--dry-run');
+      try {
+        const { stdout, stderr } = await exec('node', [scriptPath, ...args], { cwd: REPO_ROOT, env: process.env });
+        return ok((stdout + (stderr ? `\n${stderr}` : '')).trim());
+      } catch (e) {
+        return err(e.message);
+      }
+    }
+
     default:
       return err(`Unknown tool: ${name}`);
   }
@@ -230,17 +300,24 @@ async function handleTool(name, input) {
 
 // ── Server setup ──────────────────────────────────────────────────────────────
 
-const server = new Server(
-  { name: 'agentsystem', version: '1.0.0' },
-  { capabilities: { tools: {} } },
-);
+export { TOOLS };
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+const isMain = process.argv[1] &&
+  process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: input } = req.params;
-  return handleTool(name, input || {});
-});
+if (isMain) {
+  const server = new Server(
+    { name: 'agentsystem', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const { name, arguments: input } = req.params;
+    return handleTool(name, input || {});
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}

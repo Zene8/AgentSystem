@@ -26,11 +26,10 @@ jobs:
     if: github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1'
     runs-on: self-hosted
     steps:
-      - name: Consolidate personal brain
+      - name: Run full memory sleep cycle
         shell: pwsh
         run: |
-          node C:\Users\natha\AgentSystem\tools\personal-brain-split.js
-          node C:\Users\natha\AgentSystem\tools\memory-stale.js --brain=personal-brain --fix
+          node C:\Users\natha\AgentSystem\tools\memory-maintenance.js --reflect
 
   weekly-memory-decay:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'

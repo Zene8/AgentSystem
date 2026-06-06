@@ -16,3 +16,17 @@
 - No hardcoded secrets in code.
 - Validate at system boundaries only (user input, external APIs).
 - Never bypass permission checks with --no-verify flags.
+
+## Memory (shared graph brain)
+- **Preferred interface:** `node ~/AgentSystem/tools/memory.js <cmd>` — unified entrypoint for all memory operations.
+  - `memory recall <keywords...>` — query graph brain, records access for reconsolidation
+  - `memory context [--core=N]` — startup orientation: user facts + project + recent SONA
+  - `memory remember --fact="..." [--section="..."]` — write a durable fact, deduped automatically
+  - `memory reflect [--top=N] [--dry-run]` — generative reflection pass (LLM)
+  - `memory maintain [--if-stale=N] [--quiet]` — full maintenance pass
+  - `memory help` — usage
+- **Underlying tools (still valid directly):**
+  - Retrieve: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access`
+  - Startup orientation: `node ~/AgentSystem/tools/memory-context.js`
+  - Write-back: `node ~/AgentSystem/tools/brain-remember.js --fact="..." --section="How I Like to Work"`
+- Maintenance (split/decay/consolidate/reflect) runs automatically on session start when stale; no manual step needed.

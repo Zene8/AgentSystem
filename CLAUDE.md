@@ -8,6 +8,10 @@
 ## Memory
 Root: `~/agent-memory/nexus/` — shared across Claude, Gemini, Copilot
 
+## Routines Engine
+
+Agent routines are defined in `config/routines.yml` and enforced hard by default. To add a new routine: add a YAML entry with `id`, `description`, `trigger`, `mechanism` (`agent-rule`|`hook`|`cron`), `enforce: hard`, `enabled: true`, and `action`. Then run `node tools/routines.js compile` to regenerate `.agents/rules/routines.generated.md`. To bypass a routine without editing the registry: `node tools/routines.js bypass <id>`. See `docs/memory-and-routing-redesign.md` → "Routines engine" section.
+
 ## Path-Scoped Rules
 
 These rules only activate when touching matching files (Claude Code `paths:` feature):
