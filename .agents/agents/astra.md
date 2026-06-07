@@ -1,6 +1,6 @@
 ---
 name: Astra
-model: claude-sonnet-4-6
+model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: Frontend Dev, component logic, browser testing, domain authority under Friday (escalates to Friday)
 argument-hint: --component-review, --e2e-test, --perf-audit

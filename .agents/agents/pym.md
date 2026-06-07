@@ -1,6 +1,6 @@
 ---
 name: Pym
-model: claude-sonnet-4-6
+model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: Database Dev, schema, migrations, pressure-testing, domain authority under Friday (escalates to Friday)
 argument-hint: --schema-review, --migration-test, --perf-check

@@ -1,6 +1,6 @@
 ---
 name: Ultron
-model: claude-sonnet-4-6
+model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: Backend Dev, API design, deployment, services, domain authority under Friday (escalates to Friday)
 argument-hint: --api-review, --deploy-check, --service-audit

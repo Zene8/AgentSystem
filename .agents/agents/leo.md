@@ -1,6 +1,6 @@
 ---
 name: Leo
-model: claude-sonnet-4-6
+model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: DevOps, CI/CD, infrastructure, observability, domain authority under Friday (escalates to Friday)
 argument-hint: --ci-review, --infra-audit, --deploy-test
