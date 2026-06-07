@@ -69,6 +69,7 @@ if (require.main === module) {
 // Schedule a one-shot Windows Task Scheduler job to respond to PR comments ~2min later.
 // Non-fatal: if Task Scheduler is unavailable (non-Windows), logs and continues.
 function scheduleAutoResolve(prNumber) {
+  if (!/^\d+$/.test(prNumber)) return;
   try {
     const triggerTime = new Date(Date.now() + 2 * 60 * 1000);
     const hh = String(triggerTime.getHours()).padStart(2, '0');
@@ -87,7 +88,6 @@ function scheduleAutoResolve(prNumber) {
     ], {
       detached: true,
       stdio: 'ignore',
-      shell: true,
     });
     child.unref();
   } catch {
