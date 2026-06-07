@@ -8,10 +8,10 @@ agents:
   sam:      { claude: claude-sonnet-4-6,        gemini: gemini-3.1-pro-preview,       copilot: gpt-5.2-codex,  tier: 3 }
   friday:   { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
   nat:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
-  ultron:   { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
-  pym:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
-  leo:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
-  astra:    { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
+  ultron:   { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
+  pym:      { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
+  leo:      { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
+  astra:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
   wanda:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
   threepio: { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
   r2d2:     { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }

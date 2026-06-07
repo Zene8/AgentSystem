@@ -289,3 +289,47 @@ echo '{"prompt":"fix the bug in the auth api"}' | node ~/.claude/hooks/memory-ro
 ```
 
 Expected output contains `[trust: 82%]` (Friday's current score). No throw, exits 0.
+
+---
+
+## 10. Model tiers + swarm topology (2026-06-07)
+
+### Final model map
+
+| Agent | Claude model | Tier | Notes |
+|-------|-------------|------|-------|
+| jarvis | claude-opus-4-8 | 3 | CEO/orchestrator; requires CC ≥ 2.1.154 |
+| sam | claude-sonnet-4-6 | 2 | Security CSO |
+| friday | claude-sonnet-4-6 | 2 | CTO |
+| nat | claude-sonnet-4-6 | 2 | CBO |
+| ultron | claude-haiku-4-5-20251001 | 1 | Backend specialist (downgraded 2026-06-07) |
+| pym | claude-haiku-4-5-20251001 | 1 | DB specialist (downgraded 2026-06-07) |
+| leo | claude-haiku-4-5-20251001 | 1 | DevOps specialist (downgraded 2026-06-07) |
+| astra | claude-haiku-4-5-20251001 | 1 | Frontend specialist (downgraded 2026-06-07) |
+| wanda | claude-haiku-4-5-20251001 | 1 | Design system |
+| threepio | claude-haiku-4-5-20251001 | 1 | General non-technical worker |
+| r2d2 | claude-haiku-4-5-20251001 | 1 | General technical worker |
+
+`config/models.yml` is the single source of truth. Agent frontmatter `model:` fields must match.
+
+**Quality safety valve:** Friday's `spawn_tiers` block in models.yml lets any spawn be escalated to sonnet or opus via `--model=<tier>` when the subtask is complex (architecture, security, >15 files). Base assignment is haiku; complex override is explicit.
+
+**CC upgrade note:** `claude-opus-4-8` requires Claude Code ≥ 2.1.154. Run `claude update` before jarvis sessions if on an older version.
+
+### Jarvis-as-default mechanism
+
+`settings.json` has `"agent": "jarvis"` — this is the settings key that tells the Claude Code harness to load jarvis.md as the system prompt for the main thread. It is NOT a routing layer. The harness still receives every message; jarvis.md's INSTANT ROUTING rules determine whether to answer inline, route to a specialist, or own the task. The `UserPromptSubmit` hook (`memory-router.js`) injects a lightweight advisory hint before the main loop, which Jarvis reads as context.
+
+### Subprocess swarm reality
+
+Swarms are launched as `claude -p "<full-context task>" --agent=X &` subprocesses. Each subprocess is its own top-level CLI process — it can itself spawn further `claude -p` subprocesses, enabling true hierarchical nesting (Jarvis→Fridays→workers). There is no harness-level "in-session fan-out" — the `&` background mechanism is what creates parallelism.
+
+**Gemini/Copilot multi-CLI dispatch is NOT currently active.** Agent defs previously claimed Gemini/Copilot swarms worked identically; that was fiction. Until wired, those runtimes execute sequentially.
+
+### r2d2 and threepio as general workers
+
+Both agents are haiku-tier, parallelizable, and open to any agent in the system:
+- **r2d2** — general-purpose TECHNICAL worker: grep/search, file transforms, prototyping, scoped edits, read-only investigation.
+- **threepio** — general-purpose NON-TECHNICAL worker: docs, comms, PR descriptions, release notes, email drafts, Notion syncs.
+
+Any agent (jarvis, nat, friday, sam, specialists) may spawn N instances of either in parallel for independent subtasks. Include full context in each spawn — subprocesses share no session memory.
