@@ -30,3 +30,15 @@ These rules only activate when touching matching files (Claude Code `paths:` fea
 
 - **Test files** (`tests/**`, `**/*.test.js`):
   Run `node --test <file>` before committing. All tests must pass on dev before PR to main.
+
+<!-- AGENT-SYSTEM-BOOTSTRAP: do not remove this block -->
+## Agent System Context (auto-injected by bootstrap-repo.ps1)
+
+- Agent routing: see `~/.claude/CLAUDE.md`
+- Agent brain: `~/agent-memory/nexus/agent-brain/`
+- Repo brain: `nexus/agentsystem/` (run `node tools/graph/graph-init.js agentsystem .` to refresh)
+- Query graph: `node tools/graph/graph-query.js agentsystem <keywords>`
+- Update weights: `node tools/graph/graph-weight.js visit agentsystem <source> <target>`
+- Known repos: `~/agent-memory/nexus/known-repos.json`
+- Shared memory: `~/agent-memory/nexus/` — same path for Claude, Gemini, Copilot
+<!-- END AGENT-SYSTEM-BOOTSTRAP -->

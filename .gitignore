@@ -4,3 +4,6 @@ nexus/agentsystem/
 nexus/*/
 node_modules/
 .claude/
+
+# AgentSystem local graph brain (decaying memory — not committed)
+nexus/
