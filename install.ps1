@@ -6,7 +6,7 @@
 .DESCRIPTION
     1. Checks prerequisites (node, git, gh, CLIs)
     2. Initializes personal brain
-    3. Syncs agents to all CLIs (~/.claude, ~/.copilot, ~/.gemini)
+    3. Syncs agents to all CLIs (~/.claude, ~/.gemini, Antigravity plugin)
     4. Creates GitHub labels in current repo
     5. Optionally sets up self-hosted runner (requires admin, use -Runner flag)
 
@@ -65,7 +65,7 @@ foreach ($p in $prereqs.GetEnumerator()) {
     }
 }
 
-foreach ($cli in @("claude", "gemini", "copilot")) {
+foreach ($cli in @("claude")) {
     $found = Get-Command $cli -ErrorAction SilentlyContinue
     if ($found) { Write-OK "$cli CLI found" }
     else { Write-Warn "$cli CLI not found (sync will skip it)" }

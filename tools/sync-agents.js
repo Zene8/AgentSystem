@@ -17,11 +17,11 @@ const AGENTS_DIR = join(REPO_ROOT, '.agents', 'agents');
 const CONFIG_DIR = join(REPO_ROOT, 'config');
 const HOME       = homedir();
 
-// Model assignments per CLI (mirrors config/models.yml)
+// Model assignments per CLI (mirrors config/models.yml -- keep in sync with that file).
+// ultron/pym/leo/astra are tier-1 specialist workers (downgraded to cheapest tier in ede47b6).
 const MODELS = {
-  claude:  { jarvis:'claude-opus-4-8', sam:'claude-sonnet-4-6', friday:'claude-sonnet-4-6', nat:'claude-sonnet-4-6', ultron:'claude-sonnet-4-6', pym:'claude-sonnet-4-6', leo:'claude-sonnet-4-6', astra:'claude-sonnet-4-6', wanda:'claude-haiku-4-5-20251001', threepio:'claude-haiku-4-5-20251001', r2d2:'claude-haiku-4-5-20251001' },
-  gemini:  { jarvis:'gemini-3.1-pro-preview', sam:'gemini-3.1-pro-preview', friday:'gemini-3-flash-preview', nat:'gemini-3-flash-preview', ultron:'gemini-3-flash-preview', pym:'gemini-3-flash-preview', leo:'gemini-3-flash-preview', astra:'gemini-3-flash-preview', wanda:'gemini-3.1-flash-lite-preview', threepio:'gemini-3.1-flash-lite-preview', r2d2:'gemini-3.1-flash-lite-preview' },
-  copilot: { jarvis:'gpt-5.2-codex', sam:'gpt-5.2-codex', friday:'gpt-5.4-mini', nat:'gpt-5.4-mini', ultron:'gpt-5.4-mini', pym:'gpt-5.4-mini', leo:'gpt-5.4-mini', astra:'gpt-5.4-mini', wanda:'gpt-5-mini', threepio:'gpt-5-mini', r2d2:'gpt-5-mini' },
+  claude:  { jarvis:'claude-opus-4-8', sam:'claude-sonnet-4-6', friday:'claude-sonnet-4-6', nat:'claude-sonnet-4-6', ultron:'claude-haiku-4-5-20251001', pym:'claude-haiku-4-5-20251001', leo:'claude-haiku-4-5-20251001', astra:'claude-haiku-4-5-20251001', wanda:'claude-haiku-4-5-20251001', threepio:'claude-haiku-4-5-20251001', r2d2:'claude-haiku-4-5-20251001' },
+  gemini:  { jarvis:'gemini-3.1-pro-preview', sam:'gemini-3.1-pro-preview', friday:'gemini-3-flash-preview', nat:'gemini-3-flash-preview', ultron:'gemini-3.1-flash-lite-preview', pym:'gemini-3.1-flash-lite-preview', leo:'gemini-3.1-flash-lite-preview', astra:'gemini-3.1-flash-lite-preview', wanda:'gemini-3.1-flash-lite-preview', threepio:'gemini-3.1-flash-lite-preview', r2d2:'gemini-3.1-flash-lite-preview' },
 };
 
 function ok(msg)   { console.log('[SUCCESS]', msg); }
@@ -48,9 +48,18 @@ function stripFrontmatter(content) {
   return content.replace(/^---[\s\S]*?---\n/, '');
 }
 
-function copilotFrontmatter(name, description, model) {
-  const safeDesc = description.replace(/"/g, "'");
-  return `---\nname: "${name}"\ndescription: "${safeDesc}"\nmodel: "${model}"\n---\n\n`;
+// Remove the `tools:` line from the frontmatter block.
+// Our agent defs list abstract tool names (github-cli, bash, git, npm, docker, figma, ...)
+// that are NOT valid Claude Code / Gemini tool identifiers. A subagent loaded with an
+// allowlist of unrecognized names ends up with ZERO usable tools, so it hallucinates
+// `<function_calls>` as plain text instead of executing anything. Omitting `tools:`
+// makes the agent inherit full/default tool access (Bash, MCPs, sub-agent spawn).
+// Antigravity strips it too (builds fresh frontmatter without tools).
+function stripToolsLine(content) {
+  const m = content.match(/^(---\n)([\s\S]*?)(\n---)/);
+  if (!m) return content;
+  const fmBody = m[2].split('\n').filter(l => !/^tools:/.test(l)).join('\n');
+  return m[1] + fmBody + m[3] + content.slice(m[0].length);
 }
 
 function ensureDir(p) { mkdirSync(p, { recursive: true }); }
@@ -117,26 +126,13 @@ function syncAgent(file) {
   const claudeDir = join(HOME, '.claude', 'agents');
   ensureDir(claudeDir);
   const claudeModel = MODELS.claude[agentName] || meta.model || '';
-  writeFileSync(join(claudeDir, file), setModel(content, claudeModel), 'utf8');
+  writeFileSync(join(claudeDir, file), setModel(stripToolsLine(content), claudeModel), 'utf8');
   ok(`Claude: ${join(claudeDir, file)}`);
 
-  // Gemini CLI
-  const geminiDir = join(HOME, '.gemini', 'agents');
-  ensureDir(geminiDir);
-  const geminiModel = MODELS.gemini[agentName] || 'gemini-3-flash-preview';
-  writeFileSync(join(geminiDir, file), setModel(content, geminiModel), 'utf8');
-  ok(`Gemini: ${join(geminiDir, file)}`);
-
-  // Copilot
-  const copilotDir = join(HOME, '.copilot', 'agents');
-  ensureDir(copilotDir);
-  const copilotModel = MODELS.copilot[agentName] || 'gpt-5.4-mini';
-  const body = stripFrontmatter(content);
-  writeFileSync(join(copilotDir, file), copilotFrontmatter(name, desc, copilotModel) + body, 'utf8');
-  ok(`Copilot: ${join(copilotDir, file)}`);
-
-  // Antigravity CLI (agy) -- stage into the plugin agents/ dir (installed after the loop)
-  writeAntigravityAgent(file, name, desc, geminiModel, content);
+  // Antigravity CLI (agy) -- stage into the plugin agents/ dir (installed after the loop).
+  // agy is a Gemini-family runtime, so it still uses gemini-* model ids from MODELS.gemini.
+  const antiModel = MODELS.gemini[agentName] || 'gemini-3-flash-preview';
+  writeAntigravityAgent(file, name, desc, antiModel, content);
 }
 
 function syncConfig() {
@@ -164,8 +160,6 @@ syncConfig();
 installAntigravityPlugin();
 
 const claudeCount  = readdirSync(join(HOME, '.claude', 'agents')).filter(f => f.endsWith('.md')).length;
-const geminiCount  = existsSync(join(HOME, '.gemini', 'agents')) ? readdirSync(join(HOME, '.gemini', 'agents')).filter(f => f.endsWith('.md')).length : 0;
-const copilotCount = existsSync(join(HOME, '.copilot', 'agents')) ? readdirSync(join(HOME, '.copilot', 'agents')).filter(f => f.endsWith('.md')).length : 0;
 const antiCount    = existsSync(ANTI_AGENTS_DIR) ? readdirSync(ANTI_AGENTS_DIR).filter(f => f.endsWith('.md')).length : 0;
 
-ok(`Sync complete -- Claude: ${claudeCount}, Gemini: ${geminiCount}, Copilot: ${copilotCount}, Antigravity: ${antiCount}`);
+ok(`Sync complete -- Claude: ${claudeCount}, Antigravity: ${antiCount}`);

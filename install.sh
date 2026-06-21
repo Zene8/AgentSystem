@@ -33,7 +33,7 @@ for cmd in node git gh; do
   fi
 done
 
-for cli in claude gemini copilot; do
+for cli in claude; do
   if command -v "$cli" &>/dev/null; then ok "$cli CLI found"
   else warn "$cli CLI not found (sync will skip it)"; fi
 done
