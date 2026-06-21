@@ -5,10 +5,11 @@
  * Usage: node tools/sync-agents.js
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT  = join(__dirname, '..');
@@ -54,6 +55,54 @@ function copilotFrontmatter(name, description, model) {
 
 function ensureDir(p) { mkdirSync(p, { recursive: true }); }
 
+// Antigravity CLI (agy) ships agents as a plugin: a plugin.json manifest plus an
+// agents/<name>.md dir (frontmatter name+description, body = system prompt).
+// Installed via `agy plugin install <dir>`. See sync verification notes.
+const ANTI_PLUGIN_DIR = join(HOME, '.gemini', 'agentsystem-plugin');
+const ANTI_AGENTS_DIR = join(ANTI_PLUGIN_DIR, 'agents');
+
+// Pull the behavior block (the agent's system prompt) out of an agent .md and dedent it.
+function behaviorBody(content) {
+  const body = stripFrontmatter(content);
+  const m = body.match(/^\s*behavior:\s*\|[^\n]*\n([\s\S]*)$/);
+  const raw = m ? m[1] : body;
+  return raw.split('\n').map(l => l.replace(/^  /, '')).join('\n').trim();
+}
+
+// Write one agent into the Antigravity plugin's agents/ dir as Claude-style markdown.
+// NOTE: agy silently drops any agent whose `tools:` frontmatter names a tool it
+// doesn't recognize (github-cli, gmail, figma, npm, docker, ...). Our tool names are
+// abstract/Claude-style and have no agy equivalent, so we omit `tools:` entirely --
+// the agent then loads with default tool access (same as built-in agy agents).
+function writeAntigravityAgent(file, name, desc, model, content) {
+  ensureDir(ANTI_AGENTS_DIR);
+  const safeDesc = desc.replace(/\n+/g, ' ').replace(/"/g, "'");
+  const md = `---\nname: ${name}\ndescription: "${safeDesc}"\nmodel: ${model}\n`
+    + `---\n\n${behaviorBody(content)}\n`;
+  writeFileSync(join(ANTI_AGENTS_DIR, file), md, 'utf8');
+  ok(`Antigravity: ${join(ANTI_AGENTS_DIR, file)}`);
+}
+
+// Finalize the plugin manifest and install it into agy if the CLI is available.
+function installAntigravityPlugin() {
+  writeFileSync(join(ANTI_PLUGIN_DIR, 'plugin.json'), JSON.stringify({
+    name: 'agentsystem',
+    version: '1.0.0',
+    description: 'AgentSystem agent roster synced from .agents/agents',
+    author: 'AgentSystem',
+  }, null, 2) + '\n', 'utf8');
+
+  for (const agy of ['agy', join(HOME, '.local', 'bin', 'agy')]) {
+    try {
+      execFileSync(agy, ['plugin', 'install', ANTI_PLUGIN_DIR], { stdio: 'inherit' });
+      ok(`Antigravity: installed plugin via ${agy}`);
+      return true;
+    } catch { /* try next candidate */ }
+  }
+  warn(`agy CLI not found -- to register agents run: agy plugin install ${ANTI_PLUGIN_DIR}`);
+  return false;
+}
+
 function syncAgent(file) {
   const agentName = file.replace(/\.md$/, '').toLowerCase();
   const srcPath   = join(AGENTS_DIR, file);
@@ -85,6 +134,9 @@ function syncAgent(file) {
   const body = stripFrontmatter(content);
   writeFileSync(join(copilotDir, file), copilotFrontmatter(name, desc, copilotModel) + body, 'utf8');
   ok(`Copilot: ${join(copilotDir, file)}`);
+
+  // Antigravity CLI (agy) -- stage into the plugin agents/ dir (installed after the loop)
+  writeAntigravityAgent(file, name, desc, geminiModel, content);
 }
 
 function syncConfig() {
@@ -100,15 +152,20 @@ function syncConfig() {
 
 info('Starting cross-platform agent sync...');
 
+// Rebuild the Antigravity plugin staging dir from scratch so removed agents don't linger.
+if (existsSync(ANTI_AGENTS_DIR)) rmSync(ANTI_AGENTS_DIR, { recursive: true, force: true });
+
 const files = readdirSync(AGENTS_DIR).filter(f => f.endsWith('.md'));
 for (const file of files) {
   try { syncAgent(file); } catch (e) { warn(`Failed ${file}: ${e.message}`); }
 }
 
 syncConfig();
+installAntigravityPlugin();
 
 const claudeCount  = readdirSync(join(HOME, '.claude', 'agents')).filter(f => f.endsWith('.md')).length;
 const geminiCount  = existsSync(join(HOME, '.gemini', 'agents')) ? readdirSync(join(HOME, '.gemini', 'agents')).filter(f => f.endsWith('.md')).length : 0;
 const copilotCount = existsSync(join(HOME, '.copilot', 'agents')) ? readdirSync(join(HOME, '.copilot', 'agents')).filter(f => f.endsWith('.md')).length : 0;
+const antiCount    = existsSync(ANTI_AGENTS_DIR) ? readdirSync(ANTI_AGENTS_DIR).filter(f => f.endsWith('.md')).length : 0;
 
-ok(`Sync complete -- Claude: ${claudeCount}, Gemini: ${geminiCount}, Copilot: ${copilotCount}`);
+ok(`Sync complete -- Claude: ${claudeCount}, Gemini: ${geminiCount}, Copilot: ${copilotCount}, Antigravity: ${antiCount}`);
