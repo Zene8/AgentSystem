@@ -2,11 +2,15 @@
 
 ## Agent Management
 - Edit: `.agents/agents/<name>.md`
-- Sync to all CLIs: `powershell -File sync_agents_from_repo.ps1`
+- Sync to all CLIs: `node tools/sync-agents.js` (Linux/Mac/WSL) or `powershell -File sync_agents_from_repo.ps1` (Windows)
 - Verify: check `.agents/sync.log` for ERROR lines
 
 ## Memory
 Root: `~/agent-memory/nexus/` — shared across Claude, Antigravity
+
+Onboard a repo (CLAUDE.md block + graph brain + registry): `node tools/bootstrap-repo.js [repoPath]`
+Onboard every git repo under a dir (also creates the global brains): `node tools/bootstrap-repo.js --all ~/dev`
+Cross-platform (builtins only); idempotent. The per-repo `nexus/` brain is gitignored. Windows: `bootstrap-repo.ps1`.
 
 ## Routines Engine
 
