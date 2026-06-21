@@ -6,7 +6,7 @@
 - Verify: check `.agents/sync.log` for ERROR lines
 
 ## Memory
-Root: `~/agent-memory/nexus/` — shared across Claude, Gemini, Copilot
+Root: `~/agent-memory/nexus/` — shared across Claude, Antigravity
 
 ## Routines Engine
 

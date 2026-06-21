@@ -216,7 +216,8 @@ User
 | `.agents/memory/<agent>.md` | Agent decision log and session notes |
 | `.agents/memory/TEMPLATE.md` | Memory structure template |
 | `agents-memory/<agent>.md` | Runtime session persistence (CLI) |
-| `sync_agents_from_repo.ps1` | Generates user-level Claude, Copilot, Gemini, Antigravity copies |
+| `tools/sync-agents.js` | Generates user-level Claude + Antigravity copies (Linux/Mac/Windows) |
+| `sync_agents_from_repo.ps1` | Windows-only equivalent of the sync (Claude + Antigravity) |
 | `CLAUDE.md` | Claude-specific usage, default agent, bypass pattern |
 | `docs/HANDOFF.md` | Current-state log for in-flight and blocked work |
 | `README.md` | Repo overview and quick start |
@@ -225,11 +226,12 @@ User
 
 ## Model Policy
 
-| Agent | Claude | Gemini | Copilot |
-|-------|--------|--------|---------|
-| Jarvis | claude-opus-4-8 | gemini-3.1-pro-preview | gpt-5.2-codex |
-| Friday / Nat / Sam | claude-sonnet-4-6 | gemini-3-flash-preview | gpt-5.4-mini |
-| Threepio | claude-sonnet-4-6 | gemini-3.1-flash-lite-preview | gpt-5-mini |
-| All other agents | claude-haiku-4-5-20251001 | gemini-3-flash-preview | gpt-5-mini |
+| Agent | Claude | Antigravity (Gemini model id) |
+|-------|--------|-------------------------------|
+| Jarvis | claude-opus-4-8 | gemini-3.1-pro-preview |
+| Sam | claude-sonnet-4-6 | gemini-3.1-pro-preview |
+| Friday / Nat | claude-sonnet-4-6 | gemini-3-flash-preview |
+| Ultron / Pym / Leo / Astra / Wanda / Threepio / R2D2 | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview |
 
-If a model mapping changes, update `sync_agents_from_repo.ps1` first, then regenerate outputs.
+Antigravity is a Gemini-family runtime, so it loads `gemini-*` model ids (the `gemini` column in `config/models.yml`).
+Source of truth: `config/models.yml`. If a mapping changes, update that file and the `MODELS` map in `tools/sync-agents.js` (and `sync_agents_from_repo.ps1` for Windows), then re-run the sync.

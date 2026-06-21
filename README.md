@@ -1,6 +1,6 @@
 # AgentSystem
 
-A multi-agent orchestration system that runs a fleet of 11 specialized AI agents across Claude Code, Gemini CLI, and GitHub Copilot — sharing memory, routing work intelligently, and executing full engineering workflows autonomously.
+A multi-agent orchestration system that runs a fleet of 11 specialized AI agents across Claude Code and Antigravity — sharing memory, routing work intelligently, and executing full engineering workflows autonomously.
 
 [![Tests](https://img.shields.io/badge/tests-45%20passing-brightgreen)](#)
 [![License](https://img.shields.io/badge/license-Source%20Available-blue)](LICENSE)
@@ -10,7 +10,7 @@ A multi-agent orchestration system that runs a fleet of 11 specialized AI agents
 ## What it does
 
 - **11 specialized agents** — CEO (Jarvis), CTO (Friday), CSO (Sam), Backend (Ultron), DB (Pym), DevOps (Leo), Frontend (Astra), Design (Wanda), Docs (Threepio), Business (Nat), Fallback (r2d2)
-- **Three CLIs, one brain** — Claude Code, Gemini CLI, and GitHub Copilot all load the same agents and share the same graph memory
+- **Two CLIs, one brain** — Claude Code and Antigravity both load the same agents and share the same graph memory
 - **Autonomous issue workflow** — label a GitHub issue `agent:friday` from your phone → agents branch, code, PR, audit, and ping you to merge
 - **Bayesian graph memory** — Ebbinghaus decay, spreading activation, context-adaptive weight profiles
 - **Dynamic model selection** — Friday classifies task complexity (COMPLEX/STANDARD/SIMPLE) and spawns workers on the right model tier

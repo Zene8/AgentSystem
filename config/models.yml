@@ -1,26 +1,26 @@
 # Agent model assignments
 # Tiers:
-#   3 = complex reasoning  → claude-opus-4-8          / gemini-3.1-pro-preview        / gpt-5.2-codex
-#   2 = standard work      → claude-sonnet-4-6         / gemini-3-flash-preview        / gpt-5.4-mini
-#   1 = simple/cheapest    → claude-haiku-4-5-20251001 / gemini-3.1-flash-lite-preview / gpt-5-mini  (gpt-5-mini << gpt-5.4-mini in cost)
+#   3 = complex reasoning  → claude-opus-4-8          / gemini-3.1-pro-preview
+#   2 = standard work      → claude-sonnet-4-6         / gemini-3-flash-preview
+#   1 = simple/cheapest    → claude-haiku-4-5-20251001 / gemini-3.1-flash-lite-preview
 agents:
-  jarvis:   { claude: claude-opus-4-8,          gemini: gemini-3.1-pro-preview,       copilot: gpt-5.2-codex,  tier: 3 }
-  sam:      { claude: claude-sonnet-4-6,        gemini: gemini-3.1-pro-preview,       copilot: gpt-5.2-codex,  tier: 3 }
-  friday:   { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
-  nat:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       copilot: gpt-5.4-mini,   tier: 2 }
-  ultron:   { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
-  pym:      { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
-  leo:      { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
-  astra:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,     tier: 1 }
-  wanda:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
-  threepio: { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
-  r2d2:     { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini,   tier: 1 }
+  jarvis:   { claude: claude-opus-4-8,          gemini: gemini-3.1-pro-preview,       tier: 3 }
+  sam:      { claude: claude-sonnet-4-6,        gemini: gemini-3.1-pro-preview,       tier: 3 }
+  friday:   { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       tier: 2 }
+  nat:      { claude: claude-sonnet-4-6,        gemini: gemini-3-flash-preview,       tier: 2 }
+  ultron:   { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
+  pym:      { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
+  leo:      { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
+  astra:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
+  wanda:    { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
+  threepio: { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
+  r2d2:     { claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, tier: 1 }
 
 # Dynamic spawn tiers (Friday uses when spawning workers)
 spawn_tiers:
   complex:  { signals: "architecture, security, >15 files, cross-cutting, design decisions",
-              claude: claude-opus-4-8, gemini: gemini-3.1-pro-preview, copilot: gpt-5.2-codex }
+              claude: claude-opus-4-8, gemini: gemini-3.1-pro-preview }
   standard: { signals: "feature implementation, bug fix, 1-15 files",
-              claude: claude-sonnet-4-6, gemini: gemini-3-flash-preview, copilot: gpt-5.4-mini }
+              claude: claude-sonnet-4-6, gemini: gemini-3-flash-preview }
   simple:   { signals: "docs, read-only, grep/search, single file",
-              claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview, copilot: gpt-5-mini }
+              claude: claude-haiku-4-5-20251001, gemini: gemini-3.1-flash-lite-preview }

@@ -7,7 +7,7 @@
 .PARAMETER Slug
     Short identifier for this repo (used as brain key). Defaults to dirname.
 .PARAMETER PrimaryCli
-    Which CLI to use as primary: claude, gemini, copilot. Defaults to claude.
+    Which CLI to use as primary: claude. Defaults to claude.
 .PARAMETER SkipGraphInit
     Skip running graph-init (useful if repo has no git history yet).
 #>
@@ -144,7 +144,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 Write-Host "  Registered: $Slug" -ForegroundColor Green
 
 # -- Step 6: Verify CLIs ------------------------------------------------------
-foreach ($cli in @("claude", "gemini", "copilot")) {
+foreach ($cli in @("claude")) {
     $found = Get-Command $cli -ErrorAction SilentlyContinue
     if ($found) { Write-Host "  CLI: $cli found" -ForegroundColor Green }
     else { Write-Warning "  CLI: $cli not found (install for full agent support)" }
