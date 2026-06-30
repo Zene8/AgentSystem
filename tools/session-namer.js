@@ -299,7 +299,7 @@ for (const arg of args) {
 (async () => {
   if      (flags.register)              cmdRegister({ session: flags.session, cwd: flags.cwd || process.env.CWD || process.cwd() });
   else if (flags.finalize)              await cmdFinalize({ session: flags.session });
-  else if (flags.scan)                  await cmdScan();
+  else if (flags.scan)                  { await cmdScan(); await cmdScanAgy(); }
   else if (flags.list)                  cmdList({ repo: flags.repo, date: flags.date, limit: flags.limit });
   else if (flags.search || positional.length && !flags.group)
                                         cmdSearch(flags.search !== true ? flags.search : positional.join(' '));
@@ -323,3 +323,152 @@ Registry: ${REGISTRY}
 `);
   }
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Antigravity CLI (agy) support
+// Transcripts: ~/.gemini/antigravity-cli/brain/[session-id]/.system_generated/logs/transcript.jsonl
+// Format: { source: "USER_EXPLICIT", type: "USER_INPUT", created_at, content: "<USER_REQUEST>text</USER_REQUEST>..." }
+// cwd map: ~/.gemini/antigravity-cli/cache/last_conversations.json  (cwd → latest-session-id)
+// history: ~/.gemini/antigravity-cli/history.jsonl  (timestamp ms, workspace, display)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const AGY_BRAIN_DIR    = join(HOME, '.gemini', 'antigravity-cli', 'brain');
+const AGY_LAST_CONV    = join(HOME, '.gemini', 'antigravity-cli', 'cache', 'last_conversations.json');
+const AGY_HISTORY      = join(HOME, '.gemini', 'antigravity-cli', 'history.jsonl');
+
+/** Build session-id → cwd map for agy sessions */
+function buildAgyCwdMap() {
+  const map = new Map();   // session-id → cwd
+
+  // 1. Invert last_conversations.json (cwd → latest-session-id)
+  if (existsSync(AGY_LAST_CONV)) {
+    try {
+      const lc = JSON.parse(readFileSync(AGY_LAST_CONV, 'utf8'));
+      for (const [cwd, sid] of Object.entries(lc)) map.set(sid, cwd);
+    } catch { /* ignore */ }
+  }
+
+  // 2. Timestamp correlation via history.jsonl for unmapped sessions
+  let histEntries = [];
+  if (existsSync(AGY_HISTORY)) {
+    try {
+      histEntries = readFileSync(AGY_HISTORY, 'utf8')
+        .split('\n').filter(Boolean)
+        .map(l => { try { return JSON.parse(l); } catch { return null; } })
+        .filter(e => e && e.timestamp && e.workspace);
+    } catch { /* ignore */ }
+  }
+
+  if (histEntries.length && existsSync(AGY_BRAIN_DIR)) {
+    for (const dir of readdirSync(AGY_BRAIN_DIR)) {
+      if (map.has(dir)) continue;   // already mapped
+      const transcript = join(AGY_BRAIN_DIR, dir, '.system_generated', 'logs', 'transcript.jsonl');
+      if (!existsSync(transcript)) continue;
+
+      // Get first message ISO timestamp, convert to epoch ms
+      try {
+        const firstLine = readFileSync(transcript, 'utf8').split('\n').find(l => l.trim());
+        if (!firstLine) continue;
+        const firstMs = Date.parse(JSON.parse(firstLine).created_at);
+        if (!firstMs) continue;
+
+        // Find history entries within ±5 min of session start
+        const WINDOW = 5 * 60 * 1000;
+        const nearby = histEntries.filter(e => Math.abs(e.timestamp - firstMs) < WINDOW);
+        if (!nearby.length) continue;
+
+        // Most common workspace in that window
+        const freq = {};
+        for (const e of nearby) freq[e.workspace] = (freq[e.workspace] || 0) + 1;
+        const best = Object.entries(freq).sort((a,b) => b[1]-a[1])[0][0];
+        map.set(dir, best);
+      } catch { /* skip */ }
+    }
+  }
+
+  return map;
+}
+
+/** Strip <USER_REQUEST>...</USER_REQUEST> and metadata XML tags from agy content */
+function extractAgyUserText(content) {
+  if (!content) return '';
+  const m = content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
+  return m ? m[1].trim() : content.replace(/<[^>]+>/g, ' ').trim();
+}
+
+/** Read first typed user message from an agy transcript */
+async function readFirstAgyMessage(brainDir) {
+  const transcript = join(brainDir, '.system_generated', 'logs', 'transcript.jsonl');
+  if (!existsSync(transcript)) return null;
+
+  return new Promise(resolve => {
+    const rl = createInterface({ input: createReadStream(transcript), crlfDelay: Infinity });
+    let found = null;
+    rl.on('line', line => {
+      if (found) return;
+      try {
+        const obj = JSON.parse(line);
+        if (
+          obj.source === 'USER_EXPLICIT' &&
+          obj.type   === 'USER_INPUT' &&
+          obj.content
+        ) {
+          const text = extractAgyUserText(obj.content);
+          if (text.length > 0) {
+            found = { text, ts: obj.created_at };
+            rl.close();
+          }
+        }
+      } catch { /* skip */ }
+    });
+    rl.on('close', () => resolve(found));
+    rl.on('error',  () => resolve(null));
+  });
+}
+
+/** Scan all agy brain dirs and register sessions */
+async function cmdScanAgy() {
+  if (!existsSync(AGY_BRAIN_DIR)) {
+    console.log('[session-namer] agy: brain dir not found, skipping');
+    return;
+  }
+
+  const cwdMap = buildAgyCwdMap();
+  let registered = 0; let named = 0;
+  const dirs = readdirSync(AGY_BRAIN_DIR);
+
+  for (const sessionId of dirs) {
+    const brainDir = join(AGY_BRAIN_DIR, sessionId);
+    const existing = loadRegistry().find(e => e.session === sessionId);
+    if (existing?.finalized) continue;
+
+    const cwd  = cwdMap.get(sessionId) || '';
+    const repo = repoFromCwd(cwd) || 'agy';
+
+    const msg = await readFirstAgyMessage(brainDir);
+    const ts  = msg?.ts || new Date().toISOString();
+
+    if (!existing) {
+      saveEntry({ session: sessionId, repo, cwd, title: 'pending',
+                  name: buildName(repo, 'pending', ts),
+                  timestamp: ts, finalized: false, runtime: 'agy' });
+      registered++;
+    }
+
+    if (msg) {
+      const title = titleFromText(msg.text);
+      const name  = buildName(repo, title, msg.ts || ts);
+      const prev  = loadRegistry().find(e => e.session === sessionId) || {};
+      saveEntry({ ...prev, session: sessionId, repo, cwd, title, name,
+                  timestamp: msg.ts || ts, finalized: true,
+                  first_prompt: msg.text.slice(0, 120), runtime: 'agy' });
+      console.log(`[session-namer][agy] ${sessionId.slice(0,8)}… → "${name}"`);
+      named++;
+    } else {
+      const prev = loadRegistry().find(e => e.session === sessionId) || {};
+      saveEntry({ ...prev, session: sessionId, repo, cwd, finalized: true, runtime: 'agy' });
+    }
+  }
+
+  console.log(`[session-namer][agy] done — registered: ${registered}, named: ${named}`);
+}
