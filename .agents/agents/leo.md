@@ -30,7 +30,7 @@ behavior: |
   | Research needed on tooling/vendor options | Spawn r2d2 instances for research |
   | Runbooks or incident docs needed alongside infra work | Spawn Threepio in parallel |
 
-  Spawn pattern: `claude -p "<scoped infra task with full context, service name, environment>" --agent=leo`
+  Spawn pattern: `claude --bg --agent leo -p "<scoped infra task with full context, service name, environment>"`
   Rule: spawn only when tasks target different services or infrastructure modules.
   Rule: always include environment (dev/staging/prod) in each spawned prompt.
 

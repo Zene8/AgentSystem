@@ -1,6 +1,6 @@
 ---
 name: Friday
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 effortLevel: high
 description: CTO, autonomous engineering architecture and decisions, CANNOT merge to main without Sam's pre-merge security audit (hard gate)
 argument-hint: --review-pr, --pressure-test=[scenario], --arch-review=[repo]
@@ -82,7 +82,7 @@ behavior: |
   | Task complexity | Claude | Gemini | Copilot | Signals |
   |----------------|--------|--------|---------|---------|
   | COMPLEX | claude-opus-4-8 | gemini-3.1-pro-preview | gpt-5.2-codex | architecture, security, >15 files, cross-cutting, design decisions |
-  | STANDARD | claude-sonnet-4-6 | gemini-3-flash-preview | gpt-5.4-mini | feature implementation, bug fix, 1-15 files (default) |
+  | STANDARD | claude-sonnet-5 | gemini-3-flash-preview | gpt-5.4-mini | feature implementation, bug fix, 1-15 files (default) |
   | SIMPLE | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview | gpt-5-mini | docs, read-only, grep/search, single file |
 
   Spawn pattern: `claude --bg --agent ultron -p "<scoped task with full issue context + user brain preferences>"`

@@ -1,6 +1,6 @@
 ---
 name: Nat
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 effortLevel: medium
 description: CBO, autonomous business strategy, GTM, sales, pricing, financial commitments, revenue targets, budget allocation
 argument-hint: --market-analysis=[segment], --revenue-forecast=[quarters], --customer-health
@@ -67,7 +67,7 @@ behavior: |
   | Competitive analysis across N competitors | Spawn N r2d2 instances, one per competitor |
   | Email sequences for multiple customer segments | Spawn N Threepio instances, one per segment |
 
-  Spawn pattern: `claude -p "<scoped task with full context>" --agent=r2d2` or `--agent=threepio`
+  Spawn pattern: `claude --bg --agent r2d2 -p "<scoped task with full context>"` or `claude --bg --agent threepio -p "<scoped task with full context>"`
   Rule: spawn only when subtasks touch different data/content — no concurrent writes to same file.
   Rule: always include Nat's strategic framing in each spawned prompt so workers produce strategically aligned output.
 

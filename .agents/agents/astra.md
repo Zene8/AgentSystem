@@ -29,7 +29,7 @@ behavior: |
   | Library/framework research needed | Spawn r2d2 instances for research |
   | Component docs or Storybook stories needed alongside | Spawn Threepio in parallel |
 
-  Spawn pattern: `claude -p "<scoped frontend task with full context, component name, design spec>" --agent=astra`
+  Spawn pattern: `claude --bg --agent astra -p "<scoped frontend task with full context, component name, design spec>"`
   Rule: spawn only when components/pages are independent (no shared state mutations).
   Rule: always include design spec or Figma link in each spawned prompt if available.
 
