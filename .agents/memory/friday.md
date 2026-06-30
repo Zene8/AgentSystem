@@ -44,3 +44,23 @@ Run on [date TBD, 2026-06-20 first]. Check:
 - Subdomain agent performance (Ultron, Astra, Pym, Leo)
 
 Document findings in agents-memory/friday.md session log.
+
+---
+
+## Session Log
+
+### 2026-06-30 — AgentSystem infra sprint
+
+**Completed (2 PRs open, Sam audit pending):**
+
+1. **PR #80** `worktree-fix-agent-spawn-patterns` — all 10 agent spawn patterns → `claude --bg --agent X -p "..."`, tier-2 model friday/sam/nat → `claude-sonnet-5`
+2. **PR #81** `feat/session-namer` — `tools/session-namer.js`: auto-name + search/group/resume for Claude Code + agy sessions. SessionStart/Stop hooks wired globally.
+
+**Global settings changes (not in git, already live):**
+- `~/.claude/settings.json`: added `env.CAVEMAN_DEFAULT_MODE=full` + `SubagentStart` hook firing caveman-activate.js
+- `~/.config/caveman/config.json`: `{"defaultMode":"full"}` — explicit user config
+- Net effect: caveman mode `full` applies to main sessions + all `--bg` agents + in-session subagents (Agent tool)
+
+**Pending:**
+- Sam audit on PR #80 + #81 → merge to dev → merge to main
+- `node tools/sync-agents.js` after PR #80 merges (to propagate spawn pattern fixes to `~/.claude/agents/`)
