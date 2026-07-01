@@ -240,6 +240,21 @@ function cmdGroup({ by }) {
   }
 }
 
+function cmdRename(sessionId, newName) {
+  if (!sessionId) { console.error('session ID required'); process.exit(1); }
+  if (!newName || !newName.trim()) { console.error('new name required'); process.exit(1); }
+  const entry = loadRegistry().find(e => e.session.startsWith(sessionId));
+  if (!entry) { console.log('Not in registry — try: node session-namer.js --search ' + sessionId); process.exit(1); }
+
+  // Derive a title slug from the free-form name (consistent with how title is used elsewhere)
+  const cleanName = newName.trim();
+  const titleSlug = cleanName.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 5).join(' ') || cleanName;
+
+  const updated = { ...entry, name: cleanName, title: titleSlug, renamed: true, renamedAt: new Date().toISOString() };
+  saveEntry(updated);
+  console.log(`renamed ${entry.session.slice(0, 8)}… → "${cleanName}"`);
+}
+
 function cmdResume(sessionId) {
   if (!sessionId) { console.error('session ID required'); process.exit(1); }
   const entry = loadRegistry().find(e => e.session.startsWith(sessionId));
@@ -301,10 +316,11 @@ for (const arg of args) {
   else if (flags.finalize)              await cmdFinalize({ session: flags.session });
   else if (flags.scan)                  { await cmdScan(); await cmdScanAgy(); }
   else if (flags.list)                  cmdList({ repo: flags.repo, date: flags.date, limit: flags.limit });
-  else if (flags.search || positional.length && !flags.group)
+  else if (flags.search || positional.length && !flags.group && !flags.rename && !flags.resume)
                                         cmdSearch(flags.search !== true ? flags.search : positional.join(' '));
   else if (flags.group)                 cmdGroup({ by: flags.by });
   else if (flags.resume)                cmdResume(flags.resume !== true ? flags.resume : positional[0]);
+  else if (flags.rename)                cmdRename(positional[0], positional.slice(1).join(' '));
   else if (flags.today)                 cmdList({ date: today() });
   else {
     console.log(`session-namer.js — Claude Code session naming & search
@@ -318,6 +334,7 @@ Commands:
   --search QUERY                         Search by name, repo, prompt
   --group [--by=repo|date]               Grouped view
   --resume SESSION_ID                    Show info + resume command
+  --rename SESSION_ID "new name"         Manually rename a session
 
 Registry: ${REGISTRY}
 `);
