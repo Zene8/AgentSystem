@@ -125,6 +125,8 @@ Format:
 Current blockers:
 
 - **[2026-05-27] User waiting on self:** Apply settings.json changes from Issue #56 — auto mode hard gate blocked agent edit. 2-minute manual fix.
+- **[2026-06-30] Leo/Ultron waiting on agy maintainer:** Resolve agy persistence model for Mission Control (Issue #85) — does `agy` support `--bg`, or must it be tmux-wrapped? Blocks implementation of Antigravity dispatcher.
+- **[2026-06-30] All waiting on Jarvis:** Move webhook server code from `~/AgentSystem/tools/` (un-versioned) into main repo for git tracking (Issue #82 open question). Currently divergent from `/home/natha/dev/AgentSystem`.
 
 ## In-Flight Work
 
@@ -132,6 +134,7 @@ Work that is started but not yet complete. Link to GitHub issues.
 
 - **[Issue #56](https://github.com/Zene8/AgentSystem/issues/56)** — apply `autoCompactEnabled` + PostToolUse compress hook to `~/.claude/settings.json`. Manual edit required. Hook script already at `~/.claude/hooks/tool-output-compress.js`.
 - **[Issue #57](https://github.com/Zene8/AgentSystem/issues/57)** — implement effort overrides, path-scoped CLAUDE.md rules, per-agent hooks, isolation docs from shanraisshan audit.
+- **[Issues #82–#88](https://github.com/Zene8/AgentSystem/milestone/3)** — Mission Control epic: Always-on remote session dispatch for Claude Code + Antigravity. Spec complete (docs/mission-control.md). Implementation in parallel: security audit (#83), versioning (#84), agy dispatcher (#85), repo picker (#86), frontend (#87), boot resilience (#88). **Two live risks noted:** (1) daemon service currently FAILED (status: check systemd logs); (2) webhook code in ~/AgentSystem/tools/ is un-versioned.
 
 ## Startup
 
@@ -146,6 +149,7 @@ Read these first:
 
 - [AGENT-DEPENDENCY-MAP.md](AGENT-DEPENDENCY-MAP.md) — agent call chains, failure cascades, retry behavior
 - [AGENT-INVOCATION-GUIDE.md](AGENT-INVOCATION-GUIDE.md) — how to invoke each agent per CLI
+- [mission-control.md](mission-control.md) — Always-on remote session dispatch (Claude Code + Antigravity CLI). Architecture, HTTP API contract, harness dispatch matrix, security model, persistence/boot resilience. Maps to issues #82–#88.
 
 ## Escalation & Incidents
 
