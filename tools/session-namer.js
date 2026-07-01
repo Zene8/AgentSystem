@@ -8,6 +8,7 @@
  * Usage:
  *   node session-namer.js --register --session=ID [--cwd=PATH]
  *   node session-namer.js --finalize --session=ID
+ *   node session-namer.js --sweep                 Retroactively finalize all pending sessions with transcripts
  *   node session-namer.js --scan
  *   node session-namer.js --list [--repo=NAME] [--date=YYYY-MM-DD] [--limit=N]
  *   node session-namer.js --search QUERY
@@ -153,8 +154,13 @@ async function cmdFinalize({ session }) {
   const existing = loadRegistry().find(e => e.session === session)
                 || { session, repo: 'unknown', cwd: '' };
 
+  // Idempotency: never clobber an already-named session (renamed or has a real title)
+  if (existing.finalized && existing.title && existing.title !== 'pending') return;
+
   const msg = await readFirstUserMessage(session, existing.cwd);
   if (!msg) {
+    // Stop-hook path: no transcript yet — mark finalized so the session is not stuck forever
+    // but only if called from Stop (clean exit). Sweep/early paths skip sessions with no msg.
     saveEntry({ ...existing, finalized: true });
     return;
   }
@@ -167,6 +173,68 @@ async function cmdFinalize({ session }) {
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
   saveEntry(updated);
   console.log(`[session-namer] ${session.slice(0, 8)}… → "${name}"`);
+}
+
+/**
+ * cmdFinalizeEarly — finalize a single session without marking finalized if no msg found yet.
+ * Called from UserPromptSubmit hook: the transcript may have just one user message written.
+ * Does nothing if session is already properly named.
+ */
+async function cmdFinalizeEarly({ session }) {
+  if (!session) { console.error('--session required'); process.exit(1); }
+  const existing = loadRegistry().find(e => e.session === session);
+  if (!existing) return; // not registered yet — SessionStart may have been missed
+
+  // Already has a real name — nothing to do
+  if (existing.finalized && existing.title && existing.title !== 'pending') return;
+
+  const msg = await readFirstUserMessage(session, existing.cwd);
+  if (!msg) return; // transcript not readable yet — Stop hook will handle it
+
+  const title = titleFromText(msg.text);
+  const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
+  const name  = buildName(repo, title, msg.ts || existing.timestamp);
+  const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
+                    timestamp: msg.ts || existing.timestamp,
+                    finalized: true, first_prompt: msg.text.slice(0, 120) };
+  saveEntry(updated);
+  console.log(`[session-namer] early-finalize ${session.slice(0, 8)}… → "${name}"`);
+}
+
+/**
+ * cmdSweep — retroactively finalize all registry entries stuck at finalized:false
+ * (or finalized:true with title="pending") whose transcripts now have a readable first prompt.
+ * Safe: never clobbers entries that already have a real title.
+ * Designed to run on SessionStart so past crashes self-heal over time.
+ */
+async function cmdSweep() {
+  const entries = loadRegistry();
+  const pending = entries.filter(e =>
+    !e.finalized || e.title === 'pending' || !e.title
+  );
+
+  if (!pending.length) {
+    console.log('[session-namer] sweep: no pending sessions');
+    return;
+  }
+
+  let fixed = 0; let skipped = 0;
+  for (const entry of pending) {
+    const msg = await readFirstUserMessage(entry.session, entry.cwd);
+    if (!msg) { skipped++; continue; }
+
+    const title = titleFromText(msg.text);
+    const repo  = (entry.repo && entry.repo !== 'unknown') ? entry.repo : repoFromCwd(msg.cwd);
+    const name  = buildName(repo, title, msg.ts || entry.timestamp);
+    const updated = { ...entry, repo, cwd: msg.cwd || entry.cwd, title, name,
+                      timestamp: msg.ts || entry.timestamp,
+                      finalized: true, first_prompt: msg.text.slice(0, 120) };
+    saveEntry(updated);
+    console.log(`[session-namer] sweep fixed ${entry.session.slice(0, 8)}… → "${name}"`);
+    fixed++;
+  }
+
+  console.log(`[session-namer] sweep done — fixed: ${fixed}, no-transcript: ${skipped}`);
 }
 
 function cmdList({ repo, date, limit }) {
@@ -314,6 +382,8 @@ for (const arg of args) {
 (async () => {
   if      (flags.register)              cmdRegister({ session: flags.session, cwd: flags.cwd || process.env.CWD || process.cwd() });
   else if (flags.finalize)              await cmdFinalize({ session: flags.session });
+  else if (flags['finalize-early'])     await cmdFinalizeEarly({ session: flags.session });
+  else if (flags.sweep)                 await cmdSweep();
   else if (flags.scan)                  { await cmdScan(); await cmdScanAgy(); }
   else if (flags.list)                  cmdList({ repo: flags.repo, date: flags.date, limit: flags.limit });
   else if (flags.search || positional.length && !flags.group && !flags.rename && !flags.resume)
@@ -327,7 +397,9 @@ for (const arg of args) {
 
 Commands:
   --register --session=ID [--cwd=PATH]   Register session on start (hook)
-  --finalize --session=ID                Name session from first prompt (hook)
+  --finalize --session=ID                Name session from first prompt (Stop hook)
+  --finalize-early --session=ID          Name session early, skip if no transcript yet (UserPromptSubmit hook)
+  --sweep                                Retroactively finalize all pending sessions with transcripts
   --scan                                 Retroactively name all sessions
   --list [--repo=X] [--date=YYYY-MM-DD] [--limit=N]
   --today                                Today's sessions
