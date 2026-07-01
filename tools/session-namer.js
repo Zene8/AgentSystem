@@ -93,6 +93,28 @@ function dateStr(ts) { return (ts || new Date().toISOString()).slice(0, 10); }
 function today()     { return new Date().toISOString().slice(0, 10); }
 function buildName(repo, title, ts) { return `${repo} ${title} ${dateStr(ts)}`; }
 
+/** Marker appended to display name when a session is finalized. */
+const DONE_MARKER = ' + (done)';
+
+/**
+ * Append DONE_MARKER to a session display name.
+ * Idempotent: never double-appends.
+ * Does NOT touch the `title` field — title stays clean for search/grouping.
+ */
+function applyDoneMarker(name) {
+  if (!name || name.endsWith(DONE_MARKER)) return name;
+  return name + DONE_MARKER;
+}
+
+/**
+ * Strip DONE_MARKER from a name for matching/resume/rename purposes.
+ * Keeps grouping and search working correctly on finalized entries.
+ */
+function stripDoneMarker(name) {
+  if (!name) return name;
+  return name.endsWith(DONE_MARKER) ? name.slice(0, -DONE_MARKER.length) : name;
+}
+
 // ── Read first user message from session JSONL ───────────────────────────────
 
 async function readFirstUserMessage(sessionId, cwd) {
@@ -161,13 +183,14 @@ async function cmdFinalize({ session }) {
   if (!msg) {
     // Stop-hook path: no transcript yet — mark finalized so the session is not stuck forever
     // but only if called from Stop (clean exit). Sweep/early paths skip sessions with no msg.
-    saveEntry({ ...existing, finalized: true });
+    const noMsgName = applyDoneMarker(existing.name);
+    saveEntry({ ...existing, finalized: true, name: noMsgName });
     return;
   }
 
   const title = titleFromText(msg.text);
   const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = buildName(repo, title, msg.ts || existing.timestamp);
+  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp));
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -193,7 +216,7 @@ async function cmdFinalizeEarly({ session }) {
 
   const title = titleFromText(msg.text);
   const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = buildName(repo, title, msg.ts || existing.timestamp);
+  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp));
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -204,11 +227,30 @@ async function cmdFinalizeEarly({ session }) {
 /**
  * cmdSweep — retroactively finalize all registry entries stuck at finalized:false
  * (or finalized:true with title="pending") whose transcripts now have a readable first prompt.
+ * Also retro-applies DONE_MARKER to already-finalized entries that predate this feature.
  * Safe: never clobbers entries that already have a real title.
  * Designed to run on SessionStart so past crashes self-heal over time.
  */
 async function cmdSweep() {
   const entries = loadRegistry();
+
+  // Pass 1: retro-mark already-finalized entries missing the done marker.
+  // These are entries that were finalized before this feature was added.
+  let retroMarked = 0;
+  for (const entry of entries) {
+    if (
+      entry.finalized &&
+      entry.title && entry.title !== 'pending' &&
+      entry.name && !entry.name.endsWith(DONE_MARKER)
+    ) {
+      saveEntry({ ...entry, name: entry.name + DONE_MARKER });
+      retroMarked++;
+    }
+  }
+  if (retroMarked > 0) {
+    console.log(`[session-namer] sweep: retro-marked ${retroMarked} existing finalized session(s) with done marker`);
+  }
+
   const pending = entries.filter(e =>
     !e.finalized || e.title === 'pending' || !e.title
   );
@@ -225,7 +267,7 @@ async function cmdSweep() {
 
     const title = titleFromText(msg.text);
     const repo  = (entry.repo && entry.repo !== 'unknown') ? entry.repo : repoFromCwd(msg.cwd);
-    const name  = buildName(repo, title, msg.ts || entry.timestamp);
+    const name  = applyDoneMarker(buildName(repo, title, msg.ts || entry.timestamp));
     const updated = { ...entry, repo, cwd: msg.cwd || entry.cwd, title, name,
                       timestamp: msg.ts || entry.timestamp,
                       finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -546,7 +588,7 @@ async function cmdScanAgy() {
 
     if (msg) {
       const title = titleFromText(msg.text);
-      const name  = buildName(repo, title, msg.ts || ts);
+      const name  = applyDoneMarker(buildName(repo, title, msg.ts || ts));
       const prev  = loadRegistry().find(e => e.session === sessionId) || {};
       saveEntry({ ...prev, session: sessionId, repo, cwd, title, name,
                   timestamp: msg.ts || ts, finalized: true,
@@ -555,7 +597,8 @@ async function cmdScanAgy() {
       named++;
     } else {
       const prev = loadRegistry().find(e => e.session === sessionId) || {};
-      saveEntry({ ...prev, session: sessionId, repo, cwd, finalized: true, runtime: 'agy' });
+      const noMsgAgyName = applyDoneMarker(prev.name);
+      saveEntry({ ...prev, session: sessionId, repo, cwd, finalized: true, runtime: 'agy', name: noMsgAgyName });
     }
   }
 

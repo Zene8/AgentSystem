@@ -263,3 +263,165 @@ test('--sweep: fixes multiple pending sessions in one run', async () => {
 
   rmSync(tmp, { recursive: true, force: true });
 });
+
+// ── Done marker tests ────────────────────────────────────────────────────────
+
+test('done marker: finalized session name ends with " + (done)"', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'done1111-0000-0000-0000-000000000001';
+  const cwd = '/home/test/myrepo';
+  const cwdSlug = cwd.replace(/\//g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  makeTranscript(projectDir, sessionId, 'build the user authentication flow');
+
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'pending',
+      name: 'myrepo pending 2026-07-01', timestamp: '2026-07-01T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries.length, 1);
+  assert.ok(entries[0].name.endsWith(' + (done)'), `name should end with " + (done)", got: "${entries[0].name}"`);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('done marker: title field is NOT affected by done marker', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'done2222-0000-0000-0000-000000000002';
+  const cwd = '/home/test/myrepo';
+  const cwdSlug = cwd.replace(/\//g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  makeTranscript(projectDir, sessionId, 'migrate database schema columns');
+
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'pending',
+      name: 'myrepo pending 2026-07-01', timestamp: '2026-07-01T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+  const entries = readRegistry(registryPath);
+  assert.equal(entries.length, 1);
+  // title must not contain the marker
+  assert.ok(!entries[0].title.includes('(done)'), `title must not contain "(done)", got: "${entries[0].title}"`);
+  // name must contain the marker
+  assert.ok(entries[0].name.endsWith(' + (done)'), `name must end with " + (done)", got: "${entries[0].name}"`);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('done marker: pending session does NOT get the marker', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  mkdirSync(join(tmp, '.claude', 'projects'), { recursive: true });
+
+  const sessionId = 'done3333-0000-0000-0000-000000000003';
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'pending',
+      name: 'myrepo pending 2026-07-01', timestamp: '2026-07-01T00:00:00.000Z', finalized: false }
+  ]);
+
+  // No transcript — finalize-early will no-op, leaving entry as pending
+  runNamer(['--finalize-early', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].finalized, false, 'entry must remain unfinalized');
+  assert.ok(!entries[0].name.includes('(done)'), 'pending name must not contain "(done)"');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('done marker: idempotent — re-finalizing does not double-append marker', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'done4444-0000-0000-0000-000000000004';
+  const cwd = '/home/test/myrepo';
+  const cwdSlug = cwd.replace(/\//g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  makeTranscript(projectDir, sessionId, 'implement search indexing pipeline');
+
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'pending',
+      name: 'myrepo pending 2026-07-01', timestamp: '2026-07-01T00:00:00.000Z', finalized: false }
+  ]);
+
+  // Finalize once
+  runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+  const after1 = readRegistry(registryPath)[0];
+  assert.ok(after1.name.endsWith(' + (done)'), 'first finalize should add marker');
+
+  // Re-run sweep — must not double-append
+  runNamer(['--sweep'], { HOME: tmp });
+  const after2 = readRegistry(registryPath)[0];
+  const markerCount = (after2.name.match(/\+ \(done\)/g) || []).length;
+  assert.equal(markerCount, 1, `marker should appear exactly once, got name: "${after2.name}"`);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('done marker: sweep retro-marks existing finalized entries missing the marker', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  mkdirSync(join(tmp, '.claude', 'projects'), { recursive: true });
+
+  const sessionId = 'done5555-0000-0000-0000-000000000005';
+  // Pre-existing finalized entry without the done marker (simulates data before this feature)
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo',
+      title: 'old session title',
+      name: 'myrepo old session title 2026-06-01',
+      timestamp: '2026-06-01T00:00:00.000Z',
+      finalized: true, first_prompt: 'original prompt' }
+  ]);
+
+  const output = runNamer(['--sweep'], { HOME: tmp });
+  assert.match(output, /retro-marked 1/, 'sweep should report retro-marking 1 existing session');
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].name, 'myrepo old session title 2026-06-01 + (done)',
+    'retro-sweep should add marker to existing finalized entry');
+  // title must remain clean
+  assert.equal(entries[0].title, 'old session title', 'title must not be modified by retro-sweep');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('done marker: finalize-early adds marker on first-time finalize', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'done6666-0000-0000-0000-000000000006';
+  const cwd = '/home/test/myrepo';
+  const cwdSlug = cwd.replace(/\//g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  makeTranscript(projectDir, sessionId, 'add rate limiting middleware');
+
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'pending',
+      name: 'myrepo pending 2026-07-01', timestamp: '2026-07-01T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize-early', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].finalized, true);
+  assert.ok(entries[0].name.endsWith(' + (done)'), `finalize-early name must end with " + (done)", got: "${entries[0].name}"`);
+  assert.ok(!entries[0].title.includes('(done)'), 'title must be clean');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
