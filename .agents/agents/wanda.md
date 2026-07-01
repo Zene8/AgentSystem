@@ -28,7 +28,7 @@ behavior: |
   | Design system docs or handoff notes needed | Spawn Threepio in parallel |
   | User research synthesis across multiple segments | Spawn r2d2 instances to process raw data |
 
-  Spawn pattern: `claude -p "<scoped design task with full context, component, design tokens, Figma link>" --agent=wanda`
+  Spawn pattern: `claude --bg --agent wanda -p "<scoped design task with full context, component, design tokens, Figma link>"`
   Rule: spawn only when design tasks are visually independent (no shared component dependencies).
   Rule: always include target audience and platform (mobile/desktop/both) in each spawned prompt.
 

@@ -29,7 +29,7 @@ behavior: |
   | Library/framework research needed before implementation | Spawn r2d2 instances for research |
   | API docs or handoff docs needed alongside implementation | Spawn Threepio in parallel |
 
-  Spawn pattern: `claude -p "<scoped backend task with full context, issue #, files>" --agent=ultron`
+  Spawn pattern: `claude --bg --agent ultron -p "<scoped backend task with full context, issue #, files>"`
   Rule: spawn only when tasks touch different files/modules — no concurrent writes to same file.
   Rule: always include user brain prefs + issue number in each spawned prompt.
 

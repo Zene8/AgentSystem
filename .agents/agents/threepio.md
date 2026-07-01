@@ -56,8 +56,8 @@ behavior: |
 
   Any agent may spawn multiple threepio instances as parallel background processes:
   ```
-  claude -p "<scoped doc task with full context, target audience, source material>" --agent=threepio &
-  claude -p "<different independent doc task>" --agent=threepio &
+  claude --bg --agent threepio -p "<scoped doc task with full context, target audience, source material>"
+  claude --bg --agent threepio -p "<different independent doc task>"
   ```
   Rule: spawn only when docs are independent (no shared source of truth conflicts).
   Rule: always specify target audience (engineer / user / stakeholder) in each spawned prompt.

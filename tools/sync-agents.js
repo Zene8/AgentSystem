@@ -20,7 +20,7 @@ const HOME       = homedir();
 // Model assignments per CLI (mirrors config/models.yml -- keep in sync with that file).
 // ultron/pym/leo/astra are tier-1 specialist workers (downgraded to cheapest tier in ede47b6).
 const MODELS = {
-  claude:  { jarvis:'claude-opus-4-8', sam:'claude-sonnet-4-6', friday:'claude-sonnet-4-6', nat:'claude-sonnet-4-6', ultron:'claude-haiku-4-5-20251001', pym:'claude-haiku-4-5-20251001', leo:'claude-haiku-4-5-20251001', astra:'claude-haiku-4-5-20251001', wanda:'claude-haiku-4-5-20251001', threepio:'claude-haiku-4-5-20251001', r2d2:'claude-haiku-4-5-20251001' },
+  claude:  { jarvis:'claude-opus-4-8', sam:'claude-sonnet-5', friday:'claude-sonnet-5', nat:'claude-sonnet-5', ultron:'claude-haiku-4-5-20251001', pym:'claude-haiku-4-5-20251001', leo:'claude-haiku-4-5-20251001', astra:'claude-haiku-4-5-20251001', wanda:'claude-haiku-4-5-20251001', threepio:'claude-haiku-4-5-20251001', r2d2:'claude-haiku-4-5-20251001' },
   gemini:  { jarvis:'gemini-3.1-pro-preview', sam:'gemini-3.1-pro-preview', friday:'gemini-3-flash-preview', nat:'gemini-3-flash-preview', ultron:'gemini-3.1-flash-lite-preview', pym:'gemini-3.1-flash-lite-preview', leo:'gemini-3.1-flash-lite-preview', astra:'gemini-3.1-flash-lite-preview', wanda:'gemini-3.1-flash-lite-preview', threepio:'gemini-3.1-flash-lite-preview', r2d2:'gemini-3.1-flash-lite-preview' },
 };
 

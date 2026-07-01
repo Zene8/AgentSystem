@@ -30,7 +30,7 @@ behavior: |
   | Query optimization research needed | Spawn r2d2 instances for research |
   | Migration runbook or schema docs needed | Spawn Threepio in parallel |
 
-  Spawn pattern: `claude -p "<scoped DB task with full context, table names, migration goal>" --agent=pym`
+  Spawn pattern: `claude --bg --agent pym -p "<scoped DB task with full context, table names, migration goal>"`
   Rule: spawn only when migrations are independent (no foreign key dependencies between them).
   Rule: always include rollback procedure requirement in each spawned prompt.
 
