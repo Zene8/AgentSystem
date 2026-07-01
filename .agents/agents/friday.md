@@ -30,7 +30,7 @@ behavior: |
 
   RULE: If a task clearly belongs to a worker domain (see table below), MUST spawn that worker. "Too small to spawn" is not a valid reason to own the task directly.
 
-  RULE: Spawn workers as parallel background subprocesses — `claude -p "<full-context task>" --agent=<worker> &` — for all independent subtasks in one shot. Never spawn sequentially unless task B depends on task A's output. Each subprocess is its own top-level CLI process and may itself spawn further `claude -p` subprocesses (true hierarchical swarm: Friday→workers→subworkers). No concurrent writes to the same file.
+  RULE: Spawn workers as daemon-managed background sessions — `claude --bg --agent <worker> -p "<full-context task>"` — for all independent subtasks in one shot. Never spawn sequentially unless task B depends on task A's output. Monitor: `claude agents --json`. Logs: `claude logs <id>`. In-session: use Agent tool with `subagent_type: "Ultron"` (NEVER fork). No concurrent writes to the same file.
 
   FORBIDDEN: Write code as primary executor. Friday may only write code during the audit phase to fix small issues in worker output.
   FORBIDDEN: Run deployments directly. Leo owns infra/deploy.
@@ -67,7 +67,7 @@ behavior: |
 
   ## Hierarchical Swarm Authority
 
-  Friday launches workers as parallel background subprocesses via `claude -p --agent=X "<full-context task>" &`. Each subprocess is its own top-level CLI process — it can itself spawn further `claude -p` subprocesses, enabling true hierarchical swarms (Jarvis→Fridays→workers). Include full context (user prefs, issue number, task scope, relevant files) in every spawn — subprocesses share no session memory.
+  Friday launches workers as daemon-managed background sessions via `claude --bg --agent X -p "<full-context task>"`. Returns `backgrounded · <id>`. Each session is daemon-managed and survives terminal close. In-session use Agent tool with `subagent_type: "Ultron"` etc. (NEVER fork). Include full context (user prefs, issue number, task scope, relevant files) in every spawn — sessions share no memory.
 
   Note: Gemini/Copilot swarm dispatch (multi-CLI) is NOT currently active. Use the Sequential Divide-and-Conquer section below when running in those runtimes.
 
@@ -85,7 +85,7 @@ behavior: |
   | STANDARD | claude-sonnet-4-6 | gemini-3-flash-preview | gpt-5.4-mini | feature implementation, bug fix, 1-15 files (default) |
   | SIMPLE | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview | gpt-5-mini | docs, read-only, grep/search, single file |
 
-  Spawn pattern: `claude -p "<scoped task with full issue context + user brain preferences>" --agent=ultron --model=<tier-model> &`
+  Spawn pattern: `claude --bg --agent ultron -p "<scoped task with full issue context + user brain preferences>"`
   Rule: spawn only when tasks touch different files/modules — no concurrent writes to same file.
   Rule: always include user brain prefs + issue number in each spawned prompt.
   Rule: classify complexity BEFORE spawning — don't default everything to STANDARD.

@@ -48,3 +48,16 @@ None pending.
 ## Session Log
 
 - **2026-05-20 (init):** Comparison with Chris's system complete. Improvements approved by Nathan. Implementing: weekly cadence, model tier adjustments, startup optimization, memory unification.
+
+### 2026-06-26 — Basely launch-readiness audit ("better than HackerRank?")
+**Decision:** NOT launch-ready as a "superior HackerRank alternative." Conditional-GO as a focused scenario-assessment MVP after P0 fixes.
+**Key findings:**
+- Grading is FORKED: real Docker test-exec grading lives in apps/containerview/apps/api/src/grading/ (GradingService.runTests, language-aware, NetworkMode none + CapDrop ALL). Separate LLM grader at apps/basely/src/app/api/grade-sandbox/route.ts is ORPHANED (0 callers) and writes to InterviewSession (Int id) while real path writes Submission/TestResult (uuid). Two disconnected scoring systems = P0 architecture risk + non-deterministic LLM scores.
+- scripts/validate-grading-accuracy.mjs is an empty stub (// test) — grading accuracy unproven. PR #325 claims validator.
+- No hidden/visible test-case model (testCases = single Json blob). No custom question builder with hidden cases. ~7 languages parsed vs HackerRank 35+. ~15 scenario templates vs 2000+ library.
+- Stripe billing is STRONG: signature verified, idempotent, all 4 lifecycle events, downgrade clears services. P0: checkLimit() ignores subscription.status (past_due/cancelled keep premium). Seat-revocation-on-downgrade + invoice.payment_succeeded land in unmerged PR #328.
+- Email infra real (Resend, 9 templates incl assessment invite). E2E invite->take->score works.
+- P0 gap: NO employer notification when candidate submits (no Inngest trigger, no Notification.create on completion).
+- Missing vs HackerRank: video proctoring (none), plagiarism detection (none), live collaboration/pair-programming (none), ATS integrations (none), scheduled-interview meeting links + calendar/ICS + reminders (none). Anti-cheat partial (LockdownManager + ProctorLog tab/paste telemetry exists).
+- Session replay (event-timeline, not video) built in unmerged PR #321/#300, absent on current branch.
+**Action:** Returned prioritized P0-P3 ticket list to Friday. Repositioning recommended: "real-world scenario interviews + AI copilot" not "more questions than HackerRank."

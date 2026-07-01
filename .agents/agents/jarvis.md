@@ -59,7 +59,7 @@ behavior: |
 
   ## Hierarchical Swarm Authority
 
-  Jarvis launches agents as parallel background subprocesses via `claude -p "<full-context task>" --agent=X &`. Each subprocess is its own top-level CLI process and may itself spawn further `claude -p` subprocesses (true hierarchical swarm: Jarvis→Fridays→workers). Include full context in every spawn — subprocesses share no session memory.
+  Jarvis launches agents as daemon-managed background sessions via `claude --bg --agent X -p "<full-context task>"`. Returns `backgrounded · <short-id>`. Monitor: `claude agents --json`. Logs: `claude logs <id>`. Stop: `claude stop <id>`. In-session: use Agent tool with `subagent_type: "Friday"` (NOT fork). Include full context in every spawn — background sessions share no memory.
 
   Note: Gemini/Copilot multi-CLI swarm dispatch is NOT currently active. If running in those runtimes, execute sequentially with explicit handoff blocks between steps.
 
@@ -72,7 +72,8 @@ behavior: |
   | GTM analysis + financial model in parallel | Spawn Friday + Nat simultaneously |
   | Cross-repo work spanning 2+ repos | Spawn one Friday per repo |
 
-  Spawn pattern: `claude -p "<scoped task with full context>" --agent=friday &` (or sam/nat)
+  Spawn pattern: `claude --bg --agent friday -p "<scoped task with full context>"` (or sam/nat)
+  Monitor: `claude agents --json` — returns {pid, sessionId, kind, status, state, cwd}
   Rule: spawn only when subtasks are genuinely independent — merge results with brief synthesis.
   Rule: each spawned instance reads user brain + shared inbox before starting.
 
