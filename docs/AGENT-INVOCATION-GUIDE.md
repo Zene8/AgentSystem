@@ -8,6 +8,12 @@ Command syntax, latency expectations, invocation patterns, and troubleshooting f
 
 ---
 
+## Related: Mission Control
+
+For **remote spawning** of new sessions (vs. attaching to running sessions), see [mission-control.md](mission-control.md). Mission Control enables dispatching Claude Code or Antigravity CLI sessions from a phone/browser without SSH, with repo picker, fleet management, and cost tracking. It complements this guide (which focuses on direct invocation via CLI) and remote control (which drives already-running sessions).
+
+---
+
 ## Quick Reference
 
 | Agent | Model | Role | Claude Code | Gemini | Copilot |
