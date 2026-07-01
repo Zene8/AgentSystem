@@ -90,4 +90,6 @@ None pending.
 
 **Contradiction w/ prior memory:** "named agents fabricate (0-tool-call fake results)" did NOT reproduce — Friday/Leo/Sam/r2d2 all produced real verifiable commits + PRs tonight. That prior lesson may be stale.
 
+**WS3 (pre-existing 2 open PRs, done after closeout on Nathan follow-up):** #2064 (feat #710 backend) was BEHIND → `gh pr update-branch` → up-to-date, checks green, review-ready (awaits Chris; he left non-blocking "chat mockup" comment). #1957 (feat #1919 relevance-ranked exemplars) was DIRTY draft → Friday rebased onto main (290-commit drift), 1 conflict in `pathway_author_context.py` resolved preserving the feature AND reconciling with #2027 operator_exemplar_kinds + workflow_kind/attachments; undrafted; gates pass local; CI running → CLEAN. Both hold for 7/8. Total session: 6 new PRs + 2 pre-existing PRs review-ready.
+
 **Still on Nathan (non-eng):** log payroll hours (Chris needs for Thurs payroll), Q3 planning chat next week, standing-hours arrangement decision (Chris researching compliance).
