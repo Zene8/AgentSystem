@@ -69,3 +69,25 @@ None pending.
 **Non-blocker → follow-up:** Issue #92 filed — path.resolve() bounds check in resolveTranscript() (memory-onboard.js). Read-only traversal, gated by user-owned registry; hardening only.
 **Not closed:** Epic #82 stays open (children #83–#88, #91 live). Posted progress comment.
 **Guardrail win:** Refused literal "delete stale/merged branches" — both held ~1300 lines unmerged work. Merged first, deleted only after --merged confirmation.
+
+---
+
+## Session 2026-06-30 — genie dev cycle (Chris OOO prep, WS1/WS2)
+
+**Context:** Chris (boss) OOO Europe 6/27–7/8, is merge gate. Batch of messages → 3 workstreams. Nathan priority: "we must get ws1 done." Goal per #2066: review-ready, don't merge (Chris triggers on 7/8).
+
+**Landed (6 PRs, all hold for 7/8):**
+- WS1 (engagement metrics): #2103 spec, #2109 FE (badge visibility + icon color + detail counts), #2110 backend (delivery audit — ✓3/4 = real async Telnyx webhook lag, NOT a bug). Issues #2102/2104/2105/2106.
+- WS2 (observability): #2111 daily health email (#2067) — Sam APPROVED, PHI-gated, no Belissa gate; #2112 alerts (#2108) — Nathan added to action groups; #2113 Reports tab (#2107) — 4 eng + 6 clinical cards.
+- Follow-ups: #2114 (Phase-3 custom metrics — #2108 clinical alerts silently never-fire until orchestrator emits them; #2107 already computes the values, reuse).
+- Cleanup: 15 worktrees + 15 merged branches removed (audited each for dirty/unpushed/unmerged first; 1 locked held). Spike: psql-genie IS reachable from GH Actions via firewall add/remove.
+
+**Corrections logged:** repo merges to `main` directly (not dev). Engagement-delivery-tracking + #2017 already MERGED (not in-flight as first thought).
+
+**KEY OPERATIONAL LESSON — background agents die on session teardown.** This session's parent process exited repeatedly (/background + resumes); every Agent-tool background run (Friday ×4, r2d2, Leo) got killed mid-task. `claude --bg` daemon also died. **Mitigation that worked: mandate commit+push after EVERY logical step (empty-commit-first on branch create).** Committed work survives; Jarvis rescues partial state from disk + finishes the PR. WS1 FE + #2067 both landed this way despite crashes. For long agent work in unstable sessions: commit-first is non-negotiable.
+
+**Concurrency guardrail:** honored memory rule (concurrent git-mutating agents corrupt shared genie checkout) — ran cleanup solo before dispatching WS2; ran #2108+#2107 in parallel only via `isolation: worktree`.
+
+**Contradiction w/ prior memory:** "named agents fabricate (0-tool-call fake results)" did NOT reproduce — Friday/Leo/Sam/r2d2 all produced real verifiable commits + PRs tonight. That prior lesson may be stale.
+
+**Still on Nathan (non-eng):** log payroll hours (Chris needs for Thurs payroll), Q3 planning chat next week, standing-hours arrangement decision (Chris researching compliance).
