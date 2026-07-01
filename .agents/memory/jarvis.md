@@ -61,3 +61,11 @@ None pending.
 - Missing vs HackerRank: video proctoring (none), plagiarism detection (none), live collaboration/pair-programming (none), ATS integrations (none), scheduled-interview meeting links + calendar/ICS + reminders (none). Anti-cheat partial (LockdownManager + ProctorLog tab/paste telemetry exists).
 - Session replay (event-timeline, not video) built in unmerged PR #321/#300, absent on current branch.
 **Action:** Returned prioritized P0-P3 ticket list to Friday. Repositioning recommended: "real-world scenario interviews + AI copilot" not "more questions than HackerRank."
+
+### 2026-06-30 — Branch unification on main (r2d2)
+**Decision:** Merged both open feature branches into main locally (user chose local merge over PR flow), pushed, deleted branches after merge confirmed.
+**What landed:** PR #90 (session rename + memory onboarding tools, +671) + PR #89 (mission-control docs, +624), both auto-closed on merge. Branches `issue-rename-memory-onboard` + `issue-82-mission-control-docs` deleted local+origin. No stashes existed.
+**Gate:** Sam pre-merge audit PASS (hard gate enforced despite user's local-merge choice). First audit process died mid-run — re-ran to completion. Tests 17/17.
+**Non-blocker → follow-up:** Issue #92 filed — path.resolve() bounds check in resolveTranscript() (memory-onboard.js). Read-only traversal, gated by user-owned registry; hardening only.
+**Not closed:** Epic #82 stays open (children #83–#88, #91 live). Posted progress comment.
+**Guardrail win:** Refused literal "delete stale/merged branches" — both held ~1300 lines unmerged work. Merged first, deleted only after --merged confirmation.

@@ -1,7 +1,26 @@
 # Agent System Handoff
 
-**Last Updated:** 2026-05-27
-**Status:** v1.0 published. PR #55 merged to dev (personal brain, issue workflow, swarm support, install.ps1, model tiers, Sam CI gate). Branches cleaned. Two issues open for next session.
+**Last Updated:** 2026-06-30
+**Status:** main consolidated. PRs #89 (mission-control docs) + #90 (session rename + memory onboarding) merged to main; both feature branches deleted. No stashes. Sam pre-merge gate PASS. Follow-up #92 filed.
+
+---
+
+## Checkpoint: Branch Unification + main Consolidation (2026-06-30)
+
+**Actor:** r2d2 (dispatched by Nathan)
+
+**What happened:**
+- Merged both open feature branches into `main` (local `--no-ff`), pushed `7c54439..c4f6717`.
+  - `issue-rename-memory-onboard` → PR #90 (auto-closed on merge): `+671` lines — `tools/memory-onboard.js` (new), `tools/session-namer.js` `--rename`, `/rename-session` + `/onboard-memory` command stubs, 2 test files.
+  - `issue-82-mission-control-docs` → PR #89 (auto-closed on merge): `+624` lines — `docs/mission-control.md` + HANDOFF/invocation-guide edits.
+- Deleted both branches local + origin after `git branch --merged main` confirmation.
+- **Stashes:** none existed — nothing deleted.
+
+**Gate:** Sam hard-gate pre-merge audit = **PASS** (10/10 checklist clear; no shell injection — `execFileSync` array form; no secrets/PHI; no npm-dep violations). One non-blocker: theoretical read-only `../` path-traversal in `resolveTranscript()` — gated by user-owned registry. Tests 17/17 pass. First audit process died mid-run; re-run completed clean.
+
+**Follow-up filed:** [Issue #92](https://github.com/Zene8/AgentSystem/issues/92) — add explicit `path.resolve()` bounds check in `resolveTranscript()` to enforce the invariant against future refactors.
+
+**Issues:** No issue cleanly completed. Epic #82 stays open (7 children live: #83–#88, #91). Progress comment posted on #82.
 
 ---
 
