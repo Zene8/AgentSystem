@@ -1,0 +1,228 @@
+#!/usr/bin/env node
+// memory-onboard.js — onboard memory facts from prompts, messages, or sessions.
+//
+// Three input modes (pick one):
+//   --text="..."        Raw text (prompt/message) to extract facts from via LLM
+//   --session=ID        Session ID (prefix OK) — resolves transcript via session-registry
+//   --fact="..."        Write a single known fact directly (no LLM)
+//
+// Stdin mode: pipe text when none of the above flags are given.
+//
+// Usage:
+//   node tools/memory-onboard.js --fact="I always use TypeScript strict mode"
+//   node tools/memory-onboard.js --session=abc123 [--section="Preferences"]
+//   node tools/memory-onboard.js --text="I always deploy to Railway, not Vercel"
+//   echo "conversation text" | node tools/memory-onboard.js
+//
+// --section defaults to "Session Notes". Override per-call.
+
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
+import { remember } from './brain-remember.js';
+import { buildCapturePrompt, parseCaptureFacts } from './memory-capture.js';
+
+const HOME     = homedir();
+const REGISTRY = join(HOME, 'agent-memory', 'nexus', 'session-registry.jsonl');
+const PROJECTS = join(HOME, '.claude', 'projects');
+
+// ── Registry helpers ──────────────────────────────────────────────────────────
+
+function loadRegistry() {
+  if (!existsSync(REGISTRY)) return [];
+  return readFileSync(REGISTRY, 'utf8')
+    .split('\n').filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+}
+
+/**
+ * Resolve a session ID (or prefix) to { filePath, entry }.
+ * Checks registry cwd first, then scans all project dirs.
+ * Returns null if not found.
+ */
+function resolveTranscript(sessionIdOrPrefix) {
+  const registry = loadRegistry();
+
+  // Find matching entry (exact or prefix)
+  const entry = registry.find(e => e.session === sessionIdOrPrefix)
+             || registry.find(e => e.session.startsWith(sessionIdOrPrefix));
+  if (!entry) return null;
+
+  const { session, cwd } = entry;
+
+  // Fast path: use registry cwd
+  if (cwd) {
+    const dirName  = cwd.replace(/\//g, '-');
+    const candidate = join(PROJECTS, dirName, `${session}.jsonl`);
+    if (existsSync(candidate)) return { filePath: candidate, entry };
+  }
+
+  // Fallback: scan all project dirs
+  if (!existsSync(PROJECTS)) return null;
+  for (const dirName of readdirSync(PROJECTS)) {
+    const fp = join(PROJECTS, dirName, `${session}.jsonl`);
+    if (existsSync(fp)) return { filePath: fp, entry };
+  }
+  return null;
+}
+
+// ── Transcript text extraction ───────────────────────────────────────────────
+
+/** Read a session transcript JSONL and return concatenated message text. */
+function readTranscriptText(filePath) {
+  const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+  const texts = [];
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      // Claude Code format
+      if (typeof obj.message?.content === 'string' && obj.message.content.trim()) {
+        texts.push(obj.message.content.trim());
+      }
+      // Antigravity format
+      else if (obj.source === 'USER_EXPLICIT' && obj.content) {
+        const m = obj.content.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
+        if (m) texts.push(m[1].trim());
+      }
+    } catch { /* skip malformed lines */ }
+  }
+  return texts.join('\n\n');
+}
+
+// ── LLM extraction (same contract as memory-capture.js) ──────────────────────
+
+/** Injectable LLM — defaults to `claude -p` (no API key required). */
+export const defaultLlm = (prompt) =>
+  execFileSync('claude', ['-p', prompt], { encoding: 'utf8', timeout: 120_000 });
+
+/**
+ * Extract durable facts from free text and write each via remember().
+ * Returns { ok, extracted, written } or { ok: false, message }.
+ */
+export function extractAndRemember(text, { section = 'Session Notes', llm = defaultLlm } = {}) {
+  if (!text || !text.trim()) return { ok: true, extracted: 0, written: [] };
+
+  const prompt = buildCapturePrompt(text);
+  let raw;
+  try { raw = llm(prompt); }
+  catch (e) { return { ok: false, message: `llm failed: ${e.message}`, written: [] }; }
+
+  const facts = parseCaptureFacts(raw);
+  const written = [];
+  for (const fact of facts) {
+    try {
+      const r = remember({ fact, section });
+      if (r.ok && r.added) written.push(fact);
+    } catch { /* individual failures don't abort the loop */ }
+  }
+  return { ok: true, extracted: facts.length, written };
+}
+
+// ── Stdin reader ──────────────────────────────────────────────────────────────
+
+function readStdin() {
+  return new Promise(resolve => {
+    if (process.stdin.isTTY) { resolve(null); return; }
+    const lines = [];
+    const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+    rl.on('line',  l => lines.push(l));
+    rl.on('close', () => resolve(lines.join('\n').trim() || null));
+  });
+}
+
+// ── Result printer ────────────────────────────────────────────────────────────
+
+function printResult(result) {
+  if (!result.ok) { console.error(`memory-onboard: ${result.message}`); return; }
+  if (result.extracted === 0) { console.log('no durable facts extracted'); return; }
+  console.log(`extracted ${result.extracted} candidate(s), stored ${result.written.length} new fact(s)`);
+  for (const f of result.written) console.log(`  + ${f}`);
+  const skipped = result.extracted - result.written.length;
+  if (skipped > 0) console.log(`  (${skipped} already known — skipped)`);
+}
+
+// ── CLI entry point ───────────────────────────────────────────────────────────
+
+const isMain = process.argv[1] &&
+  process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
+
+if (isMain) {
+  const flags = {};
+  for (const a of process.argv.slice(2)) {
+    const m = a.match(/^--([\w-]+)(?:=(.*))?$/);
+    if (m) flags[m[1]] = m[2] !== undefined ? m[2] : true;
+  }
+
+  const section = typeof flags.section === 'string' ? flags.section : 'Session Notes';
+
+  (async () => {
+    // ── Mode 1: --fact — direct write, no LLM ──────────────────────────────
+    if (flags.fact) {
+      const fact = String(flags.fact).trim();
+      if (!fact) { console.error('--fact value is empty'); process.exit(1); }
+      const r = remember({ fact, section });
+      if (!r.ok) { console.error(`memory-onboard: ${r.message}`); process.exit(1); }
+      if (r.added) console.log(`remembered [${section}]: ${fact}`);
+      else         console.log(`already known (skipped): ${fact}`);
+      process.exit(0);
+    }
+
+    // ── Mode 2: --session=ID — resolve transcript and extract ───────────────
+    if (flags.session) {
+      const sessionId = String(flags.session);
+      const found = resolveTranscript(sessionId);
+      if (!found) {
+        console.error(`session not found: ${sessionId}`);
+        console.error('Tip: node tools/session-namer.js --scan  to index sessions first');
+        process.exit(1);
+      }
+      const label = found.entry.name || found.entry.session.slice(0, 8) + '…';
+      console.log(`extracting from session: ${label}`);
+      const text = readTranscriptText(found.filePath);
+      if (!text.trim()) { console.log('transcript appears empty — nothing to extract'); process.exit(0); }
+      const result = extractAndRemember(text, { section });
+      printResult(result);
+      process.exit(result.ok ? 0 : 1);
+    }
+
+    // ── Mode 3: --text — inline text ────────────────────────────────────────
+    if (flags.text) {
+      const text = String(flags.text).trim();
+      if (!text) { console.error('--text value is empty'); process.exit(1); }
+      const result = extractAndRemember(text, { section });
+      printResult(result);
+      process.exit(result.ok ? 0 : 1);
+    }
+
+    // ── Mode 4: stdin ────────────────────────────────────────────────────────
+    const stdin = await readStdin();
+    if (stdin) {
+      const result = extractAndRemember(stdin, { section });
+      printResult(result);
+      process.exit(result.ok ? 0 : 1);
+    }
+
+    // ── No input — show help ─────────────────────────────────────────────────
+    console.log(`memory-onboard.js — extract and store memory from prompts or sessions
+
+Modes (pick one):
+  --fact="..."         Write a single fact directly (no LLM)
+  --session=ID         Extract from a session transcript (ID prefix OK)
+  --text="..."         Extract facts from inline text via LLM
+  <stdin>              Pipe text to extract from
+
+Options:
+  --section="..."      Target section in user-brain.md (default: "Session Notes")
+
+Examples:
+  node tools/memory-onboard.js --fact="prefers TypeScript strict mode"
+  node tools/memory-onboard.js --session=abc123
+  node tools/memory-onboard.js --text="deploy target is Railway, not Vercel"
+  echo "conversation" | node tools/memory-onboard.js --section="Preferences"
+`);
+  })();
+}
