@@ -80,7 +80,36 @@ else
   echo "  -- Labels skipped (--skip-labels)"
 fi
 
-# 5. Runner note (Linux/Mac manual setup)
+# 5. Claude Code hooks
+step "Installing Claude Code hooks to ~/.claude/hooks/"
+HOOKS_DIR="$HOME/.claude/hooks"
+mkdir -p "$HOOKS_DIR"
+HOOK_SCRIPTS=(
+  "session-start.sh"
+  "session-end.sh"
+  "user-prompt-submit.sh"
+  "guard-git.sh"
+  "wip-checkpoint.sh"
+)
+HOOKS_SRC="$SCRIPT_DIR/hooks/claude-hooks"
+if [ -d "$HOOKS_SRC" ]; then
+  for hook in "${HOOK_SCRIPTS[@]}"; do
+    src="$HOOKS_SRC/$hook"
+    dst="$HOOKS_DIR/$hook"
+    if [ -f "$src" ]; then
+      cp "$src" "$dst"
+      chmod +x "$dst"
+      ok "Installed $hook"
+      ((PASS++))
+    fi
+  done
+else
+  warn "hooks/claude-hooks/ not found in repo — skipping hook install"
+  warn "Manually copy hook scripts to $HOOKS_DIR"
+  ((WARN++))
+fi
+
+# 6. Runner note (Linux/Mac manual setup)
 step "Self-hosted runner"
 warn "Runner must be set up manually on Linux/Mac:"
 echo "     GitHub > repo Settings > Actions > Runners > New self-hosted runner"
