@@ -6,7 +6,7 @@
 
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
-import { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const HOME = homedir();
@@ -29,14 +29,15 @@ export async function spawnAgyPersistent({ prompt, repoPath, model, continueId }
   args.push('--add-dir', repoPath);
 
   return new Promise((resolve, reject) => {
-    const cmd = ['new-session', '-d', '-s', tmuxSessionName, '-c', repoPath];
-    const cmdArgs = ['agy'].concat(args);
-    cmd.push(cmdArgs.join(' ') + ` 2>&1 | tee ${logPath}`);
+    // Build tmux command with separate argv (NO shell interpretation of user input)
+    // tmux new-session -d -s <name> -c <cwd> -- <command> <arg1> <arg2> ...
+    // The -- separates tmux options from the command to execute
+    const tmuxCmd = ['new-session', '-d', '-s', tmuxSessionName, '-c', repoPath, '--', 'agy'].concat(args);
 
-    const tmux = spawn('tmux', cmd, {
+    const tmux = spawn('tmux', tmuxCmd, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, HOME },
-      shell: true,
+      // NO shell: true — spawn uses execvp, which does NOT interpret shell metacharacters
     });
 
     tmux.on('error', () => spawnDirect({ prompt, repoPath, model, continueId, logPath, sessionId, tmuxSessionName }).then(resolve).catch(reject));
@@ -44,17 +45,30 @@ export async function spawnAgyPersistent({ prompt, repoPath, model, continueId }
     tmux.on('close', (code) => {
       if (code !== 0) return spawnDirect({ prompt, repoPath, model, continueId, logPath, sessionId, tmuxSessionName }).then(resolve).catch(reject);
 
-      const pidCmd = spawn('tmux', ['list-panes', '-t', tmuxSessionName, '-F', '#{pane_pid}'], { stdio: ['ignore', 'pipe', 'pipe'] });
-      let pidOut = '';
-      pidCmd.stdout?.on('data', d => { pidOut += d.toString(); });
-      pidCmd.on('close', () => {
-        const pid = parseInt(pidOut.trim());
-        const conversationId = sessionId;
-        writeFileSync(metaPath, JSON.stringify({
-          id: sessionId, tmuxSessionName, pid: pid || null, logPath, conversationId,
-          spawnedAt: new Date().toISOString(), model, repoPath, prompt: prompt.slice(0, 200),
-        }, null, 2));
-        resolve({ tmuxSessionName, pid: pid || null, logPath, conversationId, spawnedAt: new Date().toISOString() });
+      // Setup log capture via tmux pipe-pane (only logPath is embedded in shell, which is safe—it's generated, not user input)
+      const pipePaneCmd = spawn('tmux', ['pipe-pane', '-t', tmuxSessionName, '-o', `cat >> '${logPath}'`], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      pipePaneCmd.on('close', () => {
+        // Get PID of process in tmux session
+        const pidCmd = spawn('tmux', ['list-panes', '-t', tmuxSessionName, '-F', '#{pane_pid}'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let pidOut = '';
+        pidCmd.stdout?.on('data', d => { pidOut += d.toString(); });
+        pidCmd.on('close', () => {
+          const pid = parseInt(pidOut.trim());
+          const conversationId = sessionId;
+
+          writeFileSync(metaPath, JSON.stringify({
+            id: sessionId, tmuxSessionName, pid: pid || null, logPath, conversationId,
+            spawnedAt: new Date().toISOString(), model, repoPath, prompt: prompt.slice(0, 200),
+          }, null, 2));
+
+          resolve({ tmuxSessionName, pid: pid || null, logPath, conversationId, spawnedAt: new Date().toISOString() });
+        });
       });
     });
   });
@@ -97,7 +111,7 @@ export async function stopAgyPersistent({ tmuxSessionName }) {
 export async function listAgySessions() {
   const sessions = [];
   try {
-    const files = require('fs').readdirSync(LOG_BASE).filter(f => f.endsWith('.json'));
+    const files = readdirSync(LOG_BASE).filter(f => f.endsWith('.json'));
     for (const file of files) {
       const metaPath = join(LOG_BASE, file);
       const meta = JSON.parse(readFileSync(metaPath, 'utf8'));
