@@ -89,15 +89,16 @@ test('extractAndRemember returns early on empty text', async () => {
   assert.strictEqual(result.extracted, 0);
 });
 
-test('extractAndRemember with stub LLM that returns a bullet fact list', () => {
+test('extractAndRemember with stub LLM that returns classified JSON-line facts', () => {
   resetBrain();
 
-  // Override AGENT_MEMORY_ROOT so remember() writes to our temp brain
   const prev = process.env.AGENT_MEMORY_ROOT;
   process.env.AGENT_MEMORY_ROOT = fakeMemRoot;
 
-  // parseCaptureFacts expects bullet lines prefixed "- " or "* "
-  const stubLlm = () => '- prefers dark mode\n- deploys to Railway';
+  const stubLlm = () => [
+    '{"fact": "prefers dark mode", "tier": "personal", "target": ""}',
+    '{"fact": "deploys to Railway", "tier": "personal", "target": ""}',
+  ].join('\n');
   const result = extractAndRemember('some prompt text', {
     section: 'Session Notes',
     llm: stubLlm,
@@ -107,6 +108,30 @@ test('extractAndRemember with stub LLM that returns a bullet fact list', () => {
 
   assert.strictEqual(result.ok, true);
   assert.ok(result.extracted >= 1, `expected >=1 extracted facts, got ${result.extracted}`);
+  assert.ok(result.byTier.personal >= 1);
+});
+
+test('extractAndRemember groups mixed-tier facts into byTier counts', () => {
+  resetBrain();
+
+  const prev = process.env.AGENT_MEMORY_ROOT;
+  process.env.AGENT_MEMORY_ROOT = fakeMemRoot;
+
+  // No repos/agents are registered in this fixture's known-repos.json, so a repo/agent
+  // classification the LLM emits gets coerced back to personal by parseClassifiedFacts —
+  // this test asserts that coercion, not a successful repo/agent write (that's covered
+  // in brain-remember.test.js with a real fixture repo).
+  const stubLlm = () => [
+    '{"fact": "prefers dark mode", "tier": "personal", "target": ""}',
+    '{"fact": "some repo fact", "tier": "repo", "target": "nonexistent-repo"}',
+  ].join('\n');
+  const result = extractAndRemember('some prompt text', { section: 'Session Notes', llm: stubLlm });
+
+  process.env.AGENT_MEMORY_ROOT = prev;
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.byTier.repo, 0, 'unregistered repo target should be coerced to personal, not counted as repo');
+  assert.ok(result.byTier.personal >= 1);
 });
 
 // ── CLI tests: --fact mode (no LLM — direct write) ───────────────────────────

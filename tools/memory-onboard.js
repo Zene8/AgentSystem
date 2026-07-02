@@ -23,7 +23,9 @@ import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { remember } from './brain-remember.js';
-import { buildCapturePrompt, parseCaptureFacts } from './memory-capture.js';
+import { buildClassifyPrompt, parseClassifiedFacts, AGENT_ROSTER } from './memory-classify.js';
+import { agentMemoryRoot } from './graph/graph-lib.js';
+import { readRegistry } from './graph/known-repos.js';
 
 const HOME     = homedir();
 const REGISTRY = join(HOME, 'agent-memory', 'nexus', 'session-registry.jsonl');
@@ -100,26 +102,35 @@ export const defaultLlm = (prompt) =>
   execFileSync('claude', ['-p', prompt], { encoding: 'utf8', timeout: 120_000 });
 
 /**
- * Extract durable facts from free text and write each via remember().
- * Returns { ok, extracted, written } or { ok: false, message }.
+ * Extract durable facts from free text, classify each by tier, and write via remember().
+ * Returns { ok, extracted, written, byTier, warnings } or { ok: false, message, written }.
  */
 export function extractAndRemember(text, { section = 'Session Notes', llm = defaultLlm } = {}) {
-  if (!text || !text.trim()) return { ok: true, extracted: 0, written: [] };
+  if (!text || !text.trim()) return { ok: true, extracted: 0, written: [], byTier: { personal: 0, repo: 0, agent: 0 }, warnings: [] };
 
-  const prompt = buildCapturePrompt(text);
+  const registryPath = join(agentMemoryRoot(), 'nexus', 'known-repos.json');
+  const repos = readRegistry(registryPath).repos.map(r => r.slug);
+
+  const prompt = buildClassifyPrompt(text, { repos, agents: AGENT_ROSTER });
   let raw;
   try { raw = llm(prompt); }
   catch (e) { return { ok: false, message: `llm failed: ${e.message}`, written: [] }; }
 
-  const facts = parseCaptureFacts(raw);
+  const classified = parseClassifiedFacts(raw, { repos, agents: AGENT_ROSTER });
   const written = [];
-  for (const fact of facts) {
+  const byTier = { personal: 0, repo: 0, agent: 0 };
+  const warnings = [];
+
+  for (const { fact, tier, target } of classified) {
     try {
-      const r = remember({ fact, section });
-      if (r.ok && r.added) written.push(fact);
-    } catch { /* individual failures don't abort the loop */ }
+      const r = remember({ fact, section, tier, target });
+      if (r.ok && r.added) { written.push({ fact, tier, target }); byTier[tier]++; }
+      else if (!r.ok) { warnings.push(r.message); }
+    } catch (e) {
+      warnings.push(`${fact}: ${e.message}`);
+    }
   }
-  return { ok: true, extracted: facts.length, written };
+  return { ok: true, extracted: classified.length, written, byTier, warnings };
 }
 
 // ── Stdin reader ──────────────────────────────────────────────────────────────
@@ -139,10 +150,17 @@ function readStdin() {
 function printResult(result) {
   if (!result.ok) { console.error(`memory-onboard: ${result.message}`); return; }
   if (result.extracted === 0) { console.log('no durable facts extracted'); return; }
-  console.log(`extracted ${result.extracted} candidate(s), stored ${result.written.length} new fact(s)`);
-  for (const f of result.written) console.log(`  + ${f}`);
+
+  const parts = [];
+  if (result.byTier.personal) parts.push(`${result.byTier.personal} → personal-brain`);
+  if (result.byTier.repo) parts.push(`${result.byTier.repo} → repo`);
+  if (result.byTier.agent) parts.push(`${result.byTier.agent} → agent`);
+
+  console.log(`extracted ${result.extracted} candidate(s), stored ${result.written.length} new fact(s): ${parts.join(', ')}`);
+  for (const w of result.written) console.log(`  + [${w.tier}${w.target ? ':' + w.target : ''}] ${w.fact}`);
   const skipped = result.extracted - result.written.length;
-  if (skipped > 0) console.log(`  (${skipped} already known — skipped)`);
+  if (skipped > 0) console.log(`  (${skipped} already known or skipped)`);
+  for (const w of (result.warnings || [])) console.log(`  ! ${w}`);
 }
 
 // ── CLI entry point ───────────────────────────────────────────────────────────
