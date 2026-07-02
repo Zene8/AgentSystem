@@ -59,7 +59,7 @@ function runNamer(args, { HOME }) {
   const result = execFileSync(
     process.execPath,
     [join(process.cwd(), 'tools/session-namer.js'), ...args],
-    { env: { ...process.env, HOME }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    { env: { ...process.env, HOME, SESSION_NAMER_HOME: HOME }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
   );
   return result;
 }
