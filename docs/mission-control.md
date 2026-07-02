@@ -558,13 +558,13 @@ WantedBy=multi-user.target
 
 ## Key Open Questions
 
-1. **Antigravity persistence:** How does `agy` survive PC reboot? Is `--continue` the intended resume pattern, or is there a `--bg` flag pending? (Blocks Issue #85.)
+1. **Antigravity persistence — RESOLVED (#91):** `agy` has no native `--bg`. Supported modes: `--print` (one-shot); `--continue`/`--conversation <id>` (resume from ~/.gemini/antigravity-cli/history.jsonl); interactive TUI (default). Reboot-surviving always-on sessions require a tmux/systemd wrapper built by the MC dispatcher (not part of agy) — tracked as build item in #85.
 
 2. **Concurrent session limits:** Should MC allow multiple harness instances (e.g., two Claude sessions + one agy session) or enforce one-at-a-time? (Affects Issue #84 rate limiting.)
 
-3. **Cost accounting for agy:** Google AI Pro is subscription-based, not token-counted. How should cost display work? (Impacts Issue #87 FE design.)
+3. **Cost accounting for agy — RESOLVED (#91) / DEFERRED (#95):** Cost telemetry is quota-based, not token-metered. FE (#87) displays "Subscription/Quota" badge (links to agy /quota), with no separate cost API. Claude side retains /cost. ToS stance on headless/always-on automation and concurrent-session caps not discoverable from CLI — escalated to Nat for business/legal review (#95).
 
-4. **MCP server security for agy:** Does agy support MCP at all? If so, how are permissions enforced vs. Claude Code? (Blocks Issue #83 security audit.)
+4. **MCP server security for agy — RESOLVED (#91):** Yes, full MCP support. Config at ~/.gemini/config/mcp_config.json (shared with agy IDE). Built-in servers: notebooks, visualization. Custom servers supported (command exec, remote URL, OAuth). Permissions via /permissions + /config with regex rules (v1.0.13+); --sandbox for path restrictions. Threat model isomorphic to Claude Code — #83 applies unified security audit to both harnesses.
 
 5. **Un-versioned production code risk:** Webhook server code lives in `~/AgentSystem/tools/` which is not a git repo. Should it be moved into the main codebase (`/home/natha/dev/AgentSystem`) for version control? (Noted in HANDOFF.md; escalate to Jarvis.)
 
