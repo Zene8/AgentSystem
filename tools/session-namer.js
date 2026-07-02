@@ -21,8 +21,10 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, create
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
-const HOME         = homedir();
+const HOME         = process.env.SESSION_NAMER_HOME || homedir();
 const REGISTRY     = join(HOME, 'agent-memory', 'nexus', 'session-registry.jsonl');
 const PROJECTS_DIR = join(HOME, '.claude', 'projects');
 
@@ -72,15 +74,20 @@ function repoFromCwd(cwd) {
   return base || 'root';
 }
 
-/** cwd → Claude Code project dir name (/, \, : → -).
- *  Windows cwds arrive as either "C:/Users/..." or "C:\\Users\\..." depending on
- *  which shell registered the session -- both must map to the same dir Claude Code
- *  actually uses, e.g. "C--Users-natha-dev-AgentSystem". Only handling "/" left this
- *  candidate lookup silently wrong for every Windows session (harmless in practice
- *  because readFirstUserMessage() falls back to a full directory scan by session id,
- *  but worth being correct so that fallback isn't the only path that works). */
-function cwdToProjectDir(cwd) {
-  return cwd.replace(/[\\/:]/g, '-');
+/** cwd -> Claude Code project dir name.
+ *  Proven against a live ~/.claude/projects listing: Claude Code replaces every
+ *  character that is not [A-Za-z0-9] with a single '-' (no collapsing of runs).
+ *  Example: "C:/Users/natha/dev/AgentSystem" -> "C--Users-natha-dev-AgentSystem".
+ *  A worktree cwd like ".../AgentSystem/.claude/worktrees/foo" becomes
+ *  "...AgentSystem--claude-worktrees-foo" -- note the "." before "claude" is
+ *  ALSO replaced with a dash. The old regex only replaced slash/backslash/colon
+ *  and missed '.', so every worktree session (which always has "/.claude/" in
+ *  its cwd) produced a project dir name one dash short of the real one -- a
+ *  silent lookup miss that hit worktree sessions hardest. Backslash-style
+ *  Windows paths normalize identically since backslash is non-alphanumeric too. */
+export function cwdToProjectDir(cwd) {
+  if (!cwd) return '';
+  return cwd.replace(/[^A-Za-z0-9]/g, '-');
 }
 
 /** Extract 5 significant words from free text */
@@ -112,10 +119,13 @@ const HUMAN_PROMPT_SOURCES = new Set(['typed', 'queued', 'sdk']);
 /**
  * Append DONE_MARKER to a session display name.
  * Idempotent: never double-appends.
- * Does NOT touch the `title` field — title stays clean for search/grouping.
+ * Only marks a session "done" when it has a REAL title -- a still-"pending"
+ * (unnamed) session must never be marked done (nothing to mark done).
+ * Does NOT touch the title field -- title stays clean for search/grouping.
  */
-function applyDoneMarker(name) {
-  if (!name || name.endsWith(DONE_MARKER)) return name;
+function applyDoneMarker(name, title) {
+  if (!name || !title || title === 'pending') return name;
+  if (name.endsWith(DONE_MARKER)) return name;
   return name + DONE_MARKER;
 }
 
@@ -177,6 +187,16 @@ async function readFirstUserMessage(sessionId, cwd) {
 
 function cmdRegister({ session, cwd }) {
   if (!session) { console.error('--session required'); process.exit(1); }
+
+  // Resume fires SessionStart again for the same session_id. Never stomp an
+  // existing entry back to "pending" -- that would destroy the real title
+  // (and the " + (done)" marker) that --print-title needs to show on resume.
+  const existing = loadRegistry().find(e => e.session === session);
+  if (existing) {
+    if (!existing.cwd && cwd) saveEntry({ ...existing, cwd });
+    return;
+  }
+
   const repo  = repoFromCwd(cwd);
   const ts    = new Date().toISOString();
   const entry = { session, repo, cwd: cwd || '', title: 'pending',
@@ -192,18 +212,28 @@ async function cmdFinalize({ session }) {
   // Idempotency: never clobber an already-named session (renamed or has a real title)
   if (existing.finalized && existing.title && existing.title !== 'pending') return;
 
+  // Manually renamed but not yet finalized (e.g. renamed via /rename-session
+  // while still "pending" mid-session) -- the session is ending now, so keep
+  // the user's chosen title and just apply the done marker; do not overwrite
+  // it with a transcript-derived guess.
+  if (existing.renamed && existing.title && existing.title !== 'pending') {
+    const name = applyDoneMarker(existing.name, existing.title);
+    saveEntry({ ...existing, finalized: true, name });
+    return;
+  }
+
   const msg = await readFirstUserMessage(session, existing.cwd);
   if (!msg) {
-    // Stop-hook path: no transcript yet — mark finalized so the session is not stuck forever
-    // but only if called from Stop (clean exit). Sweep/early paths skip sessions with no msg.
-    const noMsgName = applyDoneMarker(existing.name);
-    saveEntry({ ...existing, finalized: true, name: noMsgName });
+    // Stop-hook path, no transcript yet (e.g. process killed before any user
+    // message was written). There is no real title, so there is nothing to
+    // mark "done" -- leave the entry as pending/unfinalized so the next
+    // SessionStart sweep can finalize it once a transcript actually exists.
     return;
   }
 
   const title = titleFromText(msg.text);
   const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp));
+  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp), title);
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -224,12 +254,16 @@ async function cmdFinalizeEarly({ session }) {
   // Already has a real name — nothing to do
   if (existing.finalized && existing.title && existing.title !== 'pending') return;
 
+  // Manually renamed -- never overwrite a /rename-session name with a
+  // transcript-derived guess, even before Stop has finalized it.
+  if (existing.renamed && existing.title && existing.title !== 'pending') return;
+
   const msg = await readFirstUserMessage(session, existing.cwd);
   if (!msg) return; // transcript not readable yet — Stop hook will handle it
 
   const title = titleFromText(msg.text);
   const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp));
+  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp), title);
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -245,7 +279,24 @@ async function cmdFinalizeEarly({ session }) {
  * Designed to run on SessionStart so past crashes self-heal over time.
  */
 async function cmdSweep() {
-  const entries = loadRegistry();
+  let entries = loadRegistry();
+
+  // Pass 0 (one-time cleanup): a prior bug applied DONE_MARKER to sessions
+  // that were still "pending" (never got a real title), producing names like
+  // "myrepo pending 2026-07-02 + (done)". Strip the stray marker. Back up the
+  // registry first since this rewrites data.
+  const dirtyPending = entries.filter(e =>
+    e.title === 'pending' && e.name && e.name.endsWith(DONE_MARKER)
+  );
+  if (dirtyPending.length > 0) {
+    const backupPath = `${REGISTRY}.bak-${Date.now()}`;
+    writeFileSync(backupPath, readFileSync(REGISTRY, 'utf8'), 'utf8');
+    for (const entry of dirtyPending) {
+      saveEntry({ ...entry, name: stripDoneMarker(entry.name) });
+    }
+    console.log(`[session-namer] sweep: cleaned ${dirtyPending.length} pending session(s) with a stray done-marker (backup: ${backupPath})`);
+    entries = loadRegistry();
+  }
 
   // Pass 1: retro-mark already-finalized entries missing the done marker.
   // These are entries that were finalized before this feature was added.
@@ -265,7 +316,7 @@ async function cmdSweep() {
   }
 
   const pending = entries.filter(e =>
-    !e.finalized || e.title === 'pending' || !e.title
+    !e.renamed && (!e.finalized || e.title === 'pending' || !e.title)
   );
 
   if (!pending.length) {
@@ -280,7 +331,7 @@ async function cmdSweep() {
 
     const title = titleFromText(msg.text);
     const repo  = (entry.repo && entry.repo !== 'unknown') ? entry.repo : repoFromCwd(msg.cwd);
-    const name  = applyDoneMarker(buildName(repo, title, msg.ts || entry.timestamp));
+    const name  = applyDoneMarker(buildName(repo, title, msg.ts || entry.timestamp), title);
     const updated = { ...entry, repo, cwd: msg.cwd || entry.cwd, title, name,
                       timestamp: msg.ts || entry.timestamp,
                       finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -290,6 +341,58 @@ async function cmdSweep() {
   }
 
   console.log(`[session-namer] sweep done — fixed: ${fixed}, no-transcript: ${skipped}`);
+}
+
+/**
+ * getGitBranch — best-effort current branch name for a cwd. Used to build the
+ * startup title "<repo>/<branch>" before the real (first-prompt-derived) name
+ * exists. Never throws; returns null if not a git repo or on any error. Bounded
+ * by a short timeout so a slow/hung git process can't block session startup.
+ */
+function getGitBranch(cwd) {
+  if (!cwd) return null;
+  try {
+    const out = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd, timeout: 1500, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const branch = out.toString().trim();
+    return branch && branch !== 'HEAD' ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * cmdPrintTitle — print (stdout only) the best-available display title for a
+ * session, for the SessionStart hook to forward into Claude Code's native
+ * sessionTitle mechanism.
+ *   - Resume of an already-finalized session -> the real registry name (keeps
+ *     the " + (done)" marker so finished sessions read as done in the picker).
+ *   - Fresh session / no real title yet -> "<repo>/<branch>" (or
+ *     "<repo> <date>" if branch can't be determined). The good
+ *     first-prompt-derived name then appears on the *next* resume — Claude
+ *     Code only lets SessionStart (not UserPromptSubmit/Stop) set the title,
+ *     so there is no way to rename mid-session once the first prompt lands.
+ * Prints nothing if no session id is given (hook then skips JSON emission).
+ */
+async function cmdPrintTitle({ session, cwd }) {
+  if (!session) return;
+  const existing = loadRegistry().find(e => e.session === session);
+
+  // Show the real name whenever one exists — whether it came from the
+  // transcript-derived finalize path or a manual /rename-session, even if
+  // the session hasn't been marked finalized yet (e.g. renamed mid-session
+  // before Stop ever fired).
+  if (existing && existing.name && existing.title && existing.title !== 'pending') {
+    process.stdout.write(existing.name);
+    return;
+  }
+
+  const effectiveCwd = cwd || existing?.cwd || '';
+  const repo   = repoFromCwd(effectiveCwd);
+  const branch = getGitBranch(effectiveCwd || process.cwd());
+  const title  = branch ? `${repo}/${branch}` : `${repo} ${today()}`;
+  process.stdout.write(title);
 }
 
 function cmdList({ repo, date, limit }) {
@@ -434,11 +537,12 @@ for (const arg of args) {
   } else positional.push(arg);
 }
 
-(async () => {
+async function main() {
   if      (flags.register)              cmdRegister({ session: flags.session, cwd: flags.cwd || process.env.CWD || process.cwd() });
   else if (flags.finalize)              await cmdFinalize({ session: flags.session });
   else if (flags['finalize-early'])     await cmdFinalizeEarly({ session: flags.session });
   else if (flags.sweep)                 await cmdSweep();
+  else if (flags['print-title'])        await cmdPrintTitle({ session: flags.session, cwd: flags.cwd });
   else if (flags.scan)                  { await cmdScan(); await cmdScanAgy(); }
   else if (flags.list)                  cmdList({ repo: flags.repo, date: flags.date, limit: flags.limit });
   else if (flags.search || positional.length && !flags.group && !flags.rename && !flags.resume)
@@ -455,6 +559,7 @@ Commands:
   --finalize --session=ID                Name session from first prompt (Stop hook)
   --finalize-early --session=ID          Name session early, skip if no transcript yet (UserPromptSubmit hook)
   --sweep                                Retroactively finalize all pending sessions with transcripts
+  --print-title --session=ID [--cwd=PATH] Print best display title (SessionStart hook)
   --scan                                 Retroactively name all sessions
   --list [--repo=X] [--date=YYYY-MM-DD] [--limit=N]
   --today                                Today's sessions
@@ -466,7 +571,13 @@ Commands:
 Registry: ${REGISTRY}
 `);
   }
-})();
+}
+
+// Only auto-run the CLI when this file is executed directly (e.g.
+// `node tools/session-namer.js --sweep`), not when it's `import`ed by the
+// test suite to unit-test pure helpers like cwdToProjectDir.
+const isMainModule = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMainModule) main();
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Antigravity CLI (agy) support
@@ -601,7 +712,7 @@ async function cmdScanAgy() {
 
     if (msg) {
       const title = titleFromText(msg.text);
-      const name  = applyDoneMarker(buildName(repo, title, msg.ts || ts));
+      const name  = applyDoneMarker(buildName(repo, title, msg.ts || ts), title);
       const prev  = loadRegistry().find(e => e.session === sessionId) || {};
       saveEntry({ ...prev, session: sessionId, repo, cwd, title, name,
                   timestamp: msg.ts || ts, finalized: true,
@@ -609,9 +720,10 @@ async function cmdScanAgy() {
       console.log(`[session-namer][agy] ${sessionId.slice(0,8)}… → "${name}"`);
       named++;
     } else {
-      const prev = loadRegistry().find(e => e.session === sessionId) || {};
-      const noMsgAgyName = applyDoneMarker(prev.name);
-      saveEntry({ ...prev, session: sessionId, repo, cwd, finalized: true, runtime: 'agy', name: noMsgAgyName });
+      // No transcript message found yet. If this session was freshly
+      // registered above it's already pending; if it already existed and
+      // still has no message, leave it pending too — do not finalize or
+      // apply the done marker (there is no real title to mark "done").
     }
   }
 
