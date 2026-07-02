@@ -146,11 +146,12 @@ export class SessionRegistry {
   }
 
   /**
-   * Get running sessions
-   * @returns {array} Sessions with status=running
+   * Get active sessions (spawning or running)
+   * Used for concurrency cap enforcement: includes both spawning and running
+   * @returns {array} Sessions with status=spawning or running
    */
   getRunning() {
-    return this.sessions.filter(s => s.status === 'running');
+    return this.sessions.filter(s => ['spawning', 'running'].includes(s.status));
   }
 
   /**

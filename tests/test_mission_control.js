@@ -301,6 +301,66 @@ test('Agy session has costEstimate null (quota-based)', async (t) => {
   assert.equal(session.costEstimate, null);
 });
 
+// ── Test: Concurrency cap enforcement ──────────────────────────────────────
+
+test('Concurrency cap: getRunning() includes spawning and running', async (t) => {
+  const { SessionRegistry } = await import('../tools/mission-control/session-registry.js');
+  const testPath = `${HOME}/.claude/mission-control-registry-cap-fresh-test.json`;
+
+  // Ensure clean state
+  try { rmSync(testPath); } catch {}
+
+  const registry = new SessionRegistry(testPath);
+
+  const s1 = registry.createSession({
+    harness: 'claude',
+    agent: 'friday',
+    repo: 'agentsystem',
+    prompt: 'test1',
+  });
+
+  // Initially spawning (getRunning includes spawning status)
+  let running = registry.getRunning();
+  assert.equal(running.length, 1, 'should have 1 spawning session');
+
+  // Mark as running
+  registry.updateSession(s1.id, { status: 'running' });
+  running = registry.getRunning();
+  assert.equal(running.length, 1, 'should have 1 running session');
+
+  // Mark as exited
+  registry.exitSession(s1.id, 0);
+  running = registry.getRunning();
+  assert.equal(running.length, 0, 'should have 0 sessions after exit');
+
+  try { rmSync(testPath); } catch {}
+});
+
+test('Concurrency cap: cannot spawn second claude while one running', async (t) => {
+  const { SessionRegistry } = await import('../tools/mission-control/session-registry.js');
+  const testPath = `${HOME}/.claude/mission-control-registry-cap-conflict-fresh-test.json`;
+
+  // Ensure clean state
+  try { rmSync(testPath); } catch {}
+
+  const registry = new SessionRegistry(testPath);
+
+  const s1 = registry.createSession({
+    harness: 'claude',
+    agent: 'friday',
+    repo: 'agentsystem',
+    prompt: 'test1',
+  });
+
+  registry.updateSession(s1.id, { status: 'running' });
+
+  // Simulate trying to spawn another claude
+  const running = registry.getRunning().filter(s => s.harness === 'claude');
+  assert.equal(running.length, 1, 'should have one running claude session');
+
+  try { rmSync(testPath); } catch {}
+});
+
 // Cleanup test files
 test('cleanup', async (t) => {
   try { rmSync(TEST_REGISTRY_PATH); } catch {}

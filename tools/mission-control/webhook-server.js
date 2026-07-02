@@ -580,6 +580,17 @@ const server = http.createServer(async (req, res) => {
         return json(res, 403, { error: e.message });
       }
 
+      // CONCURRENCY CAP: Enforce max 1 concurrent session per harness (CEO requirement)
+      // See https://github.com/Zene8/AgentSystem/issues/95 — autonomy constraints
+      const running = registry.getRunning().filter(s => s.harness === harness);
+      if (running.length > 0) {
+        return json(res, 409, {
+          error: `${harness} harness already running`,
+          running: running[0],
+          message: 'Max 1 concurrent session per harness. Wait for current session to complete.',
+        });
+      }
+
       // Create session registry entry
       const sessionRecord = registry.createSession({
         harness,
