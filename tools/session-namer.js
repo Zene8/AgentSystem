@@ -102,6 +102,13 @@ function buildName(repo, title, ts) { return `${repo} ${title} ${dateStr(ts)}`; 
 /** Marker appended to display name when a session is finalized. */
 const DONE_MARKER = ' + (done)';
 
+// Accept any human-originated first prompt, not just interactively "typed" ones.
+// "queued" = the -p prompt of a `claude --bg --agent X -p "..."` spawn (Friday's mandatory
+// delegation pattern spawns dozens of these daily -- they were ALL stuck un-renamed before
+// this fix). "sdk" = SDK/API-driven sessions. Excludes "system"/"task-notification" origin,
+// which are automated pings, not real prompts.
+const HUMAN_PROMPT_SOURCES = new Set(['typed', 'queued', 'sdk']);
+
 /**
  * Append DONE_MARKER to a session display name.
  * Idempotent: never double-appends.
@@ -152,7 +159,7 @@ async function readFirstUserMessage(sessionId, cwd) {
         if (
           obj.type === 'user' &&
           obj.origin?.kind === 'human' &&
-          obj.promptSource === 'typed' &&
+          HUMAN_PROMPT_SOURCES.has(obj.promptSource) &&
           typeof obj.message?.content === 'string' &&
           obj.message.content.trim().length > 0
         ) {
