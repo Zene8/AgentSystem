@@ -32,6 +32,12 @@ node ~/dev/AgentSystem/tools/memory-onboard.js --fact="<args>"
 **If no args given:**
 Ask the user: "What do you want to onboard? You can paste a message, give a session ID, or state a fact directly."
 
+**Note on routing (as of 2026-07-02):** text/session/stdin modes now auto-classify each
+extracted fact across three tiers — personal-brain (default), a specific repo's brain, or a
+specific agent's brain — based on what the fact is actually about. No flag needed; this is
+automatic. `--fact=` mode is unaffected: it always writes personal-brain directly, no LLM
+classification (that's the point of `--fact=` — a fast manual write).
+
 After running, report what was stored: list each new fact written, or confirm "already known" if nothing new was added.
 
 Optional: the user can suffix `--section="..."` to target a specific brain section (default: Session Notes).
