@@ -1,4 +1,8 @@
 #!/bin/bash
+# Ensure node/jq resolve even if the parent process's PATH predates their
+# installation (e.g. a long-lived daemon started before nvm4w/jq existed).
+export PATH="/c/nvm4w/nodejs:/c/Users/natha/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe:$PATH"
+
 # UserPromptSubmit hook: finalize session name as soon as the first user prompt arrives.
 # This ensures sessions get named even when Stop hook never fires (crash/teardown).
 # Safe to run on every prompt — cmdFinalizeEarly is idempotent (no-ops if already named).

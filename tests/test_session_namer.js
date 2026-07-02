@@ -7,10 +7,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { cwdToProjectDir } from '../tools/session-namer.js';
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ function runNamer(args, { HOME }) {
   const result = execFileSync(
     process.execPath,
     [join(process.cwd(), 'tools/session-namer.js'), ...args],
-    { env: { ...process.env, HOME }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    { env: { ...process.env, HOME, SESSION_NAMER_HOME: HOME }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
   );
   return result;
 }
@@ -422,6 +423,275 @@ test('done marker: finalize-early adds marker on first-time finalize', async () 
   assert.equal(entries[0].finalized, true);
   assert.ok(entries[0].name.endsWith(' + (done)'), `finalize-early name must end with " + (done)", got: "${entries[0].name}"`);
   assert.ok(!entries[0].title.includes('(done)'), 'title must be clean');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+
+// ── Bug 3 regression: cwdToProjectDir / Windows + worktree path normalization ─
+
+test('cwdToProjectDir: normalizes Windows/worktree cwds exactly like Claude Code', () => {
+  const cases = [
+    ['C:/Users/natha/dev/AgentSystem', 'C--Users-natha-dev-AgentSystem'],
+    ['C:\\Users\\natha\\dev\\AgentSystem', 'C--Users-natha-dev-AgentSystem'],
+    ['C:/Users/natha/dev/AgentSystem/.claude/worktrees/foo', 'C--Users-natha-dev-AgentSystem--claude-worktrees-foo'],
+    ['C:\\Users\\natha\\dev\\AgentSystem\\.claude\\worktrees\\foo', 'C--Users-natha-dev-AgentSystem--claude-worktrees-foo'],
+    ['/home/test/myrepo', '-home-test-myrepo'],
+    ['', ''],
+  ];
+  for (const [cwd, expected] of cases) {
+    assert.equal(cwdToProjectDir(cwd), expected, `cwdToProjectDir(${JSON.stringify(cwd)})`);
+  }
+});
+
+test('bug3 regression: worktree cwd resolves the CORRECT transcript, not a decoy', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'wtwt1111-0000-0000-0000-000000000001';
+  const cwd = 'C:/Users/natha/dev/AgentSystem/.claude/worktrees/foo';
+  const correctProjectDir = join(tmp, '.claude', 'projects', 'C--Users-natha-dev-AgentSystem--claude-worktrees-foo');
+  const decoyProjectDir   = join(tmp, '.claude', 'projects', '0decoy-sorts-first');
+
+  makeTranscript(correctProjectDir, sessionId, 'implement the correct worktree feature');
+  makeTranscript(decoyProjectDir, sessionId, 'this is a decoy from an unrelated directory');
+
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'foo', cwd, title: 'pending',
+      name: 'foo pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize-early', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.match(entries[0].name, /correct worktree feature/,
+    `expected the cwd-matched transcript to win, got name: "${entries[0].name}"`);
+  assert.doesNotMatch(entries[0].name, /decoy/, 'must not have picked up the decoy transcript');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── Bug 2 regression: done marker must require a real title ─────────────────
+
+test('bug2 regression: --finalize (Stop hook) with no transcript does not finalize or mark done', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  mkdirSync(join(tmp, '.claude', 'projects'), { recursive: true });
+
+  const sessionId = 'bug2ffff-0000-0000-0000-000000000099';
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'pending',
+      name: 'myrepo pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].finalized, false, 'must remain unfinalized with no transcript');
+  assert.equal(entries[0].title, 'pending');
+  assert.equal(entries[0].name, 'myrepo pending 2026-07-02', 'name must be untouched');
+  assert.ok(!entries[0].name.includes('(done)'), 'must never get the done marker without a real title');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--sweep: one-time cleanup strips done-marker from a still-pending entry and backs up the registry', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  mkdirSync(join(tmp, '.claude', 'projects'), { recursive: true });
+
+  const sessionId = 'dirty111-0000-0000-0000-000000000001';
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'pending',
+      name: 'myrepo pending 2026-07-02 + (done)', timestamp: '2026-07-02T00:00:00.000Z', finalized: true }
+  ]);
+
+  const output = runNamer(['--sweep'], { HOME: tmp });
+  assert.match(output, /cleaned 1 pending session/);
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].name, 'myrepo pending 2026-07-02', 'stray marker must be stripped');
+  assert.equal(entries[0].title, 'pending');
+
+  const backups = readdirSync(nexusDir).filter(f => f.startsWith('session-registry.jsonl.bak-'));
+  assert.equal(backups.length, 1, 'expected exactly one backup file');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── Bug 1: --print-title (SessionStart -> Claude Code native title) ─────────
+
+test('--print-title: finalized session prints the real registry name (done marker kept)', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'title111-0000-0000-0000-000000000001';
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'ship the thing',
+      name: 'myrepo ship the thing 2026-07-01 + (done)', timestamp: '2026-07-01T00:00:00.000Z', finalized: true }
+  ]);
+
+  const output = runNamer(['--print-title', `--session=${sessionId}`], { HOME: tmp });
+  assert.equal(output, 'myrepo ship the thing 2026-07-01 + (done)');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--print-title: fresh/pending session prints repo/branch derived from cwd, not the raw pending name', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'title222-0000-0000-0000-000000000002';
+  const realCwd = process.cwd(); // this repo checkout — a real git repo
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: realCwd, title: 'pending',
+      name: 'myrepo pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
+  ]);
+
+  const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: realCwd, encoding: 'utf8' }).trim();
+  const expectedRepo = basename(realCwd).replace(/^\./, '').toLowerCase();
+
+  const output = runNamer(['--print-title', `--session=${sessionId}`, `--cwd=${realCwd}`], { HOME: tmp });
+  assert.equal(output, `${expectedRepo}/${branch}`);
+  assert.notEqual(output, 'myrepo pending 2026-07-02');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--print-title: falls back to "<repo> <date>" when cwd is not a git repo', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const notAGitRepo = join(tmp, 'plain-folder');
+  mkdirSync(notAGitRepo, { recursive: true });
+
+  const sessionId = 'title333-0000-0000-0000-000000000003';
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'unused', cwd: notAGitRepo, title: 'pending',
+      name: 'unused pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
+  ]);
+
+  const output = runNamer(['--print-title', `--session=${sessionId}`, `--cwd=${notAGitRepo}`], { HOME: tmp });
+  const todayStr = new Date().toISOString().slice(0, 10);
+  assert.equal(output, `plain-folder ${todayStr}`);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--register: does not stomp an already-finalized entry back to pending (resume case)', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'resume11-0000-0000-0000-000000000001';
+  const cwd = '/home/test/myrepo';
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'ship the thing',
+      name: 'myrepo ship the thing 2026-07-01 + (done)', timestamp: '2026-07-01T00:00:00.000Z', finalized: true }
+  ]);
+
+  runNamer(['--register', `--session=${sessionId}`, `--cwd=${cwd}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].title, 'ship the thing', 'resume must not reset title to pending');
+  assert.equal(entries[0].name, 'myrepo ship the thing 2026-07-01 + (done)');
+  assert.equal(entries[0].finalized, true);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── /rename-session UX: rename must work on the CURRENT (possibly still ─────
+// ── "pending") session, and must survive later auto-finalize passes ─────────
+
+test('--rename: works on a still-pending/unfinalized session (mid-session rename)', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'renpend1-0000-0000-0000-000000000001';
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'pending',
+      name: 'myrepo pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
+  ]);
+
+  // Simulates /rename-session using the full ${CLAUDE_SESSION_ID}, not a prefix
+  const output = runNamer(['--rename', sessionId, 'fix the login flow'], { HOME: tmp });
+  assert.match(output, /renamed renpend1/);
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].name, 'fix the login flow');
+  assert.equal(entries[0].renamed, true);
+  assert.equal(entries[0].finalized, false, 'manual rename mid-session does not itself finalize the session');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--rename: a renamed-but-unfinalized session survives a later --finalize-early without being overwritten', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'renearl1-0000-0000-0000-000000000001';
+  const cwd = '/home/test/myrepo';
+  const cwdSlug = cwd.replace(/\//g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  makeTranscript(projectDir, sessionId, 'this text must never overwrite the manual rename');
+
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'pending',
+      name: 'myrepo pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--rename', sessionId, 'my chosen name'], { HOME: tmp });
+  runNamer(['--finalize-early', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].name, 'my chosen name', 'finalize-early must not overwrite a manual rename');
+  assert.equal(entries[0].finalized, false, 'finalize-early does not finalize a renamed-but-live session');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--finalize (Stop hook) on a renamed-but-unfinalized session applies the done marker to the RENAMED name', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  mkdirSync(join(tmp, '.claude', 'projects'), { recursive: true });
+
+  const sessionId = 'renstop1-0000-0000-0000-000000000001';
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'my chosen name',
+      name: 'my chosen name', timestamp: '2026-07-02T00:00:00.000Z', finalized: false, renamed: true }
+  ]);
+
+  runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].finalized, true);
+  assert.equal(entries[0].name, 'my chosen name + (done)');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--print-title: shows a manual rename immediately, even before the session is finalized', () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+
+  const sessionId = 'renprint-0000-0000-0000-000000000001';
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'my chosen name',
+      name: 'my chosen name', timestamp: '2026-07-02T00:00:00.000Z', finalized: false, renamed: true }
+  ]);
+
+  const output = runNamer(['--print-title', `--session=${sessionId}`], { HOME: tmp });
+  assert.equal(output, 'my chosen name');
 
   rmSync(tmp, { recursive: true, force: true });
 });

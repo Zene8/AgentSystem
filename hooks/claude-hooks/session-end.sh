@@ -1,4 +1,8 @@
 #!/bin/bash
+# Ensure node/jq resolve even if the parent process's PATH predates their
+# installation (e.g. a long-lived daemon started before nvm4w/jq existed).
+export PATH="/c/nvm4w/nodejs:/c/Users/natha/AppData/Local/Microsoft/WinGet/Packages/jqlang.jq_Microsoft.Winget.Source_8wekyb3d8bbwe:$PATH"
+
 # Stop hook: log session cost + tokens to nexus session log, then auto-name session
 INPUT=$(cat)
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
