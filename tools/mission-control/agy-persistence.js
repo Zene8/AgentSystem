@@ -13,6 +13,10 @@ const HOME = homedir();
 const LOG_BASE = join(HOME, '.agy-mission-control');
 mkdirSync(LOG_BASE, { recursive: true });
 
+// Never default to --dangerously-skip-permissions. Must be explicitly opted in
+// via env var (matches agy-dispatcher.js confirmation-required stance).
+const ALLOW_SKIP_PERMISSIONS = process.env.AGY_ALLOW_DANGEROUS_SKIP_PERMISSIONS === '1' || process.env.AGY_ALLOW_DANGEROUS_SKIP_PERMISSIONS === 'true';
+
 export async function spawnAgyPersistent({ prompt, repoPath, model, continueId }) {
   if (!existsSync(repoPath)) throw new Error(`Repo not found: ${repoPath}`);
 
@@ -25,7 +29,7 @@ export async function spawnAgyPersistent({ prompt, repoPath, model, continueId }
   const args = ['-p', prompt];
   if (model) args.push('--model', model);
   if (continueId) args.push('--continue', continueId);
-  else args.push('--dangerously-skip-permissions');
+  else if (ALLOW_SKIP_PERMISSIONS) args.push('--dangerously-skip-permissions');
   args.push('--add-dir', repoPath);
 
   return new Promise((resolve, reject) => {
@@ -79,7 +83,7 @@ async function spawnDirect({ prompt, repoPath, model, continueId, logPath, sessi
     const args = ['-p', prompt];
     if (model) args.push('--model', model);
     if (continueId) args.push('--continue', continueId);
-    else args.push('--dangerously-skip-permissions');
+    else if (ALLOW_SKIP_PERMISSIONS) args.push('--dangerously-skip-permissions');
     args.push('--add-dir', repoPath);
 
     const agy = spawn('agy', args, { cwd: repoPath, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME } });
