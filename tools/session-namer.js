@@ -72,9 +72,15 @@ function repoFromCwd(cwd) {
   return base || 'root';
 }
 
-/** cwd → Claude Code project dir name (/ → -) */
+/** cwd → Claude Code project dir name (/, \, : → -).
+ *  Windows cwds arrive as either "C:/Users/..." or "C:\\Users\\..." depending on
+ *  which shell registered the session -- both must map to the same dir Claude Code
+ *  actually uses, e.g. "C--Users-natha-dev-AgentSystem". Only handling "/" left this
+ *  candidate lookup silently wrong for every Windows session (harmless in practice
+ *  because readFirstUserMessage() falls back to a full directory scan by session id,
+ *  but worth being correct so that fallback isn't the only path that works). */
 function cwdToProjectDir(cwd) {
-  return cwd.replace(/\//g, '-');
+  return cwd.replace(/[\\/:]/g, '-');
 }
 
 /** Extract 5 significant words from free text */
