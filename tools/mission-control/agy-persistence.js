@@ -137,3 +137,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log('Usage: agy-persistence.js spawn|stop|list [args]');
   }
 }
+
+/**
+ * CONCURRENCY MODEL (per Friday's autonomy rules):
+ * - Max 1 concurrent agy session per account
+ * - Sessions are bounded (spawn → run → exit or checkpoint)
+ * - Resumable via --continue <conversationId>
+ * - Never an infinite/eternal daemon
+ *
+ * Enforcement: Dispatcher (webhook) checks before calling spawnAgyPersistent
+ * This wrapper is permissive; concurrency cap is enforced upstream
+ */
