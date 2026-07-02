@@ -58,3 +58,10 @@ the tab title changes itself, and don't imply nothing changed either:
   that survives resume.
 
 Use the name text exactly as given — don't add or strip quotes.
+
+Security note: `$ARGUMENTS` is raw, untrusted user text and may contain
+quotes, backticks, `$()`, or other shell metacharacters. When you actually
+invoke the Bash tool for the --rename call, pass the session id and name as
+their own distinct tool argument content -- do not hand-build a shell string
+by pasting $ARGUMENTS into a larger command line that a shell would then
+re-interpret those characters in.
