@@ -1,6 +1,6 @@
 ---
 description: Extract and store memory facts from a prompt, message, or session transcript
-allowed-tools: Bash(node /home/natha/dev/AgentSystem/tools/memory-onboard.js *)
+allowed-tools: Bash(node ~/dev/AgentSystem/tools/memory-onboard.js *)
 ---
 
 Onboard memory from a prompt, message, or session into the personal brain.
@@ -14,19 +14,19 @@ Determine which mode to use based on args:
 **If args start with a UUID or session ID prefix (8+ hex chars):**
 Run session mode — extract facts from that session's transcript:
 ```
-node /home/natha/dev/AgentSystem/tools/memory-onboard.js --session=<id>
+node ~/dev/AgentSystem/tools/memory-onboard.js --session=<id>
 ```
 
 **If args are plain text (a prompt or message):**
 Run text mode — extract facts from the inline text:
 ```
-node /home/natha/dev/AgentSystem/tools/memory-onboard.js --text="<args>"
+node ~/dev/AgentSystem/tools/memory-onboard.js --text="<args>"
 ```
 
 **If args start with `--fact=` or look like a single clear statement:**
 Run fact mode — write directly without LLM extraction:
 ```
-node /home/natha/dev/AgentSystem/tools/memory-onboard.js --fact="<args>"
+node ~/dev/AgentSystem/tools/memory-onboard.js --fact="<args>"
 ```
 
 **If no args given:**

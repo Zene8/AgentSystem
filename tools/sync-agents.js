@@ -146,6 +146,21 @@ function syncConfig() {
   }
 }
 
+// Slash commands (.agents/commands/*.md) were previously never synced -- edits to the
+// repo source silently never reached ~/.claude/commands/, so fixes (e.g. stale absolute
+// paths) never took effect. Sync them the same way config/ is synced: flat copy.
+const COMMANDS_DIR = join(REPO_ROOT, '.agents', 'commands');
+function syncCommands() {
+  const destDir = join(HOME, '.claude', 'commands');
+  ensureDir(destDir);
+  if (!existsSync(COMMANDS_DIR)) return;
+  for (const f of readdirSync(COMMANDS_DIR)) {
+    if (!f.endsWith('.md')) continue;
+    copyFileSync(join(COMMANDS_DIR, f), join(destDir, f));
+    ok(`Command: ${f} -> ${destDir}`);
+  }
+}
+
 info('Starting cross-platform agent sync...');
 
 // Rebuild the Antigravity plugin staging dir from scratch so removed agents don't linger.
@@ -157,6 +172,7 @@ for (const file of files) {
 }
 
 syncConfig();
+syncCommands();
 installAntigravityPlugin();
 
 const claudeCount  = readdirSync(join(HOME, '.claude', 'agents')).filter(f => f.endsWith('.md')).length;
