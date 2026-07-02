@@ -19,7 +19,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync, openSync, closeSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { SessionRegistry } from './session-registry.js';
 import { validateRepo } from './repo-validator.js';
 import { spawnAgyOneShotDirect, spawnAgyPersistent } from './agy-dispatcher.js';
@@ -88,7 +88,10 @@ function checkAuth(req) {
 function verifyGitHubSig(raw, sig) {
   if (!GH_SECRET || !sig) return false;
   const expected = 'sha256=' + createHmac('sha256', GH_SECRET).update(raw).digest('hex');
-  return sig === expected;
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expected);
+  if (sigBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(sigBuf, expectedBuf);
 }
 
 function getSessions() {
@@ -474,7 +477,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && path === '/github') {
     const { raw, parsed } = await readBody(req);
     const sig = req.headers['x-hub-signature-256'] || '';
-    if (GH_SECRET && !verifyGitHubSig(raw, sig)) {
+    if (!GH_SECRET || !verifyGitHubSig(raw, sig)) {
       return json(res, 401, { error: 'Invalid GitHub webhook signature' });
     }
     const event = req.headers['x-github-event'] || '';
