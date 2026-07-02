@@ -56,9 +56,17 @@ function stripFrontmatter(content) {
 // makes the agent inherit full/default tool access (Bash, MCPs, sub-agent spawn).
 // Antigravity strips it too (builds fresh frontmatter without tools).
 function stripToolsLine(content) {
-  const m = content.match(/^(---\n)([\s\S]*?)(\n---)/);
+  // Source agent defs are CRLF (Windows-authored) -- the frontmatter fence is "---\r\n",
+  // not "---\n". A CRLF-only regex here silently fails to match, `stripToolsLine` returns
+  // content UNCHANGED, and the tools: allowlist survives into the synced file -- which is
+  // exactly the hallucination failure mode described in the comment above. Confirmed live:
+  // this exact bug reintroduced tools: into all 11 synced agents when sync-agents.js was
+  // re-run 2026-07-02, and a spawned Ultron with a real-tool-shaped-but-invalid allowlist
+  // fabricated an entire fictional tool-call transcript (zero actual tool_uses) rather than
+  // doing any work.
+  const m = content.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
   if (!m) return content;
-  const fmBody = m[2].split('\n').filter(l => !/^tools:/.test(l)).join('\n');
+  const fmBody = m[2].split(/\r?\n/).filter(l => !/^tools:/.test(l)).join('\n');
   return m[1] + fmBody + m[3] + content.slice(m[0].length);
 }
 
