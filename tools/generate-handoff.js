@@ -146,10 +146,35 @@ function getCurrentSessionInfo(cwd) {
   }
 }
 
+const DEFAULT_NEXT_STEPS = `<!-- Add continuation notes here -->\n- [ ] \n`;
+
+/**
+ * Preserve any manually-written "Next Steps" content across regenerations.
+ * Without this, every PreCompact (can fire many times in one long session)
+ * or SessionEnd would silently wipe out notes a prior agent/user left for
+ * the next session — defeating the entire point of a handoff doc.
+ * Returns the existing section body, or null if there is none / it's still
+ * just the untouched placeholder (in which case the caller uses the default).
+ */
+function readExistingNextSteps(handoffPath) {
+  if (!existsSync(handoffPath)) return null;
+  try {
+    const prev = readFileSync(handoffPath, 'utf8');
+    const marker = '## Next Steps\n\n';
+    const idx = prev.indexOf(marker);
+    if (idx === -1) return null;
+    const body = prev.slice(idx + marker.length).trim();
+    if (!body || body === DEFAULT_NEXT_STEPS.trim()) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Generate HANDOFF.md content.
  */
-function generateContent(gitRoot, cwd) {
+function generateContent(gitRoot, cwd, existingNextSteps) {
   const repoName = getRepoName(gitRoot || cwd);
   const branch = getBranch(gitRoot || cwd);
   const gitStatus = getGitStatus(gitRoot || cwd);
@@ -200,10 +225,10 @@ function generateContent(gitRoot, cwd) {
     content += `**URL:** ${prInfo.url}\n\n`;
   }
 
-  // Next steps placeholder
+  // Next steps — preserve whatever a prior session left here; only fall
+  // back to the placeholder for a brand-new handoff doc.
   content += `## Next Steps\n\n`;
-  content += `<!-- Add continuation notes here -->\n`;
-  content += `- [ ] \n`;
+  content += existingNextSteps ? `${existingNextSteps}\n` : DEFAULT_NEXT_STEPS;
 
   return content;
 }
@@ -217,7 +242,8 @@ function main() {
   const handoffPath = join(targetDir, 'HANDOFF.md');
 
   try {
-    const content = generateContent(gitRoot, CWD);
+    const existingNextSteps = readExistingNextSteps(handoffPath);
+    const content = generateContent(gitRoot, CWD, existingNextSteps);
     writeFileSync(handoffPath, content, 'utf8');
     console.log(`[generate-handoff] wrote ${handoffPath}`);
   } catch (err) {
