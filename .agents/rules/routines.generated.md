@@ -25,3 +25,8 @@ For identity/memory queries (who am I, what do you know about me, my preferences
 *Agents self-capture durable facts to memory the moment they judge them relevant*
 
 The MOMENT you learn a durable fact worth keeping (a user preference, decision, correction, stable project/company context, or a reusable pattern), immediately persist it — do not wait for session end. Run: node ~/dev/AgentSystem/tools/brain-remember.js --fact=\"<concise fact>\" [--tier=repo --target=<slug> | --tier=agent --target=<name>]. Tier routing: personal (default) = about the user; repo:<slug> = a technical/business fact about ONE repo (slugs+descriptions in ~/agent-memory/nexus/known-repos.json — match by what the repo IS, e.g. genie=product UI vs genie-brain=Arbor Genie backend/business-logic); agent:<name> = a learned pattern about one agent. Only capture facts that are durable + specific + high-precision; skip one-off task details and speculation. Dedup is automatic. A Stop-hook safety net (memory-capture.js) also sweeps the transcript, but capture at the moment of insight so nothing is lost.
+
+## post-merge-cleanup (hard)
+*After a PR merges, close its linked issue and confirm the branch was deleted*
+
+After merging a PR (gh pr merge), verify the linked issue is closed (gh issue close <N> --comment referencing the PR) and the source branch was deleted (--delete-branch on merge, or gh api to delete if it wasn't). Do not leave merged branches or linked-but-open issues behind.
