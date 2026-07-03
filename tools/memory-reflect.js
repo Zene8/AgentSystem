@@ -53,7 +53,10 @@ function selectTopFacts(brainPath, topN) {
   return facts.sort((a, b) => b.importance - a.importance).slice(0, topN).map(f => f.text);
 }
 
-const defaultLlm = (prompt) => execFileSync('claude', ['-p', prompt], { encoding: 'utf8', timeout: 120000 });
+// Non-essential background feature (weekly reflection) -- pinned to the cheapest tier
+// so it doesn't silently inherit whatever model `claude -p` defaults to (this machine's
+// CLI default is sonnet, per ~/.claude/settings.json -- expensive for a task this simple).
+const defaultLlm = (prompt) => execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 120000 });
 
 export function reflect({ topN = 10, dryRun = false, llm = defaultLlm } = {}) {
   const brainPath = join(agentMemoryRoot(), 'nexus', 'personal-brain');

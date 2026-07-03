@@ -48,8 +48,10 @@ export function parseCaptureFacts(text) {
     .slice(0, MAX_FACTS);
 }
 
+// Non-essential background feature (auto fact-capture) -- pinned to the cheapest tier,
+// see memory-reflect.js for why (bare `claude -p` inherits the CLI's default model).
 const defaultLlm = (prompt) =>
-  execFileSync('claude', ['-p', prompt], { encoding: 'utf8', timeout: 120000 });
+  execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 120000 });
 
 // Orchestrator: read transcript, call LLM, write each fact via remember().
 // On any failure → returns { ok: false, ... } without writing anything.

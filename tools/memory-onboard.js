@@ -97,9 +97,11 @@ function readTranscriptText(filePath) {
 
 // ── LLM extraction (same contract as memory-capture.js) ──────────────────────
 
-/** Injectable LLM — defaults to `claude -p` (no API key required). */
+/** Injectable LLM — defaults to `claude -p` (no API key required).
+ * Non-essential background feature (memory extraction) -- pinned to the cheapest tier,
+ * see memory-reflect.js for why (bare `claude -p` inherits the CLI's default model). */
 export const defaultLlm = (prompt) =>
-  execFileSync('claude', ['-p', prompt], { encoding: 'utf8', timeout: 120_000 });
+  execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 120_000 });
 
 /**
  * Extract durable facts from free text, classify each by tier, and write via remember().
