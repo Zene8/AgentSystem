@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 /**
+ * LINUX MISSION-CONTROL HOST COMPONENT: Runs on dedicated Linux host only. Not compatible with Windows.
+ * See tools/mission-control/README.md for architecture.
+ *
  * Claude Code Remote Control Server
  * REST API + mobile web panel for phone-based agent dispatch
  *
@@ -27,7 +30,7 @@ import { spawnAgyOneShotDirect, spawnAgyPersistent } from './agy-dispatcher.js';
 const HOME      = homedir();
 const KEY_FILE  = `${HOME}/.claude/remote-webhook.key`;
 const ROSTER    = `${HOME}/.claude/daemon/roster.json`;
-const CLAUDE    = `${HOME}/.local/bin/claude`;
+const CLAUDE    = process.env.CLAUDE_BIN || `${HOME}/.local/bin/claude`;
 const LOG_DIR   = `${HOME}/.claude/agent-runs`;
 const COST_LOG  = `${HOME}/agent-memory/nexus/session-log.jsonl`;
 const KNOWN_REPOS_FILE = `${HOME}/agent-memory/nexus/known-repos.json`;

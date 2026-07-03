@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 /**
+ * LINUX MISSION-CONTROL HOST COMPONENT: Runs on dedicated Linux host only. Not compatible with Windows.
+ *
+ * Graceful fallback: if tmux unavailable, falls back to spawnDirect() for detached execution
+ * (critical for Windows dev environments).
+ *
  * Antigravity CLI Persistence Wrapper
  * Spawns `agy` in tmux sessions for background execution
  */
