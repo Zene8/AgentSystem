@@ -2,7 +2,7 @@
 
 ## Agent Management
 - Edit: `.agents/agents/<name>.md`
-- Sync to all CLIs: `node tools/sync-agents.js` (Linux/Mac/WSL) or `powershell -File sync_agents_from_repo.ps1` (Windows)
+- Sync to all CLIs: `node tools/sync-agents.js` (all platforms)
 - Verify: check `.agents/sync.log` for ERROR lines
 
 ## Memory
@@ -10,7 +10,7 @@ Root: `~/agent-memory/nexus/` — shared across Claude, Antigravity
 
 Onboard a repo (CLAUDE.md block + graph brain + registry): `node tools/bootstrap-repo.js [repoPath]`
 Onboard every git repo under a dir (also creates the global brains): `node tools/bootstrap-repo.js --all ~/dev`
-Cross-platform (builtins only); idempotent. The per-repo `nexus/` brain is gitignored. Windows: `bootstrap-repo.ps1`.
+Cross-platform (Node.js, builtins only); idempotent. The per-repo `nexus/` brain is gitignored.
 
 ## Routines Engine
 
@@ -24,7 +24,7 @@ These rules only activate when touching matching files (Claude Code `paths:` fea
   Pym domain. Run migrations in dev first. Never `prisma migrate deploy` without approval.
 
 - **Agent definitions** (`.agents/**`):
-  Edit `.agents/agents/<name>.md`, then run `powershell -File sync_agents_from_repo.ps1` to sync to all CLIs.
+Edit `.agents/agents/<name>.md`, then run `node tools/sync-agents.js` to sync to all CLIs.
 
 - **CI/CD workflows** (`.github/workflows/**`):
   Test on feature branch before merging. Self-hosted runner required for agent-dispatch.yml.
