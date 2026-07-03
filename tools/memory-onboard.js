@@ -98,10 +98,23 @@ function readTranscriptText(filePath) {
 // ── LLM extraction (same contract as memory-capture.js) ──────────────────────
 
 /** Injectable LLM — defaults to `claude -p` (no API key required).
- * Non-essential background feature (memory extraction) -- pinned to the cheapest tier,
- * see memory-reflect.js for why (bare `claude -p` inherits the CLI's default model). */
+ * Reverted from haiku to sonnet 2026-07-03: haiku's extraction recall was noticeably
+ * worse on dense, multi-entity pastes (a paste with ~16 distinct facts only extracted
+ * 6; a paste with 8 well-separated facts extracted cleanly) -- this feature preserves
+ * data, so recall matters more than the cost delta memory-capture/reconcile/reflect
+ * can safely absorb. Kept token-efficient without dropping to haiku: --effort low
+ * (this is extraction, not deep reasoning -- see claude-api skill's effort guidance)
+ * and --exclude-dynamic-system-prompt-sections (drops per-machine system-prompt
+ * bloat -- cwd/env/memory-path/git-status sections -- from every single call).
+ * Deliberately NOT --bare: this machine has no ANTHROPIC_API_KEY set, and --bare
+ * disables OAuth/keychain auth entirely -- would break every call outright. */
 export const defaultLlm = (prompt) =>
-  execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 120_000 });
+  execFileSync('claude', [
+    '-p', prompt,
+    '--model', 'claude-sonnet-5',
+    '--effort', 'low',
+    '--exclude-dynamic-system-prompt-sections',
+  ], { encoding: 'utf8', timeout: 120_000 });
 
 /**
  * Extract durable facts from free text, classify each by tier, and write via remember().
