@@ -13,8 +13,27 @@ export const AGENT_ROSTER = [
   'jarvis', 'friday', 'sam', 'nat', 'ultron', 'pym', 'leo', 'astra', 'wanda', 'threepio', 'r2d2',
 ];
 
+// Normalize a repos arg that may be an array of slug strings OR of
+// { slug, description } objects into { slugs, lines } for prompt + validation use.
+function normalizeRepos(repos) {
+  const slugs = [];
+  const lines = [];
+  for (const r of repos) {
+    if (typeof r === 'string') { slugs.push(r); lines.push(`      - ${r}`); continue; }
+    if (r && typeof r.slug === 'string') {
+      slugs.push(r.slug);
+      lines.push(`      - ${r.slug}${r.description ? ` — ${r.description}` : ''}`);
+    }
+  }
+  return { slugs, lines };
+}
+
 // Pure: build the classify+extract prompt for pasted text.
 export function buildClassifyPrompt(text, { repos = [], agents = [] } = {}) {
+  const { lines } = normalizeRepos(repos);
+  const repoBlock = lines.length
+    ? `. target must be EXACTLY one of these slugs (match the fact to the description, not the slug spelling):\n${lines.join('\n')}`
+    : ': (no repos known)';
   return [
     'You are a memory extraction + routing engine reading pasted text.',
     'Extract ONLY facts that are ALL of:',
@@ -27,7 +46,7 @@ export function buildClassifyPrompt(text, { repos = [], agents = [] } = {}) {
     '',
     'For EACH fact, decide which memory tier it belongs to:',
     '  - "personal" — about the user themselves (identity, preferences, workflow, goals). Default when unsure.',
-    `  - "repo" — a technical fact about ONE specific repo. target must be exactly one of: ${repos.join(', ') || '(none known)'}`,
+    `  - "repo" — a technical/business fact about ONE specific repo${repoBlock}`,
     `  - "agent" — a learned pattern about ONE specific agent. target must be exactly one of: ${agents.join(', ') || '(none known)'}`,
     '',
     'Output ONLY one JSON object per line, no preamble, no explanation, no markdown fences:',
@@ -47,7 +66,7 @@ export function parseClassifiedFacts(raw, { repos = [], agents = [] } = {}) {
   const trimmed = raw.trim();
   if (!trimmed || trimmed.toUpperCase() === 'NONE') return [];
 
-  const repoSet = new Set(repos);
+  const repoSet = new Set(normalizeRepos(repos).slugs);
   const agentSet = new Set(agents);
   const out = [];
 

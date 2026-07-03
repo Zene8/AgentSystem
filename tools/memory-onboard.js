@@ -75,7 +75,7 @@ function resolveTranscript(sessionIdOrPrefix) {
 // ── Transcript text extraction ───────────────────────────────────────────────
 
 /** Read a session transcript JSONL and return concatenated message text. */
-function readTranscriptText(filePath) {
+export function readTranscriptText(filePath) {
   const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
   const texts = [];
   for (const line of lines) {
@@ -124,7 +124,10 @@ export function extractAndRemember(text, { section = 'Session Notes', llm = defa
   if (!text || !text.trim()) return { ok: true, extracted: 0, written: [], byTier: { personal: 0, repo: 0, agent: 0 }, warnings: [] };
 
   const registryPath = join(agentMemoryRoot(), 'nexus', 'known-repos.json');
-  const repos = readRegistry(registryPath).repos.map(r => r.slug);
+  // Pass full { slug, description } objects so the classifier can match a fact to a
+  // repo by what the repo IS, not just its slug spelling (fixes product-vs-business-logic
+  // repos like genie/genie-brain and basely/basely-brain being routed by name alone).
+  const repos = readRegistry(registryPath).repos.map(r => ({ slug: r.slug, description: r.description || '' }));
 
   const prompt = buildClassifyPrompt(text, { repos, agents: AGENT_ROSTER });
   let raw;

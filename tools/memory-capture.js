@@ -1,21 +1,29 @@
 #!/usr/bin/env node
-// memory-capture.js — automatic fact extraction from a session transcript.
-// Reads a transcript file (path as first positional arg), calls an injectable LLM to
-// extract ≤5 durable facts about the user or project, and writes each via remember()
-// (which reconciles/dedups automatically). Conservative by design: high precision over
-// recall. On LLM failure, captures nothing — never guesses.
-// LLM call uses `claude -p` (subscription, no API key). Injectable for testing.
+// memory-capture.js — automatic fact capture from a session transcript.
+// Reads a transcript file (path as first positional arg), extracts durable facts, and
+// routes EACH across the three memory tiers (personal / repo:<slug> / agent:<name>) via
+// the same classifier + descriptions used by /onboard-memory. Conservative by design:
+// high precision over recall. On LLM failure it captures nothing — never guesses.
+//
+// This is the auto-capture safety net wired to the Stop hook (session-end.sh): whatever
+// durable facts surfaced during a session get persisted and correctly routed without the
+// user having to run /onboard-memory by hand. Agents can also self-capture mid-session
+// via brain-remember.js when they judge a specific fact relevant.
+//
 // Usage: node tools/memory-capture.js <transcript-path>
+//
+// The legacy pure helpers (buildCapturePrompt/parseCaptureFacts) are retained and still
+// exported for the existing unit tests, but the orchestrator now delegates to the
+// tier-aware extractAndRemember() so auto-capture and manual onboarding route identically.
 
-import { existsSync, readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { remember } from './brain-remember.js';
+import { extractAndRemember, readTranscriptText } from './memory-onboard.js';
 
 const MAX_FACTS = 5;
 
-// Pure: build the extraction prompt for a transcript text.
-// The LLM must output ONLY bullet lines or the single word NONE.
+// Pure (legacy): build a personal-only extraction prompt. Retained for backward-compat
+// tests; the live path uses memory-classify's tier-aware prompt via extractAndRemember.
 export function buildCapturePrompt(transcriptText) {
   return [
     'You are a memory extraction engine reading a session transcript.',
@@ -35,8 +43,7 @@ export function buildCapturePrompt(transcriptText) {
   ].join('\n');
 }
 
-// Pure: parse LLM output into fact strings. Returns [] for NONE, malformed, or empty.
-// Enforces the MAX_FACTS cap in the parser so callers can unit-test this independently.
+// Pure (legacy): parse bullet-line LLM output into fact strings.
 export function parseCaptureFacts(text) {
   const trimmed = text.trim();
   if (!trimmed || trimmed.toUpperCase() === 'NONE') return [];
@@ -48,47 +55,32 @@ export function parseCaptureFacts(text) {
     .slice(0, MAX_FACTS);
 }
 
-// Non-essential background feature (auto fact-capture) -- pinned to the cheapest tier,
-// see memory-reflect.js for why (bare `claude -p` inherits the CLI's default model).
-const defaultLlm = (prompt) =>
-  execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 120000 });
-
-// Orchestrator: read transcript, call LLM, write each fact via remember().
+// Orchestrator: read transcript, extract + tier-route via extractAndRemember.
 // On any failure → returns { ok: false, ... } without writing anything.
-// llm: injectable — pass a stub in tests.
-export function captureFromTranscript(transcriptPath, { llm = defaultLlm, section = 'Session Notes' } = {}) {
+// llm: injectable — forwarded to extractAndRemember (pass a stub in tests).
+export function captureFromTranscript(transcriptPath, { llm, section = 'Session Notes' } = {}) {
   if (!transcriptPath || !existsSync(transcriptPath)) {
     return { ok: false, message: `transcript not found: ${transcriptPath}`, written: [] };
   }
 
-  let transcriptText;
+  let text;
   try {
-    transcriptText = readFileSync(transcriptPath, 'utf8');
+    text = readTranscriptText(transcriptPath);
   } catch (e) {
     return { ok: false, message: `cannot read transcript: ${e.message}`, written: [] };
   }
+  if (!text || !text.trim()) return { ok: true, extracted: 0, written: [], byTier: { personal: 0, repo: 0, agent: 0 } };
 
-  const prompt = buildCapturePrompt(transcriptText);
-
-  let raw;
-  try {
-    raw = llm(prompt);
-  } catch (e) {
-    return { ok: false, message: `llm failed: ${e.message}`, written: [] };
-  }
-
-  const facts = parseCaptureFacts(raw);
-  const written = [];
-  for (const fact of facts) {
-    try {
-      const r = remember({ fact, section });
-      if (r.ok && r.added) written.push(fact);
-    } catch {
-      // Individual fact failures don't abort the rest.
-    }
-  }
-
-  return { ok: true, extracted: facts.length, written };
+  const result = extractAndRemember(text, llm ? { section, llm } : { section });
+  // Normalize to the historical { ok, extracted, written } shape (written = string[]).
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    extracted: result.extracted,
+    written: result.written.map(w => `[${w.tier}${w.target ? ':' + w.target : ''}] ${w.fact}`),
+    byTier: result.byTier,
+    warnings: result.warnings,
+  };
 }
 
 const isMain = process.argv[1] &&

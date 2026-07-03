@@ -27,6 +27,11 @@ export function upsertRepo(registry, entry) {
     primary_cli: entry.primary_cli ?? 'claude',
     bootstrap_complete: true,
   };
+  // Only set description when explicitly provided — otherwise the spread below
+  // preserves any existing description on re-bootstrap (never clobber to empty).
+  if (typeof entry.description === 'string' && entry.description.trim()) {
+    record.description = entry.description.trim();
+  }
   const idx = registry.repos.findIndex(r => r.slug === entry.slug);
   if (idx >= 0) {
     const repos = [...registry.repos];

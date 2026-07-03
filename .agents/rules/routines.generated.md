@@ -20,3 +20,8 @@ After opening a PR, do not declare DONE until pr-guard passes: run `node tools/p
 *Answer identity/lookup queries inline from graph-query, never spawn Jarvis*
 
 For identity/memory queries (who am I, what do you know about me, my preferences), answer INLINE using: node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access. Do NOT spawn a heavyweight agent. This path returns ~110 tokens vs 47k for a subagent call.
+
+## memory-write-back (hard)
+*Agents self-capture durable facts to memory the moment they judge them relevant*
+
+The MOMENT you learn a durable fact worth keeping (a user preference, decision, correction, stable project/company context, or a reusable pattern), immediately persist it — do not wait for session end. Run: node ~/dev/AgentSystem/tools/brain-remember.js --fact=\"<concise fact>\" [--tier=repo --target=<slug> | --tier=agent --target=<name>]. Tier routing: personal (default) = about the user; repo:<slug> = a technical/business fact about ONE repo (slugs+descriptions in ~/agent-memory/nexus/known-repos.json — match by what the repo IS, e.g. genie=product UI vs genie-brain=Arbor Genie backend/business-logic); agent:<name> = a learned pattern about one agent. Only capture facts that are durable + specific + high-precision; skip one-off task details and speculation. Dedup is automatic. A Stop-hook safety net (memory-capture.js) also sweeps the transcript, but capture at the moment of insight so nothing is lost.
