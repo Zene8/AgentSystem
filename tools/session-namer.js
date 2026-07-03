@@ -103,8 +103,9 @@ function titleFromText(text) {
 }
 
 function dateStr(ts) { return (ts || new Date().toISOString()).slice(0, 10); }
+function dateTimeStr(ts) { return (ts || new Date().toISOString()).slice(0, 16).replace('T', ' '); }
 function today()     { return new Date().toISOString().slice(0, 10); }
-function buildName(repo, title, ts) { return `${repo} ${title} ${dateStr(ts)}`; }
+function buildName(repo, title, ts) { return `${repo} - ${title} - ${dateTimeStr(ts)}`; }
 
 /** Marker appended to display name when a session is finalized. */
 const DONE_MARKER = ' + (done)';
@@ -168,8 +169,7 @@ async function readFirstUserMessage(sessionId, cwd) {
         const obj = JSON.parse(line);
         if (
           obj.type === 'user' &&
-          obj.origin?.kind === 'human' &&
-          HUMAN_PROMPT_SOURCES.has(obj.promptSource) &&
+          (obj.origin?.kind === 'human' || HUMAN_PROMPT_SOURCES.has(obj.promptSource)) &&
           typeof obj.message?.content === 'string' &&
           obj.message.content.trim().length > 0
         ) {
