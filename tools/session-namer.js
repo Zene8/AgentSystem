@@ -214,11 +214,10 @@ async function cmdFinalize({ session }) {
 
   // Manually renamed but not yet finalized (e.g. renamed via /rename-session
   // while still "pending" mid-session) -- the session is ending now, so keep
-  // the user's chosen title and just apply the done marker; do not overwrite
-  // it with a transcript-derived guess.
+  // the user's chosen title; do not overwrite it with a transcript-derived guess.
+  // NOTE: --finalize does NOT apply the done marker. Only --finalize-close does.
   if (existing.renamed && existing.title && existing.title !== 'pending') {
-    const name = applyDoneMarker(existing.name, existing.title);
-    saveEntry({ ...existing, finalized: true, name });
+    saveEntry({ ...existing, finalized: true });
     return;
   }
 
@@ -233,7 +232,7 @@ async function cmdFinalize({ session }) {
 
   const title = titleFromText(msg.text);
   const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp), title);
+  const name  = buildName(repo, title, msg.ts || existing.timestamp);
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -245,6 +244,7 @@ async function cmdFinalize({ session }) {
  * cmdFinalizeEarly — finalize a single session without marking finalized if no msg found yet.
  * Called from UserPromptSubmit hook: the transcript may have just one user message written.
  * Does nothing if session is already properly named.
+ * NOTE: Does NOT apply the done marker. Only --finalize-close does.
  */
 async function cmdFinalizeEarly({ session }) {
   if (!session) { console.error('--session required'); process.exit(1); }
@@ -263,12 +263,36 @@ async function cmdFinalizeEarly({ session }) {
 
   const title = titleFromText(msg.text);
   const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = applyDoneMarker(buildName(repo, title, msg.ts || existing.timestamp), title);
+  const name  = buildName(repo, title, msg.ts || existing.timestamp);
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
                     finalized: true, first_prompt: msg.text.slice(0, 120) };
   saveEntry(updated);
   console.log(`[session-namer] early-finalize ${session.slice(0, 8)}… → "${name}"`);
+}
+
+/**
+ * cmdFinalizeClose — called when a session truly closes (SessionEnd event).
+ * Applies the DONE_MARKER to mark a session as finished.
+ * Similar to cmdFinalize but explicitly designed for session-close semantics.
+ * Idempotent: won't double-mark a session.
+ */
+async function cmdFinalizeClose({ session }) {
+  if (!session) { console.error('--session required'); process.exit(1); }
+  const existing = loadRegistry().find(e => e.session === session)
+                || { session, repo: 'unknown', cwd: '' };
+
+  // Idempotency: never clobber an already-marked-done session
+  if (existing.finalized && existing.title && existing.title !== 'pending' &&
+      existing.name && existing.name.endsWith(DONE_MARKER)) return;
+
+  // If we don't have a real title yet, don't mark done (nothing to mark)
+  if (!existing.title || existing.title === 'pending') return;
+
+  // Apply done marker to an already-named session
+  const name = applyDoneMarker(existing.name, existing.title);
+  saveEntry({ ...existing, finalized: true, name });
+  console.log(`[session-namer] close-finalize ${session.slice(0, 8)}… → "${name}"`);
 }
 
 /**
@@ -298,22 +322,9 @@ async function cmdSweep() {
     entries = loadRegistry();
   }
 
-  // Pass 1: retro-mark already-finalized entries missing the done marker.
-  // These are entries that were finalized before this feature was added.
-  let retroMarked = 0;
-  for (const entry of entries) {
-    if (
-      entry.finalized &&
-      entry.title && entry.title !== 'pending' &&
-      entry.name && !entry.name.endsWith(DONE_MARKER)
-    ) {
-      saveEntry({ ...entry, name: entry.name + DONE_MARKER });
-      retroMarked++;
-    }
-  }
-  if (retroMarked > 0) {
-    console.log(`[session-namer] sweep: retro-marked ${retroMarked} existing finalized session(s) with done marker`);
-  }
+  // Pass 1: Check for entries that lost the done marker (shouldn't happen, but defensive).
+  // Don't retroactively apply the done marker here — only SessionEnd (--finalize-close) should do that.
+  // Keep entries as-is if they predate the close-finalize feature.
 
   const pending = entries.filter(e =>
     !e.renamed && (!e.finalized || e.title === 'pending' || !e.title)
@@ -331,7 +342,7 @@ async function cmdSweep() {
 
     const title = titleFromText(msg.text);
     const repo  = (entry.repo && entry.repo !== 'unknown') ? entry.repo : repoFromCwd(msg.cwd);
-    const name  = applyDoneMarker(buildName(repo, title, msg.ts || entry.timestamp), title);
+    const name  = buildName(repo, title, msg.ts || entry.timestamp);
     const updated = { ...entry, repo, cwd: msg.cwd || entry.cwd, title, name,
                       timestamp: msg.ts || entry.timestamp,
                       finalized: true, first_prompt: msg.text.slice(0, 120) };
@@ -540,6 +551,7 @@ for (const arg of args) {
 async function main() {
   if      (flags.register)              cmdRegister({ session: flags.session, cwd: flags.cwd || process.env.CWD || process.cwd() });
   else if (flags.finalize)              await cmdFinalize({ session: flags.session });
+  else if (flags['finalize-close'])     await cmdFinalizeClose({ session: flags.session });
   else if (flags['finalize-early'])     await cmdFinalizeEarly({ session: flags.session });
   else if (flags.sweep)                 await cmdSweep();
   else if (flags['print-title'])        await cmdPrintTitle({ session: flags.session, cwd: flags.cwd });
@@ -556,7 +568,8 @@ async function main() {
 
 Commands:
   --register --session=ID [--cwd=PATH]   Register session on start (hook)
-  --finalize --session=ID                Name session from first prompt (Stop hook)
+  --finalize --session=ID                Name session from first prompt (Stop hook, no marker)
+  --finalize-close --session=ID          Apply done marker on session close (SessionEnd hook)
   --finalize-early --session=ID          Name session early, skip if no transcript yet (UserPromptSubmit hook)
   --sweep                                Retroactively finalize all pending sessions with transcripts
   --print-title --session=ID [--cwd=PATH] Print best display title (SessionStart hook)

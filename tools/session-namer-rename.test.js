@@ -51,14 +51,14 @@ function resetRegistry() {
   writeFileSync(registryPath, makeRegistry([FAKE_ENTRY]));
 }
 
-/** Run session-namer with HOME overridden to temp dir. */
+/** Run session-namer with SESSION_NAMER_HOME overridden to temp dir. */
 function run(args) {
   return execFileSync(
     process.execPath,
     [TOOL, ...args],
     {
       encoding: 'utf8',
-      env: { ...process.env, HOME: fakeHome },
+      env: { ...process.env, SESSION_NAMER_HOME: fakeHome },
       timeout: 10_000,
     }
   ).trim();

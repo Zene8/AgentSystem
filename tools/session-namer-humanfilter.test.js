@@ -102,15 +102,16 @@ test('SDK origin-less session (Bug 1) - readFirstUserMessage accepts promptSourc
   
   // Finalize should now succeed (before Bug 1 fix, this would stay pending)
   run(['--finalize', `--session=${TEST_SESSION_ID}`]);
-  
+
   const updated = readRegistry().find(e => e.session === TEST_SESSION_ID);
   assert.strictEqual(updated.finalized, true);
   assert.notStrictEqual(updated.title, 'pending');
   // After titleFromText filtering, expect "debug session namer bugs" (remove stop words: "the")
   // Actually, "debug" is not a stop word, so we expect it to be there
   assert.ok(updated.title.includes('session') || updated.title.includes('namer') || updated.title.includes('bugs'));
-  // Full name format: "repo - title - YYYY-MM-DD HH:MM" (+ done marker since finalized).
-  assert.match(updated.name, /^test - .+ - [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} [+] [(]done[)]$/);
+  // Full name format: "repo - title - YYYY-MM-DD HH:MM" (NO done marker from --finalize).
+  // The done marker is only applied by --finalize-close (SessionEnd hook).
+  assert.match(updated.name, /^test - .+ - [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$/);
 });
 
 test('system promptSource (Bug 1) - readFirstUserMessage rejects promptSource:system even with valid content', () => {
@@ -159,7 +160,7 @@ test('task-notification promptSource (Bug 1) - readFirstUserMessage rejects prom
   const projectDirName = 'test-task-' + TEST_SESSION_ID.slice(0, 8);
   const projDir = join(projectsDir, projectDirName);
   mkdirSync(projDir, { recursive: true });
-  
+
   const sessionId = 'testtask0011223344';
   const transcript = join(projDir, `${sessionId}.jsonl`);
   const lines = [
@@ -173,7 +174,7 @@ test('task-notification promptSource (Bug 1) - readFirstUserMessage rejects prom
     }),
   ];
   writeFileSync(transcript, lines.join('\n'));
-  
+
   // Register the session
   const entry = {
     session: sessionId,
@@ -185,11 +186,100 @@ test('task-notification promptSource (Bug 1) - readFirstUserMessage rejects prom
     finalized: false,
   };
   writeFileSync(registryPath, makeRegistry([entry]));
-  
+
   // Finalize should NOT find the message
   run(['--finalize', `--session=${sessionId}`]);
-  
+
   const updated = readRegistry().find(e => e.session === sessionId);
   assert.strictEqual(updated.title, 'pending');
   assert.strictEqual(updated.finalized, false);
+});
+
+test('--finalize does NOT apply done marker (Bug 2 fix)', () => {
+  // Create a transcript with a user message
+  const projectDirName = 'tmp-work';
+  const projDir = join(projectsDir, projectDirName);
+  mkdirSync(projDir, { recursive: true });
+
+  const sessionId = 'finalize-nomark-1234';
+  const transcript = join(projDir, `${sessionId}.jsonl`);
+  const lines = [
+    JSON.stringify({
+      type: 'user',
+      origin: { kind: 'human' },
+      message: { content: 'fix session hooks issue' },
+      timestamp: '2026-07-03T10:30:00.000Z',
+      cwd: '/tmp/work',
+    }),
+  ];
+  writeFileSync(transcript, lines.join('\n'));
+
+  // Register a session entry
+  const entry = {
+    session: sessionId,
+    repo: 'myrepo',
+    cwd: '/tmp/work',
+    title: 'pending',
+    name: 'myrepo - pending - 2026-07-03 10:30',
+    timestamp: '2026-07-03T10:30:00.000Z',
+    finalized: false,
+  };
+  writeFileSync(registryPath, makeRegistry([entry]));
+
+  // Run --finalize (Stop hook path)
+  run(['--finalize', `--session=${sessionId}`]);
+
+  const updated = readRegistry().find(e => e.session === sessionId);
+  assert.strictEqual(updated.finalized, true);
+  // Name should NOT have the done marker appended
+  assert.match(updated.name, /^myrepo - .+ - [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$/);
+  assert.doesNotMatch(updated.name, /[+] [(]done[)]/);
+});
+
+test('--finalize-close applies done marker (Bug 2 fix - SessionEnd path)', () => {
+  // Register a session with a real title
+  const sessionId = 'finalize-close-1234';
+  const entry = {
+    session: sessionId,
+    repo: 'myrepo',
+    cwd: '/tmp/work',
+    title: 'fix session hooks',
+    name: 'myrepo - fix session hooks - 2026-07-03 10:30',
+    timestamp: '2026-07-03T10:30:00.000Z',
+    finalized: true,
+  };
+  writeFileSync(registryPath, makeRegistry([entry]));
+
+  // Run --finalize-close (SessionEnd hook path)
+  run(['--finalize-close', `--session=${sessionId}`]);
+
+  const updated = readRegistry().find(e => e.session === sessionId);
+  assert.strictEqual(updated.finalized, true);
+  // Name SHOULD have the done marker appended
+  assert.match(updated.name, /[+] [(]done[)]$/);
+  assert.strictEqual(updated.name, 'myrepo - fix session hooks - 2026-07-03 10:30 + (done)');
+});
+
+test('--finalize-close is idempotent (does not double-mark)', () => {
+  // Register a session that already has the done marker
+  const sessionId = 'finalize-close-idempot';
+  const entry = {
+    session: sessionId,
+    repo: 'myrepo',
+    cwd: '/tmp/work',
+    title: 'fix session hooks',
+    name: 'myrepo - fix session hooks - 2026-07-03 10:30 + (done)',
+    timestamp: '2026-07-03T10:30:00.000Z',
+    finalized: true,
+  };
+  writeFileSync(registryPath, makeRegistry([entry]));
+
+  // Run --finalize-close again
+  run(['--finalize-close', `--session=${sessionId}`]);
+
+  const updated = readRegistry().find(e => e.session === sessionId);
+  // Should still have exactly one done marker
+  assert.strictEqual(updated.name, 'myrepo - fix session hooks - 2026-07-03 10:30 + (done)');
+  const matches = updated.name.match(/[+] [(]done[)]/g);
+  assert.strictEqual(matches.length, 1, 'should have exactly one done marker');
 });
