@@ -546,18 +546,31 @@ test('--print-title: fresh/pending session prints repo/branch derived from cwd, 
   const nexusDir = join(tmp, 'agent-memory', 'nexus');
   mkdirSync(nexusDir, { recursive: true });
 
+  // Create hermetic git repo in tmpdir
+  const repoDir = join(tmp, 'test-git-repo');
+  mkdirSync(repoDir, { recursive: true });
+
+  // Initialize git repo
+  execFileSync('git', ['init'], { cwd: repoDir });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repoDir });
+
+  // Create dummy file and commit
+  writeFileSync(join(repoDir, 'README.md'), '# Test Repo\n', 'utf8');
+  execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
+  execFileSync('git', ['commit', '-m', 'initial commit'], { cwd: repoDir });
+
+  // Checkout test branch
+  execFileSync('git', ['checkout', '-b', 'testbranch'], { cwd: repoDir });
+
   const sessionId = 'title222-0000-0000-0000-000000000002';
-  const realCwd = process.cwd(); // this repo checkout — a real git repo
   makeRegistry(nexusDir, [
-    { session: sessionId, repo: 'myrepo', cwd: realCwd, title: 'pending',
+    { session: sessionId, repo: 'myrepo', cwd: repoDir, title: 'pending',
       name: 'myrepo pending 2026-07-02', timestamp: '2026-07-02T00:00:00.000Z', finalized: false }
   ]);
 
-  const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: realCwd, encoding: 'utf8' }).trim();
-  const expectedRepo = basename(realCwd).replace(/^\./, '').toLowerCase();
-
-  const output = runNamer(['--print-title', `--session=${sessionId}`, `--cwd=${realCwd}`], { HOME: tmp });
-  assert.equal(output, `${expectedRepo}/${branch}`);
+  const output = runNamer(['--print-title', `--session=${sessionId}`, `--cwd=${repoDir}`], { HOME: tmp });
+  assert.equal(output, 'test-git-repo/testbranch');
   assert.notEqual(output, 'myrepo pending 2026-07-02');
 
   rmSync(tmp, { recursive: true, force: true });

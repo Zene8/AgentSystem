@@ -558,15 +558,20 @@ WantedBy=multi-user.target
 
 ## Key Open Questions
 
-1. **Antigravity persistence — RESOLVED (#91):** `agy` has no native `--bg`. Supported modes: `--print` (one-shot); `--continue`/`--conversation <id>` (resume from ~/.gemini/antigravity-cli/history.jsonl); interactive TUI (default). Reboot-surviving always-on sessions require a tmux/systemd wrapper built by the MC dispatcher (not part of agy) — tracked as build item in #85.
+1. **Antigravity persistence:** How does `agy` survive PC reboot? Is `--continue` the intended resume pattern, or is there a `--bg` flag pending? (Blocks Issue #85.)
+   - **RESOLVED (spike #91):** agy has no native `--bg` flag. Available modes: `--print` (one-shot), `--continue`/`--conversation <id>` (resumes from `~/.gemini/antigravity-cli/history.jsonl`), and interactive TUI. For reboot/long-running survival, a **tmux or systemd wrapper** is required — not provided by agy itself. This is a new build item under #85 (owner Leo), also feeds issue #88. Issue #85 is now unblocked and scope-expanded to include this persistence wrapper.
 
 2. **Concurrent session limits:** Should MC allow multiple harness instances (e.g., two Claude sessions + one agy session) or enforce one-at-a-time? (Affects Issue #84 rate limiting.)
+   - **PARTIAL/DEFERRED (spike #91):** Google AI Pro operates on a flat subscription model. agy exposes `/quota` and `/usage` endpoints. The Terms of Service regarding headless/always-on automation and any hard concurrency cap are NOT determinable from CLI inspection alone. Deferred to Nat (business/legal review) under new issue #95. If a hard limit surfaces, dispatcher #85/#88 will enforce it — noted as follow-up dependency, not yet actionable.
 
-3. **Cost accounting for agy — RESOLVED (#91) / DEFERRED (#95):** Cost telemetry is quota-based, not token-metered. FE (#87) displays "Subscription/Quota" badge (links to agy /quota), with no separate cost API. Claude side retains /cost. ToS stance on headless/always-on automation and concurrent-session caps not discoverable from CLI — escalated to Nat for business/legal review (#95).
+3. **Cost accounting for agy:** Google AI Pro is subscription-based, not token-counted. How should cost display work? (Impacts Issue #87 FE design.)
+   - **RESOLVED (spike #91):** Quota-based, not token-metered. agy exposes `/quota` and `/usage` but has no cost-API equivalent to Claude's `/cost` endpoint. Recommendation for #87: Display a "Subscription/Quota" badge for agy sessions (showing quota usage %) instead of dollar cost; keep `/cost` metric for Claude sessions only.
 
-4. **MCP server security for agy — RESOLVED (#91):** Yes, full MCP support. Config at ~/.gemini/config/mcp_config.json (shared with agy IDE). Built-in servers: notebooks, visualization. Custom servers supported (command exec, remote URL, OAuth). Permissions via /permissions + /config with regex rules (v1.0.13+); --sandbox for path restrictions. Threat model isomorphic to Claude Code — #83 applies unified security audit to both harnesses.
+4. **MCP server security for agy:** Does agy support MCP at all? If so, how are permissions enforced vs. Claude Code? (Blocks Issue #83 security audit.)
+   - **RESOLVED (spike #91):** agy DOES support MCP. Configuration file: `~/.gemini/config/mcp_config.json` (shared with IDE usage). Built-in servers: notebooks, visualization. Custom servers supported (command/remote/OAuth). Permissions enforced via `/permissions` and `/config` commands, with regex-based rules (v1.0.13+) and `--sandbox` mode. The permission model is isomorphic to Claude Code's MCP security model — issue #83 (Sam) applies the same threat model to both harnesses, with no lesser bar for agy. Issue #83 is now unblocked.
 
 5. **Un-versioned production code risk:** Webhook server code lives in `~/AgentSystem/tools/` which is not a git repo. Should it be moved into the main codebase (`/home/natha/dev/AgentSystem`) for version control? (Noted in HANDOFF.md; escalate to Jarvis.)
+   - **RESOLVED (in progress, spike #91):** Addressed by issue #84 (owner Leo, in flight): moving webhook server code from `~/AgentSystem/tools/` and `~/.claude/remote-control-server.js` into `~/dev/AgentSystem/tools/mission-control/` under git version control. This places all production code under the versioned monorepo.
 
 ---
 
@@ -585,11 +590,11 @@ WantedBy=multi-user.target
 | Issue | Scope | Owner | Depends On |
 |-------|-------|-------|-----------|
 | #82 | Spec & architecture (this doc) | Friday/Threepio | — |
-| #83 | Security audit + TLS + per-device auth | Sam | #82 (spec done) |
-| #84 | API versioning + rate limiting + cost tracking | Leo | #82 |
-| #85 | Implement agy dispatcher + persistence | Ultron/Leo | #82, agy persistence research |
+| #83 | Security audit + TLS + per-device auth (incl. agy MCP) | Sam | #82 (spec done); agy MCP research ✅ |
+| #84 | API versioning + rate limiting + cost tracking (incl. webhook versioning) | Leo | #82 |
+| #85 | Implement agy dispatcher + tmux/systemd persistence wrapper | Ultron/Leo | #82; agy persistence research ✅ |
 | #86 | Repo picker UI + allowlist validation | Astra | #82 |
-| #87 | Frontend (React SPA / HTML form) | Astra | #82, #86 |
+| #87 | Frontend (React SPA / HTML form) + quota display | Astra | #82, #86 |
 | #88 | Systemd boot resilience + recovery | Leo | #82, #85 |
 
 ---
