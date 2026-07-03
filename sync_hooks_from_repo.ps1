@@ -1,10 +1,9 @@
 # sync_hooks_from_repo.ps1 - Copy repo hooks/ -> ~/.claude/hooks/ and merge hook entries
 # into ~/.claude/settings.json idempotently.
 #
-# Only manages the two memory hooks. Other hooks (caveman-*, agent-context-inject, etc.)
-# are out of scope -- they live in ~/.claude/hooks/ and are not repo-owned.
+# Manages both memory hooks (JS) and shell script hooks (SH) under ~/.claude/hooks/.
 #
-# Run after any change to hooks/memory-context-inject.js or hooks/memory-router.js.
+# Run after any change to hooks/ or settings.json hooks.
 
 param(
     [string]$LogFile = ".agents/sync.log",
@@ -58,10 +57,12 @@ if (-not (Test-Path $claudeHooks)) {
     New-Item -ItemType Directory -Path $claudeHooks -Force | Out-Null
 }
 
-$hookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js")
+$jsHookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js")
+$shHookFiles = @("session-start.sh", "session-end.sh", "user-prompt-submit.sh", "guard-git.sh", "wip-checkpoint.sh", "session-close.sh", "context-handoff.sh")
 $copyFailed = $false
 
-foreach ($file in $hookFiles) {
+# Copy JS hook files (and rewrite tools path resolved relative to repo)
+foreach ($file in $jsHookFiles) {
     $src  = Join-Path $hooksDir $file
     $dest = Join-Path $claudeHooks $file
 
@@ -72,9 +73,6 @@ foreach ($file in $hookFiles) {
     }
 
     $srcText = [System.IO.File]::ReadAllText($src, [System.Text.UTF8Encoding]::new($false))
-
-    # Resolve __dirname reference: replace relative path.resolve() with the repo's absolute tools path.
-    # This makes the deployed hook work from ~/.claude/hooks/ which is not adjacent to tools/.
     $toolsAbsolute = (Join-Path $RepoRoot "tools") -replace '\\', '/'
     $deployText = $srcText -replace "path\.resolve\(__dirname, '\.\.', 'tools'\)", "'$toolsAbsolute'"
 
@@ -88,13 +86,36 @@ foreach ($file in $hookFiles) {
     }
 
     [System.IO.File]::WriteAllText($dest, $deployText, [System.Text.UTF8Encoding]::new($false))
-    $actualText = [System.IO.File]::ReadAllText($dest, [System.Text.UTF8Encoding]::new($false))
-    if ((Get-StringHash -Text $actualText) -ne $expectedHash) {
-        Write-Status "ERROR: Hash mismatch after writing $dest" "ERROR"
+    Write-Status "Synced JS hook: $file -> $dest" "SUCCESS"
+}
+
+# Copy SH hook files (and rewrite repo root paths dynamically)
+$shHooksSrcDir = Join-Path $hooksDir "claude-hooks"
+foreach ($file in $shHookFiles) {
+    $src  = Join-Path $shHooksSrcDir $file
+    $dest = Join-Path $claudeHooks $file
+
+    if (-not (Test-Path $src)) {
+        Write-Status "ERROR: Source hook not found: $src" "ERROR"
         $copyFailed = $true
         continue
     }
-    Write-Status "Synced hook: $file -> $dest" "SUCCESS"
+
+    $srcText = [System.IO.File]::ReadAllText($src, [System.Text.UTF8Encoding]::new($false))
+    $repoRootBash = $RepoRoot -replace '\\', '/'
+    $deployText = $srcText -replace '~/dev/AgentSystem', $repoRootBash
+
+    $expectedHash = Get-StringHash -Text $deployText
+    if (Test-Path $dest) {
+        $destText = [System.IO.File]::ReadAllText($dest, [System.Text.UTF8Encoding]::new($false))
+        if ((Get-StringHash -Text $destText) -eq $expectedHash) {
+            Write-Status "Skipped (unchanged): $file" "INFO"
+            continue
+        }
+    }
+
+    [System.IO.File]::WriteAllText($dest, $deployText, [System.Text.UTF8Encoding]::new($false))
+    Write-Status "Synced SH hook: $file -> $dest" "SUCCESS"
 }
 
 if ($copyFailed) {
@@ -143,11 +164,39 @@ $injectEntries = @(
         statusMessage = 'Loading memory context...'
     },
     [PSCustomObject]@{
+        event         = 'SessionStart'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routines-context-inject.js`""
+        timeout       = 5
+        statusMessage = 'Loading enforced routines...'
+    },
+    [PSCustomObject]@{
+        event         = 'SessionStart'
+        type          = 'command'
+        command       = "bash `"$claudeHooksNorm/session-start.sh`""
+        timeout       = 10
+        statusMessage = 'Starting session...'
+    },
+    [PSCustomObject]@{
         event         = 'UserPromptSubmit'
         type          = 'command'
         command       = "node `"$claudeHooksNorm/memory-router.js`""
         timeout       = 5
         statusMessage = 'Routing...'
+    },
+    [PSCustomObject]@{
+        event         = 'UserPromptSubmit'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
+        timeout       = 5
+        statusMessage = 'Checking routines...'
+    },
+    [PSCustomObject]@{
+        event         = 'UserPromptSubmit'
+        type          = 'command'
+        command       = "bash `"$claudeHooksNorm/user-prompt-submit.sh`""
+        timeout       = 5
+        statusMessage = 'Registering prompt...'
     },
     [PSCustomObject]@{
         event         = 'SessionEnd'
@@ -157,11 +206,35 @@ $injectEntries = @(
         statusMessage = 'Capturing memory...'
     },
     [PSCustomObject]@{
-        event         = 'SubagentStop'
+        event         = 'SessionEnd'
         type          = 'command'
-        command       = "node `"$claudeHooksNorm/sona-writeback-hook.js`""
+        command       = "bash `"$claudeHooksNorm/session-close.sh`""
+        timeout       = 10
+        statusMessage = 'Finalizing session...'
+    },
+    [PSCustomObject]@{
+        event         = 'PostToolUse'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
         timeout       = 5
-        statusMessage = 'Writing episodic memory...'
+        statusMessage = 'Checking routines...'
+        matcher       = 'Write|Edit|NotebookEdit'
+    },
+    [PSCustomObject]@{
+        event         = 'PostToolUse'
+        type          = 'command'
+        command       = "bash `"$claudeHooksNorm/wip-checkpoint.sh`""
+        timeout       = 5
+        statusMessage = 'Saving checkpoint...'
+        matcher       = 'Write|Edit|NotebookEdit'
+    },
+    [PSCustomObject]@{
+        event         = 'PreToolUse'
+        type          = 'command'
+        command       = "bash `"$claudeHooksNorm/guard-git.sh`""
+        timeout       = 5
+        statusMessage = 'Guarding git...'
+        matcher       = 'Bash'
     },
     [PSCustomObject]@{
         event         = 'Stop'
@@ -171,25 +244,25 @@ $injectEntries = @(
         statusMessage = 'Writing episodic memory...'
     },
     [PSCustomObject]@{
-        event         = 'UserPromptSubmit'
+        event         = 'Stop'
         type          = 'command'
-        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
+        command       = "bash `"$claudeHooksNorm/session-end.sh`""
         timeout       = 5
-        statusMessage = 'Checking routines...'
+        statusMessage = 'Ending session...'
     },
     [PSCustomObject]@{
-        event         = 'PostToolUse'
+        event         = 'SubagentStop'
         type          = 'command'
-        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
+        command       = "node `"$claudeHooksNorm/sona-writeback-hook.js`""
         timeout       = 5
-        statusMessage = 'Checking routines...'
+        statusMessage = 'Writing episodic memory...'
     },
     [PSCustomObject]@{
-        event         = 'SessionStart'
+        event         = 'PreCompact'
         type          = 'command'
-        command       = "node `"$claudeHooksNorm/routines-context-inject.js`""
+        command       = "bash `"$claudeHooksNorm/context-handoff.sh`""
         timeout       = 5
-        statusMessage = 'Loading enforced routines...'
+        statusMessage = 'Generating handoff doc...'
     }
 )
 
@@ -198,23 +271,60 @@ $pendingMerges = [System.Collections.Generic.List[string]]::new()
 foreach ($entry in $injectEntries) {
     $event   = $entry.event
     $command = $entry.command
+    $matcher = $entry.matcher
 
     $eventGroups = $settings.hooks.$event
     if ($null -eq $eventGroups) {
-        $emptyGroup = [PSCustomObject]@{ hooks = @() }
-        $settings.hooks | Add-Member -MemberType NoteProperty -Name $event -Value @($emptyGroup) -Force
+        $settings.hooks | Add-Member -MemberType NoteProperty -Name $event -Value @() -Force
         $eventGroups = $settings.hooks.$event
     }
 
     if ($eventGroups -isnot [System.Array]) { $eventGroups = @($eventGroups) }
-    $group = $eventGroups[0]
+    
+    # Find group with matching matcher
+    $group = $null
+    foreach ($g in $eventGroups) {
+        if ($null -ne $matcher) {
+            if ($g.matcher -eq $matcher) {
+                $group = $g
+                break
+            }
+        } else {
+            if ($null -eq $g.matcher) {
+                $group = $g
+                break
+            }
+        }
+    }
+
+    # If no group matches, add a new one
+    if ($null -eq $group) {
+        if ($null -ne $matcher) {
+            $group = [PSCustomObject]@{ matcher = $matcher; hooks = @() }
+        } else {
+            $group = [PSCustomObject]@{ hooks = @() }
+        }
+        $eventGroups = $eventGroups + @($group)
+        $settings.hooks.$event = $eventGroups
+    }
 
     $existingCmds = @()
     if ($null -ne $group.hooks) {
         $existingCmds = @($group.hooks | ForEach-Object { if ($_ -and $_.command) { $_.command } })
     }
 
-    if ($existingCmds -contains $command) {
+    # Normalize command quotes/slashes comparison to be idempotent across slight format changes
+    $normCommand = $command -replace "'", '"' -replace '\\', '/'
+    $alreadyPresent = $false
+    foreach ($c in $existingCmds) {
+        $normC = $c -replace "'", '"' -replace '\\', '/'
+        if ($normC -eq $normCommand) {
+            $alreadyPresent = $true
+            break
+        }
+    }
+
+    if ($alreadyPresent) {
         Write-Status "Already present (idempotent): $event -> $command" "INFO"
         continue
     }

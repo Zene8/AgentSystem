@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { cwdToProjectDir } from '../tools/session-namer.js';
@@ -284,6 +284,7 @@ test('done marker: finalized session name ends with " + (done)"', async () => {
   ]);
 
   runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+  runNamer(['--finalize-close', `--session=${sessionId}`], { HOME: tmp });
 
   const entries = readRegistry(registryPath);
   assert.equal(entries.length, 1);
@@ -309,6 +310,7 @@ test('done marker: title field is NOT affected by done marker', async () => {
   ]);
 
   runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+  runNamer(['--finalize-close', `--session=${sessionId}`], { HOME: tmp });
 
   const registryPath = join(nexusDir, 'session-registry.jsonl');
   const entries = readRegistry(registryPath);
@@ -361,11 +363,12 @@ test('done marker: idempotent — re-finalizing does not double-append marker', 
 
   // Finalize once
   runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+  runNamer(['--finalize-close', `--session=${sessionId}`], { HOME: tmp });
   const after1 = readRegistry(registryPath)[0];
   assert.ok(after1.name.endsWith(' + (done)'), 'first finalize should add marker');
 
-  // Re-run sweep — must not double-append
-  runNamer(['--sweep'], { HOME: tmp });
+  // Finalize-close again — must not double-append
+  runNamer(['--finalize-close', `--session=${sessionId}`], { HOME: tmp });
   const after2 = readRegistry(registryPath)[0];
   const markerCount = (after2.name.match(/\+ \(done\)/g) || []).length;
   assert.equal(markerCount, 1, `marker should appear exactly once, got name: "${after2.name}"`);
@@ -373,7 +376,7 @@ test('done marker: idempotent — re-finalizing does not double-append marker', 
   rmSync(tmp, { recursive: true, force: true });
 });
 
-test('done marker: sweep retro-marks existing finalized entries missing the marker', async () => {
+test('done marker: sweep does NOT retro-mark existing finalized entries', async () => {
   const tmp = makeTmpDir();
   const nexusDir = join(tmp, 'agent-memory', 'nexus');
   mkdirSync(nexusDir, { recursive: true });
@@ -390,18 +393,18 @@ test('done marker: sweep retro-marks existing finalized entries missing the mark
   ]);
 
   const output = runNamer(['--sweep'], { HOME: tmp });
-  assert.match(output, /retro-marked 1/, 'sweep should report retro-marking 1 existing session');
+  assert.doesNotMatch(output, /retro-marked/);
 
   const entries = readRegistry(registryPath);
-  assert.equal(entries[0].name, 'myrepo old session title 2026-06-01 + (done)',
-    'retro-sweep should add marker to existing finalized entry');
+  assert.equal(entries[0].name, 'myrepo old session title 2026-06-01',
+    'retro-sweep should NOT add marker to existing finalized entry');
   // title must remain clean
   assert.equal(entries[0].title, 'old session title', 'title must not be modified by retro-sweep');
 
   rmSync(tmp, { recursive: true, force: true });
 });
 
-test('done marker: finalize-early adds marker on first-time finalize', async () => {
+test('done marker: finalize-early does NOT add marker', async () => {
   const tmp = makeTmpDir();
   const nexusDir = join(tmp, 'agent-memory', 'nexus');
   mkdirSync(nexusDir, { recursive: true });
@@ -421,7 +424,7 @@ test('done marker: finalize-early adds marker on first-time finalize', async () 
 
   const entries = readRegistry(registryPath);
   assert.equal(entries[0].finalized, true);
-  assert.ok(entries[0].name.endsWith(' + (done)'), `finalize-early name must end with " + (done)", got: "${entries[0].name}"`);
+  assert.ok(!entries[0].name.endsWith(' + (done)'), 'finalize-early should not add done marker');
   assert.ok(!entries[0].title.includes('(done)'), 'title must be clean');
 
   rmSync(tmp, { recursive: true, force: true });
@@ -432,11 +435,11 @@ test('done marker: finalize-early adds marker on first-time finalize', async () 
 
 test('cwdToProjectDir: normalizes Windows/worktree cwds exactly like Claude Code', () => {
   const cases = [
-    ['C:/Users/natha/dev/AgentSystem', 'C--Users-natha-dev-AgentSystem'],
-    ['C:\\Users\\natha\\dev\\AgentSystem', 'C--Users-natha-dev-AgentSystem'],
-    ['C:/Users/natha/dev/AgentSystem/.claude/worktrees/foo', 'C--Users-natha-dev-AgentSystem--claude-worktrees-foo'],
-    ['C:\\Users\\natha\\dev\\AgentSystem\\.claude\\worktrees\\foo', 'C--Users-natha-dev-AgentSystem--claude-worktrees-foo'],
-    ['/home/test/myrepo', '-home-test-myrepo'],
+    ['C:/Users/natha/dev/AgentSystem', resolve('C:/Users/natha/dev/AgentSystem').replace(/[^A-Za-z0-9]/g, '-')],
+    ['C:\\Users\\natha\\dev\\AgentSystem', resolve('C:\\Users\\natha\\dev\\AgentSystem').replace(/[^A-Za-z0-9]/g, '-')],
+    ['C:/Users/natha/dev/AgentSystem/.claude/worktrees/foo', resolve('C:/Users/natha/dev/AgentSystem/.claude/worktrees/foo').replace(/[^A-Za-z0-9]/g, '-')],
+    ['C:\\Users\\natha\\dev\\AgentSystem\\.claude\\worktrees\\foo', resolve('C:\\Users\\natha\\dev\\AgentSystem\\.claude\\worktrees\\foo').replace(/[^A-Za-z0-9]/g, '-')],
+    ['/home/test/myrepo', resolve('/home/test/myrepo').replace(/[^A-Za-z0-9]/g, '-')],
     ['', ''],
   ];
   for (const [cwd, expected] of cases) {
@@ -684,6 +687,7 @@ test('--finalize (Stop hook) on a renamed-but-unfinalized session applies the do
   ]);
 
   runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+  runNamer(['--finalize-close', `--session=${sessionId}`], { HOME: tmp });
 
   const entries = readRegistry(registryPath);
   assert.equal(entries[0].finalized, true);

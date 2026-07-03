@@ -90,6 +90,8 @@ HOOK_SCRIPTS=(
   "user-prompt-submit.sh"
   "guard-git.sh"
   "wip-checkpoint.sh"
+  "session-close.sh"
+  "context-handoff.sh"
 )
 HOOKS_SRC="$SCRIPT_DIR/hooks/claude-hooks"
 if [ -d "$HOOKS_SRC" ]; then

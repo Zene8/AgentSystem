@@ -17,7 +17,7 @@
 // --section defaults to "Session Notes". Override per-call.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -60,6 +60,10 @@ function resolveTranscript(sessionIdOrPrefix) {
   if (cwd) {
     const dirName  = cwd.replace(/\//g, '-');
     const candidate = join(PROJECTS, dirName, `${session}.jsonl`);
+    const resolved = resolve(candidate);
+    if (!resolved.startsWith(PROJECTS)) {
+      return null;
+    }
     if (existsSync(candidate)) return { filePath: candidate, entry };
   }
 

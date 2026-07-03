@@ -31,6 +31,10 @@ const HOME      = homedir();
 const KEY_FILE  = `${HOME}/.claude/remote-webhook.key`;
 const ROSTER    = `${HOME}/.claude/daemon/roster.json`;
 const CLAUDE    = process.env.CLAUDE_BIN || `${HOME}/.local/bin/claude`;
+if (process.env.CLAUDE_BIN && !existsSync(process.env.CLAUDE_BIN)) {
+  console.error(`Specified CLAUDE_BIN does not exist: ${process.env.CLAUDE_BIN}`);
+  process.exit(1);
+}
 const LOG_DIR   = `${HOME}/.claude/agent-runs`;
 const COST_LOG  = `${HOME}/agent-memory/nexus/session-log.jsonl`;
 const KNOWN_REPOS_FILE = `${HOME}/agent-memory/nexus/known-repos.json`;
@@ -220,9 +224,7 @@ async function dispatchClaude(agent, prompt, repoPath) {
 
 async function dispatchAgy(prompt, repoPath, model = null) {
   try {
-    // For MVP, use one-shot dispatch (direct agy invocation)
-    // TODO: Switch to spawnAgyPersistent() once Leo's agy-persistence.js is available (issue #84)
-    const result = await spawnAgyOneShotDirect(prompt, repoPath, model);
+    const result = await spawnAgyPersistent(prompt, repoPath, model);
     return result;
   } catch (e) {
     console.error('agy dispatch failed:', e.message);
@@ -509,6 +511,18 @@ const server = http.createServer(async (req, res) => {
     return html(res, panelHTML(SECRET));
   }
 
+  // GET /repos — list spawnable repos
+  if (req.method === 'GET' && path === '/repos') {
+    const knownRepos = loadKnownRepos();
+    const repos = (knownRepos.repos || []).map(r => ({
+      slug: r.slug,
+      path: r.path,
+      primary_cli: r.primary_cli || 'claude',
+      description: r.description || ''
+    }));
+    return json(res, 200, { repos });
+  }
+
   // GET /sessions — live from claude agents --json + agy sessions from registry
   if (req.method === 'GET' && path === '/sessions') {
     const claudeSessions = await getActiveSessions();
@@ -537,6 +551,18 @@ const server = http.createServer(async (req, res) => {
   // GET /log/:id — uses claude logs <id> for bg sessions, file fallback
   if (req.method === 'GET' && path.startsWith('/log/')) {
     const id = path.slice(5).replace(/[^a-z0-9_\-]/gi, '');
+    
+    // Check if session exists in registry and has a logPath
+    const session = registry.getSession(id);
+    if (session && session.logPath) {
+      if (existsSync(session.logPath)) {
+        const content = readFileSync(session.logPath, 'utf8');
+        const last = content.split('\n').slice(-100).join('\n');
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end(last);
+      }
+    }
+
     // Try as a background session short-id first
     if (/^[a-f0-9]{8}$/.test(id)) {
       const output = await getAgentLog(id);

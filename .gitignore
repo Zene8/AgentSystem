@@ -7,3 +7,7 @@ node_modules/
 
 # AgentSystem local graph brain (decaying memory — not committed)
 nexus/
+
+# Untracked runtime files
+HANDOFF.md
+.claudedaemon

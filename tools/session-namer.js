@@ -18,7 +18,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, createReadStream } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { execFileSync } from 'node:child_process';
@@ -87,7 +87,8 @@ function repoFromCwd(cwd) {
  *  Windows paths normalize identically since backslash is non-alphanumeric too. */
 export function cwdToProjectDir(cwd) {
   if (!cwd) return '';
-  return cwd.replace(/[^A-Za-z0-9]/g, '-');
+  const resolved = resolve(cwd);
+  return resolved.replace(/[^A-Za-z0-9]/g, '-');
 }
 
 /** Extract 5 significant words from free text */

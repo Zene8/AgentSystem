@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { spawnAgyPersistent as spawnAgyPersistentImpl } from './agy-persistence.js';
 
 const HOME = homedir();
 const AGY_CLI = 'agy'; // Assume agy is in PATH
@@ -81,11 +82,16 @@ export async function spawnAgyOneShotDirect(prompt, repoPath, model = null) {
  * @returns {Promise<{sessionId: string, tmuxSession: string, logPath: string, status: string}>}
  */
 export async function spawnAgyPersistent(prompt, repoPath, model = null, continueId = null) {
-  // TODO: Implement once Leo's agy-persistence.js is available (issue #84)
-  // For now, fall back to one-shot (non-persistent)
-  console.warn('[agy-dispatcher] agy-persistence.js not yet available, falling back to one-shot');
-
   try {
+    const result = await spawnAgyPersistentImpl({ prompt, repoPath, model, continueId });
+    return {
+      sessionId: result.conversationId,
+      tmuxSession: result.tmuxSessionName,
+      logPath: result.logPath,
+      status: 'running',
+    };
+  } catch (e) {
+    console.warn('[agy-dispatcher] spawnAgyPersistent failed, falling back to one-shot:', e.message);
     const result = await spawnAgyOneShotDirect(prompt, repoPath, model);
     return {
       sessionId: continueId || 'agy-oneShotFallback',
@@ -93,14 +99,6 @@ export async function spawnAgyPersistent(prompt, repoPath, model = null, continu
       logPath: null,
       status: result.status,
       exitCode: result.exitCode,
-    };
-  } catch (e) {
-    return {
-      sessionId: null,
-      tmuxSession: null,
-      logPath: null,
-      status: 'failed',
-      error: e.message,
     };
   }
 }
