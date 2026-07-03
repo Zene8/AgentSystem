@@ -2,11 +2,32 @@
 
 Remote dispatch server for Claude Code agent fleet management and Antigravity (agy) session handling. Enables phone/browser-based session spawning, monitoring, and cost tracking.
 
+**Architecture:** Mission Control runs on a dedicated Linux host only. Windows is dev-only. See Components below.
+
 ## Files
 
-- **webhook-server.js** — HTTP REST API for agent dispatch, session management, GitHub webhooks, log streaming, and cost tracking
-- **agy-persistence.js** — Tmux-based wrapper for persistent agy background sessions (survives terminal close, enables session resumption)
+- **webhook-server.js** — LINUX HOST ONLY. HTTP REST API for agent dispatch, session management, GitHub webhooks, log streaming, and cost tracking
+- **agy-persistence.js** — LINUX HOST ONLY. Tmux-based wrapper for persistent agy background sessions (survives terminal close, enables session resumption). Graceful fallback to direct spawn if tmux unavailable (critical for Windows dev environments).
 - **README.md** — This file
+
+## Components
+
+### Linux Host Components
+- `webhook-server.js` — REST API server (requires Linux host with Claude CLI installed)
+- `agy-persistence.js` — Tmux session manager (requires tmux installed)
+
+Both components are **not compatible with Windows**. Windows developers use them in a dev environment only; production runs on dedicated Linux server.
+
+## Environment Variables
+
+### CLAUDE_BIN
+Optional. Defaults to `~/.local/bin/claude`. Set to override claude binary location on Linux host.
+
+Example:
+```bash
+export CLAUDE_BIN=/usr/local/bin/claude
+node webhook-server.js
+```
 
 ## Deployment
 
