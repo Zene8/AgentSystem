@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>⚡ Mission Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-main: #030712;
+    --bg-radial: radial-gradient(circle at 50% 50%, #0b1528 0%, #030712 100%);
+    --card-bg: rgba(17, 24, 39, 0.6);
+    --border-glow: rgba(99, 102, 241, 0.15);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --text-primary: #f3f4f6;
+    --text-secondary: #9ca3af;
+    --text-muted: #6b7280;
+    --neon-blue: #38bdf8;
+    --neon-purple: #c084fc;
+    --neon-green: #34d399;
+    --neon-red: #f87171;
+    --neon-orange: #fb923c;
+    --shadow-neon: 0 0 15px rgba(99, 102, 241, 0.25);
+    --transition: all 0.2s ease;
+  }
+  
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    background: var(--bg-main);
+    background-image: var(--bg-radial);
+    color: var(--text-primary);
+    font-family: 'Outfit', sans-serif;
+    min-height: 100vh;
+    padding: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+    overflow-x: hidden;
+  }
+  
+  .glass-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    transition: var(--transition);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+  }
+  
+  .glass-card:hover {
+    border-color: rgba(99, 102, 241, 0.25);
+    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.05);
+  }
+  
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 4px 16px;
+    margin-bottom: 12px;
+  }
+  
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--neon-blue), var(--neon-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-green);
+    display: inline-block;
+    animation: pulse 2s infinite;
+  }
+  
+  @keyframes pulse {
+    0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+    70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+    100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+  }
+  
+  .tabs {
+    display: flex;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-subtle);
+  }
+  
+  .tab-btn {
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+    font-size: 13px;
+    transition: var(--transition);
+  }
+  
+  .tab-btn.active {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.8), rgba(168, 85, 247, 0.8));
+    color: white;
+    box-shadow: var(--shadow-neon);
+  }
+  
+  .panel-content {
+    display: none;
+  }
+  
+  .panel-content.active {
+    display: block;
+  }
+  
+  .form-group {
+    margin-bottom: 16px;
+  }
+  
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  input, select, textarea {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    transition: var(--transition);
+  }
+  
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: rgba(99, 102, 241, 0.5);
+    background: rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.1);
+  }
+  
+  .btn-submit {
+    width: 100%;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 14px;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: var(--shadow-neon);
+  }
+  
+  .btn-submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+  }
+  
+  .btn-submit:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  
+  .btn-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .harness-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  
+  .harness-btn {
+    flex: 1;
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 13px;
+    transition: var(--transition);
+  }
+  
+  .harness-btn.active[data-val="claude"] {
+    border-color: var(--neon-blue);
+    color: var(--neon-blue);
+    background: rgba(56, 189, 248, 0.08);
+  }
+  
+  .harness-btn.active[data-val="agy"] {
+    border-color: var(--neon-purple);
+    color: var(--neon-purple);
+    background: rgba(192, 132, 252, 0.08);
+  }
+  
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  
+  .metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  
+  .metric-card {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+  }
+  
+  .metric-val {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-top: 4px;
+  }
+  
+  .metric-lbl {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+  
+  .repo-list, .sessions-list, .runs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .repo-item, .session-item, .run-item {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: var(--transition);
+  }
+  
+  .repo-item:hover, .session-item:hover, .run-item:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  
+  .repo-name, .session-name, .run-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  
+  .repo-path, .session-status, .run-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  
+  .status-badge {
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-left: 6px;
+  }
+  
+  .status-badge.running { background: rgba(52, 211, 153, 0.15); color: var(--neon-green); border: 1px solid rgba(52, 211, 153, 0.3); }
+  .status-badge.spawning { background: rgba(251, 146, 60, 0.15); color: var(--neon-orange); border: 1px solid rgba(251, 146, 60, 0.3); }
+  .status-badge.stopped { background: rgba(107, 114, 128, 0.15); color: var(--text-muted); border: 1px solid rgba(107, 114, 128, 0.3); }
+  
+  .btn-action {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+    transition: var(--transition);
+  }
+  
+  .btn-action:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+  
+  .btn-stop {
+    background: rgba(248, 113, 113, 0.1);
+    border-color: rgba(248, 113, 113, 0.2);
+    color: var(--neon-red);
+  }
+  
+  .btn-stop:hover {
+    background: rgba(248, 113, 113, 0.25);
+    border-color: var(--neon-red);
+  }
+  
+  /* Log Modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(3, 7, 18, 0.85);
+    backdrop-filter: blur(8px);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 16px;
+    z-index: 1000;
+  }
+  
+  .modal-container {
+    background: #090d16;
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 550px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  }
+  
+  .modal-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .modal-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  
+  .modal-body {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  
+  .terminal-box {
+    background: #02040a;
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+    overflow-y: auto;
+    max-height: 45vh;
+    line-height: 1.5;
+  }
+  
+  .modal-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: flex-end;
+  }
+  
+  .no-runs {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-muted);
+    font-size: 13px;
+    border: 1px dashed var(--border-subtle);
+    border-radius: 10px;
+  }
+  
+  .loading {
+    text-align: center;
+    padding: 12px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <h1>⚡ Mission Control <span class="pulse-dot"></span></h1>
+    <span class="status-badge running" style="margin-left:0; font-size:11px;" id="server-health-badge">Online</span>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('dispatch')">🚀 Dispatch</button>
+    <button class="tab-btn" onclick="switchTab('fleet'); loadSessions(); loadRuns();">📡 Fleet</button>
+    <button class="tab-btn" onclick="switchTab('memory')">🧠 Memory</button>
+    <button class="tab-btn" onclick="switchTab('scratchpads'); loadScratchpads();">📝 Tasks</button>
+  </div>
+
+  <!-- PANEL: DISPATCH -->
+  <div id="panel-dispatch" class="panel-content active">
+    <div class="glass-card">
+      <h2>🚀 Session Dispatcher</h2>
+      
+      <div class="form-group">
+        <label>Control Harness</label>
+        <div class="harness-toggle">
+          <button type="button" class="harness-btn active" data-val="claude" onclick="setHarness('claude')">Claude Code</button>
+          <button type="button" class="harness-btn" data-val="agy" onclick="setHarness('agy')">Antigravity</button>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Target Repository</label>
+        <select id="repo-select">
+          <option value="">Loading allowlisted repos...</option>
+        </select>
+      </div>
+      
+      <!-- Claude Specific Fields -->
+      <div id="claude-fields">
+        <div class="form-group">
+          <label>Lead Agent Specialist</label>
+          <select id="agent-select">
+            <option value="jarvis">Jarvis — CEO (Orchestration & Business)</option>
+            <option value="friday" selected>Friday — CTO (Technical lead / Code / Arch)</option>
+            <option value="sam">Sam — CSO (Security & Audits)</option>
+            <option value="nat">Nat — CBO (Strategy & GTM)</option>
+            <option value="ultron">Ultron (Backend & APIs)</option>
+            <option value="pym">Pym (Database & Schemas)</option>
+            <option value="leo">Leo (DevOps & CI/CD)</option>
+            <option value="astra">Astra (Frontend & Components)</option>
+            <option value="wanda">Wanda (Design & UI/UX)</option>
+            <option value="threepio">Threepio (Docs & Release Notes)</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- Antigravity Specific Fields -->
+      <div id="agy-fields" style="display: none;">
+        <div class="form-group">
+          <label>Lead Model</label>
+          <select id="model-select">
+            <option value="gemini-3.1-pro-preview" selected>gemini-3.1-pro-preview (Jarvis/Sam)</option>
+            <option value="gemini-3-flash-preview">gemini-3-flash-preview (Friday/Nat)</option>
+            <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview (Workers)</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Instruction / Prompt</label>
+        <textarea id="prompt-input" rows="4" placeholder="Enter instructions for the agent..."></textarea>
+      </div>
+      
+      <button class="btn-submit" id="btn-dispatch" onclick="dispatchSession()">Launch Agent Session</button>
+    </div>
+  </div>
+
+  <!-- PANEL: FLEET -->
+  <div id="panel-fleet" class="panel-content">
+    <!-- Spend Cost Card -->
+    <div class="glass-card">
+      <h2>📊 Spend & Performance</h2>
+      <div class="metrics">
+        <div class="metric-card">
+          <div class="metric-lbl">Active Fleet</div>
+          <div class="metric-val" id="val-active-runs">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-lbl">Today's Cost</div>
+          <div class="metric-val" id="val-today-cost">$0.00</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-lbl">Weekly Cost</div>
+          <div class="metric-val" id="val-weekly-cost">$0.00</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Fleet List -->
+    <div class="glass-card">
+      <h2>📡 Active Runs Registry</h2>
+      <div class="sessions-list" id="sessions-list">
+        <div class="loading">Loading session fleet registry...</div>
+      </div>
+    </div>
+
+    <!-- Recent Session Runs History -->
+    <div class="glass-card">
+      <h2>📜 Execution History</h2>
+      <div class="runs-list" id="runs-list">
+        <div class="loading">Loading execution runs...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL: MEMORY -->
+  <div id="panel-memory" class="panel-content">
+    <!-- Save Fact Card -->
+    <div class="glass-card">
+      <h2>🧠 Commit Fact to Memory</h2>
+      <div class="form-group">
+        <label>Durable Fact worth keeping</label>
+        <textarea id="fact-input" rows="3" placeholder="e.g. Added HOST env var defaulting to 127.0.0.1 to remote server..."></textarea>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Memory Tier</label>
+          <select id="fact-tier" onchange="toggleFactTarget()">
+            <option value="personal" selected>Personal (user-brain)</option>
+            <option value="repo">Repository Graph</option>
+            <option value="agent">Agent Specific</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Section / Heading</label>
+          <input type="text" id="fact-section" value="Session Notes" placeholder="Section name">
+        </div>
+      </div>
+      <div class="form-group" id="fact-target-group" style="display:none;">
+        <label>Target Agent/Repo Name</label>
+        <input type="text" id="fact-target" placeholder="e.g. agentsystem">
+      </div>
+      <button class="btn-submit" id="fact-submit-btn" onclick="saveMemoryFact()">Remember Fact</button>
+    </div>
+
+    <!-- Search Memory Card -->
+    <div class="glass-card">
+      <h2>🔍 Search Agent Memories</h2>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>Agent Memory Pool</label>
+          <select id="search-agent">
+            <option value="friday" selected>Friday (Engineering)</option>
+            <option value="jarvis">Jarvis (CEO)</option>
+            <option value="sam">Sam (Security)</option>
+            <option value="nat">Nat (CBO)</option>
+            <option value="ultron">Ultron (Workers/API)</option>
+            <option value="pym">Pym (Workers/DB)</option>
+            <option value="leo">Leo (DevOps)</option>
+            <option value="astra">Astra (Frontend)</option>
+            <option value="wanda">Wanda (Design)</option>
+            <option value="threepio">Threepio (Docs)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Search Query</label>
+          <input type="text" id="search-query" placeholder="e.g. rate limit host">
+        </div>
+      </div>
+      <button class="btn-submit" id="search-btn" onclick="searchMemory()">Search Memory</button>
+      
+      <div id="memory-results" style="margin-top: 16px;"></div>
+    </div>
+
+    <!-- File Viewer Panel (inside card) -->
+    <div class="glass-card" id="mem-file-viewer" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2 id="mem-viewer-title" style="margin-bottom:0; font-family:'JetBrains Mono',monospace; text-transform:none;">Memory Node</h2>
+        <button class="btn-action" onclick="document.getElementById('mem-file-viewer').style.display='none'">Close</button>
+      </div>
+      <pre id="mem-file-body" class="terminal-box" style="max-height: 300px;"></pre>
+    </div>
+  </div>
+
+  <!-- PANEL: TASK SCRATCHPADS -->
+  <div id="panel-scratchpads" class="panel-content">
+    <div class="glass-card">
+      <h2>📝 Active Multi-Agent Task Scratchpads</h2>
+      <div class="repo-list" id="scratchpads-list">
+        <div class="loading">Loading scratchpads...</div>
+      </div>
+    </div>
+
+    <!-- Scratchpad Body and Append View -->
+    <div class="glass-card" id="scratchpad-viewer" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2 id="scratchpad-viewer-title" style="margin-bottom:0; text-transform:none;">Scratchpad</h2>
+        <button class="btn-action" onclick="document.getElementById('scratchpad-viewer').style.display='none'">Close</button>
+      </div>
+      
+      <pre id="scratchpad-body" class="terminal-box" style="max-height: 250px; margin-bottom: 12px;"></pre>
+      
+      <!-- Append Entry Form -->
+      <div style="border-top: 1px solid var(--border-subtle); padding-top: 12px;">
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Agent Role</label>
+            <select id="scratchpad-agent">
+              <option value="Jarvis">Jarvis (CEO)</option>
+              <option value="Friday" selected>Friday (CTO)</option>
+              <option value="Nat">Nat (CBO)</option>
+              <option value="Sam">Sam (CSO)</option>
+              <option value="Ultron">Ultron</option>
+              <option value="Pym">Pym</option>
+              <option value="Leo">Leo</option>
+              <option value="Astra">Astra</option>
+              <option value="Wanda">Wanda</option>
+              <option value="Threepio">Threepio</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Submit update to issue</label>
+            <button class="btn-submit" id="scratchpad-submit-btn" style="padding:11px;" onclick="submitScratchpadMessage()">Append Comment</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Add comment to scratchpad</label>
+          <textarea id="scratchpad-message" rows="2" placeholder="Write message to add to scratchpad..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TERMINAL STREAM -->
+  <div class="modal-overlay" id="log-modal" onclick="if(event.target===this) closeLogStream()">
+    <div class="modal-container">
+      <div class="modal-header">
+        <span class="modal-title" id="log-modal-title">Agent Logs</span>
+        <button class="btn-action" onclick="closeLogStream()">&times; Close</button>
+      </div>
+      <div class="modal-body">
+        <pre class="terminal-box" id="log-terminal"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const KEY = '${key}';
+    let currentHarness = 'claude';
+    let logInterval = null;
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.panel-content').forEach(p => p.classList.remove('active'));
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.toLowerCase().includes(tabId));
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      const panel = document.getElementById('panel-' + tabId);
+      if (panel) panel.classList.add('active');
+    }
+
+    function setHarness(h) {
+      currentHarness = h;
+      document.querySelectorAll('.harness-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector(`.harness-btn[data-val="${h}"]`).classList.add('active');
+      
+      if (h === 'claude') {
+        document.getElementById('claude-fields').style.display = 'block';
+        document.getElementById('agy-fields').style.display = 'none';
+      } else {
+        document.getElementById('claude-fields').style.display = 'none';
+        document.getElementById('agy-fields').style.display = 'block';
+      }
+    }
+
+    function toggleFactTarget() {
+      const tier = document.getElementById('fact-tier').value;
+      const group = document.getElementById('fact-target-group');
+      if (tier === 'personal') {
+        group.style.display = 'none';
+      } else {
+        group.style.display = 'block';
+      }
+    }
+
+    async function api(path, options = {}) {
+      const headers = {
+        'Authorization': 'Bearer ' + KEY,
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
+      };
+      const res = await fetch(path, { ...options, headers });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Request failed with status ' + res.status);
+      }
+      return res.json();
+    }
+
+    async function loadRepos() {
+      const select = document.getElementById('repo-select');
+      try {
+        const data = await api('/repos');
+        if (!data.repos || data.repos.length === 0) {
+          select.innerHTML = '<option value="">No repositories available</option>';
+          return;
+        }
+        select.innerHTML = data.repos.map(r => 
+          `<option value="${r.slug}">${r.slug.toUpperCase()} (${r.path})</option>`
+        ).join('');
+      } catch (e) {
+        select.innerHTML = `<option value="">Error: ${e.message}</option>`;
+      }
+    }
+
+    async function loadCost() {
+      try {
+        const data = await api('/cost');
+        document.getElementById('val-today-cost').textContent = '$' + (data.today_spend || 0.00).toFixed(2);
+        document.getElementById('val-weekly-cost').textContent = '$' + (data.weekly_spend || 0.00).toFixed(2);
+      } catch (e) {
+        console.warn('Cost fetch failed:', e);
+      }
+    }
+
+    async function loadHealth() {
+      try {
+        const data = await api('/health');
+        const badge = document.getElementById('server-health-badge');
+        badge.textContent = data.status === 'ok' ? 'Online' : 'Offline';
+      } catch (e) {
+        document.getElementById('server-health-badge').textContent = 'Error';
+      }
+    }
+
+    async function loadSessions() {
+      const container = document.getElementById('sessions-list');
+      try {
+        const data = await api('/sessions');
+        document.getElementById('val-active-runs').textContent = (data.sessions || []).filter(s => s.status === 'running' || s.status === 'spawning').length;
+        
+        if (!data.sessions || data.sessions.length === 0) {
+          container.innerHTML = '<div class="no-runs">No active agent sessions running.</div>';
+          return;
+        }
+        
+        container.innerHTML = data.sessions.map(s => {
+          const isAgy = s.harness === 'agy';
+          const name = isAgy ? 'Antigravity' : 'Claude: ' + (s.agent || 'Agent').toUpperCase();
+          const running = s.status === 'running' || s.status === 'spawning';
+          return `
+            <div class="session-item">
+              <div>
+                <div class="session-name">
+                  \${name}
+                  <span class="status-badge \${s.status}">\${s.status}</span>
+                </div>
+                <div class="session-meta" style="font-size:12px; color:var(--text-secondary); margin-top:2px;">
+                  Repo: \${(s.repo || 'unknown').toUpperCase()} | ID: \${s.id}
+                </div>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn-action" onclick="viewLogStream('\${s.id}', '\${name}')">Logs</button>
+                \${running ? `<button class="btn-action btn-stop" onclick="stopSession('\${s.id}')">Stop</button>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        container.innerHTML = '<div class="error">Failed to load sessions: ' + e.message + '</div>';
+      }
+    }
+
+    async function loadRuns() {
+      const container = document.getElementById('runs-list');
+      try {
+        const data = await api('/runs');
+        if (!data.runs || data.runs.length === 0) {
+          container.innerHTML = '<div class="no-runs">No recent runs recorded.</div>';
+          return;
+        }
+        
+        container.innerHTML = data.runs.map(r => {
+          const date = new Date(r.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          return `
+            <div class="run-item">
+              <div>
+                <div class="run-name">👤 \${r.agent.toUpperCase()}</div>
+                <div class="run-meta">Started at \${date} | ID: \${r.id}</div>
+              </div>
+              <button class="btn-action" onclick="viewLogStream('\${r.id}', '\${r.agent}')">Read Logs</button>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        container.innerHTML = '<div class="error">Failed to load runs: ' + e.message + '</div>';
+      }
+    }
+
+    async function dispatchSession() {
+      const repo = document.getElementById('repo-select').value;
+      const prompt = document.getElementById('prompt-input').value.trim();
+      const agent = document.getElementById('agent-select').value;
+      const model = document.getElementById('model-select').value;
+      
+      if (!repo) { alert('Select a repository first'); return; }
+      if (!prompt) { alert('Enter instructions / prompt'); return; }
+      
+      const btn = document.getElementById('btn-dispatch');
+      btn.disabled = true;
+      btn.textContent = 'Launching session...';
+      
+      const payload = {
+        harness: currentHarness,
+        repo,
+        prompt,
+        agent: currentHarness === 'claude' ? agent : null,
+        model: currentHarness === 'agy' ? model : null,
+      };
+      
+      try {
+        const data = await api('/run', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        
+        document.getElementById('prompt-input').value = '';
+        alert('Session dispatched successfully! ID: ' + data.id);
+        loadSessions();
+      } catch (e) {
+        alert('Launch failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Launch Agent Session';
+      }
+    }
+
+    async function stopSession(id) {
+      if (!confirm('Are you sure you want to stop this session?')) return;
+      try {
+        const data = await api('/stop', {
+          method: 'POST',
+          body: JSON.stringify({ id })
+        });
+        if (data.error) {
+          alert('Failed to stop session: ' + data.error);
+        } else {
+          loadSessions();
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function viewLogStream(id, name) {
+      const modal = document.getElementById('log-modal');
+      const terminal = document.getElementById('log-terminal');
+      document.getElementById('log-modal-title').textContent = `Logs: \${name} (\${id})`;
+      
+      modal.style.display = 'flex';
+      terminal.textContent = 'Reading tail logs...';
+      
+      if (logInterval) clearInterval(logInterval);
+      
+      const fetchLogs = async () => {
+        try {
+          const r = await fetch('/log/' + id, {
+            headers: { 'Authorization': 'Bearer ' + KEY }
+          });
+          if (r.ok) {
+            const text = await r.text();
+            terminal.textContent = text || 'No logs recorded yet.';
+            terminal.scrollTop = terminal.scrollHeight;
+          } else {
+            terminal.textContent = 'Logs temporarily unavailable (http status: ' + r.status + ')';
+          }
+        } catch (e) {
+          terminal.textContent = 'Error loading logs: ' + e.message;
+        }
+      };
+      
+      await fetchLogs();
+      logInterval = setInterval(fetchLogs, 3000);
+    }
+
+    function closeLogStream() {
+      document.getElementById('log-modal').style.display = 'none';
+      if (logInterval) {
+        clearInterval(logInterval);
+        logInterval = null;
+      }
+    }
+
+    async function loadScratchpads() {
+      const container = document.getElementById('scratchpads-list');
+      container.innerHTML = '<div class="loading">Loading scratchpads...</div>';
+      try {
+        const data = await api('/scratchpads');
+        if (!data.scratchpads || data.scratchpads.length === 0) {
+          container.innerHTML = '<div class="no-runs">No active task scratchpads found.</div>';
+          return;
+        }
+        container.innerHTML = data.scratchpads.map(s => `
+          <div class="repo-item" onclick="viewScratchpad('\${s.project}', '\${s.issue}')">
+            <div>
+              <div class="repo-name">🔧 \${s.project} / Issue #\${s.issue}</div>
+              <div class="repo-path" style="font-size:11px;">\${s.path.split('/').pop()}</div>
+            </div>
+            <span style="font-size:12px; color:var(--neon-blue);">View &rarr;</span>
+          </div>
+        `).join('');
+      } catch (e) {
+        container.innerHTML = '<div class="error">Failed to load scratchpads: ' + e.message + '</div>';
+      }
+    }
+
+    let activeProject = null;
+    let activeIssue = null;
+
+    async function viewScratchpad(project, issue) {
+      activeProject = project;
+      activeIssue = issue;
+      document.getElementById('scratchpad-viewer-title').textContent = `🔧 \${project} / Issue #\${issue}`;
+      document.getElementById('scratchpad-viewer').style.display = 'block';
+      const container = document.getElementById('scratchpad-body');
+      container.innerHTML = '<div class="loading">Fetching scratchpad...</div>';
+      
+      try {
+        const r = await fetch(`/scratchpad?project=\${project}&issue=\${issue}`, {
+          headers: { 'Authorization': 'Bearer ' + KEY }
+        });
+        if (r.ok) {
+          const content = await r.text();
+          container.textContent = content || 'Scratchpad is empty.';
+        } else {
+          container.innerHTML = '<div class="error">Failed to load scratchpad (status ' + r.status + ')</div>';
+        }
+      } catch (e) {
+        container.innerHTML = '<div class="error">Error: ' + e.message + '</div>';
+      }
+    }
+
+    async function submitScratchpadMessage() {
+      const agent = document.getElementById('scratchpad-agent').value;
+      const message = document.getElementById('scratchpad-message').value.trim();
+      if (!message) return;
+      
+      const btn = document.getElementById('scratchpad-submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Posting...';
+      
+      try {
+        const data = await api('/scratchpad', {
+          method: 'POST',
+          body: JSON.stringify({ project: activeProject, issue: activeIssue, agent, message })
+        });
+        if (data.error) {
+          alert('Failed to post: ' + data.error);
+        } else {
+          document.getElementById('scratchpad-message').value = '';
+          viewScratchpad(activeProject, activeIssue);
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Append Comment';
+      }
+    }
+
+    async function saveMemoryFact() {
+      const fact = document.getElementById('fact-input').value.trim();
+      const tier = document.getElementById('fact-tier').value;
+      const target = document.getElementById('fact-target').value.trim();
+      const section = document.getElementById('fact-section').value.trim() || 'Session Notes';
+      
+      if (!fact) {
+        alert('Fact text is required.');
+        return;
+      }
+      
+      const btn = document.getElementById('fact-submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Remembering...';
+      
+      try {
+        const data = await api('/memory/remember', {
+          method: 'POST',
+          body: JSON.stringify({ fact, tier, target, section })
+        });
+        if (data.error) {
+          alert('Failed to remember fact: ' + data.error);
+        } else {
+          alert('Fact successfully remembered in memory graph!');
+          document.getElementById('fact-input').value = '';
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Remember Fact';
+      }
+    }
+
+    async function searchMemory() {
+      const agent = document.getElementById('search-agent').value;
+      const query = document.getElementById('search-query').value.trim();
+      
+      if (!query) return;
+      
+      const btn = document.getElementById('search-btn');
+      btn.disabled = true;
+      btn.textContent = 'Searching...';
+      
+      const resultsDiv = document.getElementById('memory-results');
+      resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+      
+      try {
+        const data = await api(`/memory/search?agent=\${agent}&query=\${encodeURIComponent(query)}`);
+        if (!data.results || data.results.length === 0) {
+          resultsDiv.innerHTML = '<div class="no-runs">No matching memory nodes found.</div>';
+          return;
+        }
+        
+        resultsDiv.innerHTML = data.results.map(r => `
+          <div class="repo-item" onclick="loadMemoryFile('\${r.path.replace(/\\\\/g, "/")}')">
+            <div>
+              <div class="repo-name">🧠 \${r.file}</div>
+              <div class="repo-path" style="font-size:11px; word-break:break-all;">Path: \${r.path}</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="status-badge running" style="margin-left:0; font-size:11px;">Score: \${r.score.toFixed(2)}</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        resultsDiv.innerHTML = '<div class="error">Search failed: ' + e.message + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Search Memory';
+      }
+    }
+
+    async function loadMemoryFile(filePath) {
+      document.getElementById('mem-viewer-title').textContent = filePath.split(/[\\\\/]/).pop();
+      document.getElementById('mem-file-viewer').style.display = 'block';
+      const body = document.getElementById('mem-file-body');
+      body.innerHTML = '<div class="loading">Loading file...</div>';
+      
+      try {
+        const r = await fetch(`/memory/file?path=\${encodeURIComponent(filePath)}`, {
+          headers: { 'Authorization': 'Bearer ' + KEY }
+        });
+        if (r.ok) {
+          const content = await r.text();
+          body.textContent = content || 'File is empty.';
+        } else {
+          body.innerHTML = '<div class="error">Access denied or file not found (status ' + r.status + ')</div>';
+        }
+      } catch (e) {
+        body.innerHTML = '<div class="error">Error: ' + e.message + '</div>';
+      }
+    }
+
+    // Initialize Page
+    loadRepos();
+    loadCost();
+    loadSessions();
+    loadRuns();
+    loadHealth();
+    
+    // Auto-refresh loops
+    setInterval(() => {
+      loadSessions();
+      loadRuns();
+      loadHealth();
+    }, 15000);
+
+    setInterval(loadCost, 90000);
+  </script>
+</body>
+</html>

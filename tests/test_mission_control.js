@@ -385,6 +385,35 @@ test('POST /stop payload verification', async (t) => {
   assert.match(request.id, /^(claude|agy)-[a-f0-9]+$/);
 });
 
+test('GET /scratchpads response format', async (t) => {
+  const response = {
+    scratchpads: [
+      { project: 'agentsystem', issue: 'issue-10', path: '/home/tasks/agentsystem/issue-10/scratchpad.md' }
+    ]
+  };
+  assert.ok(Array.isArray(response.scratchpads));
+  assert.equal(response.scratchpads[0].project, 'agentsystem');
+});
+
+test('POST /memory/remember payload validation', async (t) => {
+  const request = {
+    fact: 'This is a durable fact.',
+    tier: 'personal',
+    section: 'Session Notes'
+  };
+  assert.ok(request.fact);
+  assert.equal(request.tier, 'personal');
+});
+
+test('GET /memory/search query structure', async (t) => {
+  const request = {
+    agent: 'friday',
+    query: 'security audit'
+  };
+  assert.equal(request.agent, 'friday');
+  assert.equal(request.query, 'security audit');
+});
+
 // Cleanup test files
 test('cleanup', async (t) => {
   try { rmSync(TEST_REGISTRY_PATH); } catch {}
