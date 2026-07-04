@@ -33,13 +33,18 @@ node webhook-server.js
 
 ### Production Setup (Mini-PC)
 
-1. Copy files to mini-PC:
+1. Clone or sync the versioned repository to the mini-PC:
 ```bash
-scp tools/mission-control/webhook-server.js natha@mini-pc:/home/natha/bin/
-scp tools/mission-control/agy-persistence.js natha@mini-pc:/home/natha/bin/
+# Clone the repository
+git clone git@github.com:Zene8/AgentSystem.git /home/natha/dev/AgentSystem
 ```
 
-2. Create systemd service at /etc/systemd/system/claude-webhook.service:
+2. Symlink or copy the systemd service file to `/etc/systemd/system/`:
+```bash
+sudo ln -sf /home/natha/dev/AgentSystem/tools/mission-control/claude-webhook.service /etc/systemd/system/
+```
+
+The service configuration uses the repository directory directly:
 ```ini
 [Unit]
 Description=Claude Code Webhook Server
@@ -48,7 +53,8 @@ After=network-online.target
 [Service]
 Type=simple
 User=natha
-ExecStart=/usr/bin/node /home/natha/bin/webhook-server.js
+WorkingDirectory=/home/natha/dev/AgentSystem
+ExecStart=/usr/bin/node tools/mission-control/webhook-server.js
 Restart=always
 RestartSec=5
 StandardOutput=journal

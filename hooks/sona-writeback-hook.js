@@ -7,19 +7,82 @@
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const os = require('node:os');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 
 const TOOLS = process.env.AGENT_TOOLS_ROOT ||
-  path.resolve(__dirname, '..', 'tools');
+  'C:/Users/natha/dev/AgentSystem/tools';
+
+// Offset-tracking state file: this hook fires on every Stop/SubagentStop event, and a
+// long session can accumulate a large transcript. Re-reading the whole file from byte 0
+// on every fire is O(n^2) over a session. Instead we remember how many bytes we've
+// already consumed per transcript and only read the new tail each time.
+const STATE_DIR = path.join(os.homedir(), '.claude', 'hooks', '.state');
+const OFFSETS_FILE = path.join(STATE_DIR, 'sona-writeback-offsets.json');
+
+function loadOffsets() {
+  try {
+    return JSON.parse(fs.readFileSync(OFFSETS_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveOffsets(offsets) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(OFFSETS_FILE, JSON.stringify(offsets));
+  } catch {
+    // Non-fatal — worst case we re-read from 0 next time.
+  }
+}
+
+function offsetKey(transcriptPath) {
+  return crypto.createHash('md5').update(transcriptPath).digest('hex');
+}
+
+// Read only the bytes appended to transcriptPath since the last recorded offset for it.
+// Falls back to reading the whole file if the file shrank (rotated/truncated) or this is
+// the first time we've seen it. Returns { text, newOffset }.
+function readTranscriptTail(transcriptPath) {
+  const stat = fs.statSync(transcriptPath);
+  const offsets = loadOffsets();
+  const key = offsetKey(transcriptPath);
+  const lastOffset = offsets[key] || 0;
+
+  let text;
+  if (lastOffset > 0 && lastOffset <= stat.size) {
+    const fd = fs.openSync(transcriptPath, 'r');
+    try {
+      const len = stat.size - lastOffset;
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, lastOffset);
+      text = buf.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } else {
+    // First read of this transcript, or file was rotated/truncated — read it all.
+    text = fs.readFileSync(transcriptPath, 'utf8');
+  }
+
+  offsets[key] = stat.size;
+  saveOffsets(offsets);
+  return text;
+}
 
 // Parse a Claude Code JSONL transcript and extract episodic facts for SONA.
 // Transcript format: newline-delimited JSON. Each line is one of:
 //   { type: "queue-operation", ... }           — hook/system entries, skip
 //   { parentUuid, isSidechain, message: { role, content: [...] }, ... }  — conversation turns
+// Only the NEW bytes since the last invocation are read (see readTranscriptTail) — on a
+// long session this turns an O(n) full-file read on every Stop/SubagentStop into an O(delta)
+// read of just what's new.
 // Returns { task, files, outcome, agent } or null on any failure.
 function extractEpisodicFacts(transcriptPath) {
   try {
-    const raw = fs.readFileSync(transcriptPath, 'utf8');
+    const raw = readTranscriptTail(transcriptPath);
 
     // JSONL: split on newlines, parse each line individually.
     const lines = raw.split('\n').filter(l => l.trim());

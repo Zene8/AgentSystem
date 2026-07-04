@@ -1,0 +1,14 @@
+[Unit]
+Description=Claude Code Webhook Server
+After=network-online.target
+
+[Service]
+Type=simple
+User=natha
+WorkingDirectory=/home/natha/dev/AgentSystem
+ExecStart=/usr/bin/node tools/mission-control/webhook-server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PORT=8765

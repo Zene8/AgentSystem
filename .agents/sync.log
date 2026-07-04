@@ -1641,3 +1641,37 @@
 [2026-07-03 15:38:44] [INFO] Already present (idempotent): PreCompact -> bash "C:/Users/natha/.claude/hooks/context-handoff.sh"
 [2026-07-03 15:38:44] [INFO] settings.json unchanged (all entries already present)
 [2026-07-03 15:38:44] [SUCCESS] Hook sync complete
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): memory-context-inject.js
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): memory-router.js
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): memory-capture-hook.js
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): sona-writeback-hook.js
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): routine-dispatch.js
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): routines-context-inject.js
+[2026-07-03 15:53:02] [SUCCESS] Synced JS hook: tool-output-compress.js -> C:\Users\natha\.claude\hooks\tool-output-compress.js
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): session-start.sh
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): session-end.sh
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): user-prompt-submit.sh
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): guard-git.sh
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): wip-checkpoint.sh
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): session-close.sh
+[2026-07-03 15:53:02] [INFO] Skipped (unchanged): context-handoff.sh
+[2026-07-03 15:53:02] [INFO] settings.json loaded from C:\Users\natha\.claude\settings.json (size=15978)
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): SessionStart -> node "C:/Users/natha/.claude/hooks/memory-context-inject.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): SessionStart -> node "C:/Users/natha/.claude/hooks/routines-context-inject.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): SessionStart -> bash "C:/Users/natha/.claude/hooks/session-start.sh"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): UserPromptSubmit -> node "C:/Users/natha/.claude/hooks/memory-router.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): UserPromptSubmit -> node "C:/Users/natha/.claude/hooks/routine-dispatch.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): UserPromptSubmit -> bash "C:/Users/natha/.claude/hooks/user-prompt-submit.sh"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): SessionEnd -> node "C:/Users/natha/.claude/hooks/memory-capture-hook.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): SessionEnd -> bash "C:/Users/natha/.claude/hooks/session-close.sh"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): PostToolUse -> node "C:/Users/natha/.claude/hooks/routine-dispatch.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): PostToolUse -> bash "C:/Users/natha/.claude/hooks/wip-checkpoint.sh"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): PreToolUse -> bash "C:/Users/natha/.claude/hooks/guard-git.sh"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): Stop -> node "C:/Users/natha/.claude/hooks/sona-writeback-hook.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): Stop -> bash "C:/Users/natha/.claude/hooks/session-end.sh"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): SubagentStop -> node "C:/Users/natha/.claude/hooks/sona-writeback-hook.js"
+[2026-07-03 15:53:02] [INFO] Already present (idempotent): PreCompact -> bash "C:/Users/natha/.claude/hooks/context-handoff.sh"
+[2026-07-03 15:53:02] [SUCCESS] Merged hook: autoCompactWindow -> 150000
+[2026-07-03 15:53:02] [SUCCESS] Merged hook: PostToolUse -> node "C:/Users/natha/.claude/hooks/tool-output-compress.js"
+[2026-07-03 15:53:02] [SUCCESS] settings.json written: 2 entries added
+[2026-07-03 15:53:02] [SUCCESS] Hook sync complete

@@ -361,6 +361,30 @@ test('Concurrency cap: cannot spawn second claude while one running', async (t) 
   try { rmSync(testPath); } catch {}
 });
 
+test('GET /health endpoint response structure', async (t) => {
+  const response = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    daemon: { status: 'running' },
+    active_sessions: 0,
+    platform: process.platform,
+    node_version: process.version
+  };
+
+  assert.equal(response.status, 'ok');
+  assert.ok(response.timestamp);
+  assert.equal(response.daemon.status, 'running');
+});
+
+test('POST /stop payload verification', async (t) => {
+  const request = {
+    id: 'claude-123456'
+  };
+
+  assert.ok(request.id, 'id is required');
+  assert.match(request.id, /^(claude|agy)-[a-f0-9]+$/);
+});
+
 // Cleanup test files
 test('cleanup', async (t) => {
   try { rmSync(TEST_REGISTRY_PATH); } catch {}

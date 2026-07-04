@@ -57,7 +57,7 @@ if (-not (Test-Path $claudeHooks)) {
     New-Item -ItemType Directory -Path $claudeHooks -Force | Out-Null
 }
 
-$jsHookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js")
+$jsHookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js", "tool-output-compress.js")
 $shHookFiles = @("session-start.sh", "session-end.sh", "user-prompt-submit.sh", "guard-git.sh", "wip-checkpoint.sh", "session-close.sh", "context-handoff.sh")
 $copyFailed = $false
 
@@ -229,6 +229,13 @@ $injectEntries = @(
         matcher       = 'Write|Edit|NotebookEdit'
     },
     [PSCustomObject]@{
+        event         = 'PostToolUse'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/tool-output-compress.js`""
+        timeout       = 5
+        statusMessage = 'Compressing output...'
+    },
+    [PSCustomObject]@{
         event         = 'PreToolUse'
         type          = 'command'
         command       = "bash `"$claudeHooksNorm/guard-git.sh`""
@@ -267,6 +274,18 @@ $injectEntries = @(
 )
 
 $pendingMerges = [System.Collections.Generic.List[string]]::new()
+
+# Ensure autoCompact settings are configured
+if ($null -eq $settings.autoCompactEnabled -or $settings.autoCompactEnabled -ne $true) {
+    $settings | Add-Member -MemberType NoteProperty -Name 'autoCompactEnabled' -Value $true -Force -ErrorAction SilentlyContinue
+    $settings.autoCompactEnabled = $true
+    $pendingMerges.Add("autoCompactEnabled -> true")
+}
+if ($null -eq $settings.autoCompactWindow -or $settings.autoCompactWindow -ne 150000) {
+    $settings | Add-Member -MemberType NoteProperty -Name 'autoCompactWindow' -Value 150000 -Force -ErrorAction SilentlyContinue
+    $settings.autoCompactWindow = 150000
+    $pendingMerges.Add("autoCompactWindow -> 150000")
+}
 
 foreach ($entry in $injectEntries) {
     $event   = $entry.event
