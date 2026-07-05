@@ -19,7 +19,7 @@ After opening a PR, do not declare DONE until pr-guard passes: run `node tools/p
 ## identity-query-inline (hard)
 *Answer identity/lookup queries inline from graph-query, never spawn Jarvis*
 
-For identity/memory queries (who am I, what do you know about me, my preferences), answer INLINE using: node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access. Do NOT spawn a heavyweight agent. This path returns ~110 tokens vs 47k for a subagent call.
+For identity/memory queries (who am I, what do you know about me, my preferences), answer INLINE using: node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access. Do NOT spawn a heavyweight agent. This path returns ~110 tokens vs 47k for a subagent call.
 
 ## memory-write-back (hard)
 *Agents self-capture durable facts to memory the moment they judge them relevant*

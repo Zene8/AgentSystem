@@ -14,7 +14,7 @@ const { pathToFileURL } = require('url');
 
 const PB = '~/agent-memory/nexus/personal-brain';
 const TRUST_SCORES_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'trust-scores.md');
-const AGENT_TRUST_PATH = path.join(os.homedir(), 'AgentSystem', 'tools', 'agent-trust.js');
+const AGENT_TRUST_PATH = path.join(os.homedir(), 'dev', 'AgentSystem', 'tools', 'agent-trust.js');
 
 function classify(promptRaw) {
   const p = (promptRaw || '').toLowerCase().trim();

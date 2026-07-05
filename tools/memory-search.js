@@ -6,7 +6,7 @@
  * Optional path: Voyage AI embeddings if VOYAGE_API_KEY is set
  *
  * Usage:
- *   node ~/AgentSystem/tools/memory-search.js --query="auth bug fix" [--top=5]
+ *   node ~/dev/AgentSystem/tools/memory-search.js --query="auth bug fix" [--top=5]
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';

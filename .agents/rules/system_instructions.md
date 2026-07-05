@@ -18,7 +18,7 @@
 - Never bypass permission checks with --no-verify flags.
 
 ## Memory (shared graph brain)
-- **Preferred interface:** `node ~/AgentSystem/tools/memory.js <cmd>` — unified entrypoint for all memory operations.
+- **Preferred interface:** `node ~/dev/AgentSystem/tools/memory.js <cmd>` — unified entrypoint for all memory operations.
   - `memory recall <keywords...>` — query graph brain, records access for reconsolidation
   - `memory context [--core=N]` — startup orientation: user facts + project + recent SONA
   - `memory remember --fact="..." [--section="..."]` — write a durable fact, deduped automatically
@@ -26,7 +26,7 @@
   - `memory maintain [--if-stale=N] [--quiet]` — full maintenance pass
   - `memory help` — usage
 - **Underlying tools (still valid directly):**
-  - Retrieve: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access`
-  - Startup orientation: `node ~/AgentSystem/tools/memory-context.js`
-  - Write-back: `node ~/AgentSystem/tools/brain-remember.js --fact="..." --section="How I Like to Work"`
+  - Retrieve: `node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access`
+  - Startup orientation: `node ~/dev/AgentSystem/tools/memory-context.js`
+  - Write-back: `node ~/dev/AgentSystem/tools/brain-remember.js --fact="..." --section="How I Like to Work"`
 - Maintenance (split/decay/consolidate/reflect) runs automatically on session start when stale; no manual step needed.

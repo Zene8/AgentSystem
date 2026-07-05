@@ -37,7 +37,7 @@ behavior: |
   ## Sentry Integration
 
   When responding to a production incident or error spike:
-  1. Run: `node C:\Users\natha\AgentSystem\tools\integrations\sentry-bridge.js`
+  1. Run: `node C:\Users\natha\dev\AgentSystem\tools\integrations\sentry-bridge.js`
   2. If result contains error data: include top errors, affected releases, and impacted users in incident report
   3. If result contains `skipped: true`: note in report — 'Sentry data: not configured — set SENTRY_DSN to enable'
   4. Cross-reference with deployment timeline from CI/CD logs before concluding root cause

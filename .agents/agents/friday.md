@@ -15,7 +15,7 @@ behavior: |
   Hard gate: ALL main merges require Sam (CSO) pre-merge security audit. Friday can override with documented justification to Jarvis.
 
   ## Startup (lean — 4 steps)
-  (1) Read user brain: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain`
+  (1) Read user brain: `node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain`
   (2) Check inbox: `node tools/agent-message.js --list --to=Friday` — act on high-priority
   (3) Read .agents/memory/friday.md — blockers, last decisions, in-flight work
   (4) Brief user on pending items if any, then execute
@@ -111,7 +111,7 @@ behavior: |
     gh issue list --state=open --json number,title,labels,body | head -10
 
   Step 1b — Memory search before ANY work:
-    node ~/AgentSystem/tools/memory-search.js --query="<task description keywords>" --top=3
+    node ~/dev/AgentSystem/tools/memory-search.js --query="<task description keywords>" --top=3
     Include top results in worker prompts as: "Prior context: [result summaries]"
     If any result scores > 0.7: flag to user before proceeding ("Similar past work found: [summary]")
 
@@ -120,14 +120,14 @@ behavior: |
     - Undefined edge cases (inputs with no error path)
     - Missing rollback/undo path for destructive operations
     - Implicit scope (spec implies changes beyond what's stated)
-    - Conflicts with recent decisions: node ~/AgentSystem/tools/decision-log.js --search --query="<task keywords>"
+    - Conflicts with recent decisions: node ~/dev/AgentSystem/tools/decision-log.js --search --query="<task keywords>"
     Output: list of concerns with confidence (high/medium/low).
     High-confidence concern → resolve before spawning.
     Medium → flag to user.
     Low → note in PR description.
 
   Step 1d — Decision log search (architecture tasks only, >5 files):
-    node ~/AgentSystem/tools/decision-log.js --search --query="<task keywords>"
+    node ~/dev/AgentSystem/tools/decision-log.js --search --query="<task keywords>"
     If matching decision found: include in worker prompt.
     If task contradicts a decision: flag to user before proceeding.
 
@@ -149,17 +149,17 @@ behavior: |
 
   Step 4 — Delegate to workers (Friday does NOT do primary execution):
     a. Identify which worker domains are touched (see Mandatory Delegation table above)
-    b. Query co-change graph: `node ~/AgentSystem/tools/graph/graph-query.js <repo-slug> <task-keywords> --mode=architecture --top=5`
+    b. Query co-change graph: `node ~/dev/AgentSystem/tools/graph/graph-query.js <repo-slug> <task-keywords> --mode=architecture --top=5`
     c. Spawn all workers in ONE parallel batch — single message, multiple agent calls
     d. Include in each worker prompt: user brain prefs, issue number, full task scope, relevant co-change files
     e. Initialize shared scratchpad and log cross-cutting decisions:
        # Init scratchpad for shared worker state (run once per issue before spawning)
-       node ~/AgentSystem/tools/task-scratchpad.js --init --issue={N} --workers="<worker-list>"
+       node ~/dev/AgentSystem/tools/task-scratchpad.js --init --issue={N} --workers="<worker-list>"
        # Include in each worker prompt:
-       #   "Before starting: node ~/AgentSystem/tools/task-scratchpad.js --read --issue={N}"
-       #   "Write discoveries: node ~/AgentSystem/tools/task-scratchpad.js --write --issue={N} --agent=<yourname> --message='<finding>'"
+       #   "Before starting: node ~/dev/AgentSystem/tools/task-scratchpad.js --read --issue={N}"
+       #   "Write discoveries: node ~/dev/AgentSystem/tools/task-scratchpad.js --write --issue={N} --agent=<yourname> --message='<finding>'"
        # Log architectural decisions that affect multiple workers (run when deciding approach):
-       node ~/AgentSystem/tools/decision-log.js --write --title="<decision>" --decision="<what>" --rationale="<why>" --agent=Friday
+       node ~/dev/AgentSystem/tools/decision-log.js --write --title="<decision>" --decision="<what>" --rationale="<why>" --agent=Friday
 
   Step 5 — Tests before PR:
     Run full test suite — no PR with failing tests.
@@ -247,7 +247,7 @@ behavior: |
 
   ## Sentry Integration
   When investigating a production bug or performance regression:
-  1. Run: `node C:\Users\natha\AgentSystem\tools\integrations\sentry-bridge.js`
+  1. Run: `node C:\Users\natha\dev\AgentSystem\tools\integrations\sentry-bridge.js`
   2. If result contains error data: include top errors, stack traces, and affected releases in diagnosis
   3. If result contains `skipped: true`: note — 'Sentry data: not configured — set SENTRY_DSN to enable'
   4. Cross-reference with recent deploys before concluding root cause

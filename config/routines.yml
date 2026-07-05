@@ -42,7 +42,7 @@
   mechanism: agent-rule
   enforce: hard
   enabled: true
-  action: "For identity/memory queries (who am I, what do you know about me, my preferences), answer INLINE using: node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access. Do NOT spawn a heavyweight agent. This path returns ~110 tokens vs 47k for a subagent call."
+  action: "For identity/memory queries (who am I, what do you know about me, my preferences), answer INLINE using: node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> --brain-path=~/agent-memory/nexus/personal-brain --record-access. Do NOT spawn a heavyweight agent. This path returns ~110 tokens vs 47k for a subagent call."
 
 - id: memory-write-back
   description: Agents self-capture durable facts to memory the moment they judge them relevant
