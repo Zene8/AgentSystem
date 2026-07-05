@@ -5,17 +5,36 @@
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve, relative, extname } from 'node:path';
+import { homedir } from 'node:os';
 import {
   emptyGraph, readGraph, writeGraph,
   addNode, addEdge, pruneOrphanedEdges,
   recomputeComposite, serializeFrontmatter,
 } from './graph-lib.js';
 
-const slug = process.argv[2];
-const repoPath = resolve(process.argv[3] || process.cwd());
-if (!slug) { console.error('Usage: graph-init.js <project-slug> [repo-path]'); process.exit(1); }
+function expandTilde(p) {
+  return p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p;
+}
 
-const nexusDir = join(repoPath, 'nexus', slug);
+const rawArgs = process.argv.slice(2);
+const flags = {};
+const positional = [];
+for (const a of rawArgs) {
+  if (a.startsWith('--')) {
+    const [k, v] = a.slice(2).split('=');
+    flags[k] = v ?? true;
+  } else {
+    positional.push(a);
+  }
+}
+
+const [slug, repoPathArg] = positional;
+const repoPath = resolve(repoPathArg || process.cwd());
+if (!slug) { console.error('Usage: graph-init.js <project-slug> [repo-path] [--brain-path=PATH]'); process.exit(1); }
+
+const nexusDir = flags['brain-path']
+  ? resolve(expandTilde(flags['brain-path']))
+  : join(repoPath, 'nexus', slug);
 const nodesDir = join(nexusDir, 'nodes');
 const graphPath = join(nexusDir, 'graph.json');
 

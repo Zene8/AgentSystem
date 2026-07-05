@@ -6,18 +6,37 @@
 //   node tools/graph/graph-weight.js deprecate  <slug> <node-id>
 
 import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readGraph, writeGraph, updateVisitCount, updateConfidence } from './graph-lib.js';
 
-const [,, command, slug, ...rest] = process.argv;
+function expandTilde(p) {
+  return p && p.startsWith('~') ? join(homedir(), p.slice(1)) : p;
+}
+
+const rawArgs = process.argv.slice(2);
+const flags = {};
+const positional = [];
+for (const a of rawArgs) {
+  if (a.startsWith('--')) {
+    const [k, v] = a.slice(2).split('=');
+    flags[k] = v ?? true;
+  } else {
+    positional.push(a);
+  }
+}
+
+const [command, slug, ...rest] = positional;
 const COMMANDS = ['visit', 'confidence', 'deprecate'];
 
 if (!command || !COMMANDS.includes(command) || !slug) {
-  console.error(`Usage: graph-weight.js <${COMMANDS.join('|')}> <slug> ...`);
+  console.error(`Usage: graph-weight.js <${COMMANDS.join('|')}> <slug> ... [--brain-path=PATH]`);
   process.exit(1);
 }
 
-const nexusDir = join(process.cwd(), 'nexus', slug);
+const nexusDir = flags['brain-path']
+  ? resolve(expandTilde(flags['brain-path']))
+  : join(process.cwd(), 'nexus', slug);
 const graphPath = join(nexusDir, 'graph.json');
 
 if (!existsSync(graphPath)) {

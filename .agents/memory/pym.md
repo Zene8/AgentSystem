@@ -1,3 +1,5 @@
+> **DEPRECATED (see #117):** this file is not read by any current tool. The live memory system is the graph brain under `~/agent-memory/nexus/` (query via `tools/graph/graph-query.js`). Kept as historical/manual scratch notes only — do not rely on it being current.
+
 # Pym Memory & Decision Log
 
 **Last updated:** 2026-05-25
