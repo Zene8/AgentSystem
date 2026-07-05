@@ -218,22 +218,21 @@ function renderSubagent(ctx) {
   return out;
 }
 
+// #122: compact single-block render (was 4 headed paragraphs w/ blank-line padding) — same
+// facts, ~40% fewer bytes injected at SessionStart. Full querying instructions still available
+// via graph-query.js directly; this only trims the inline prose around each fact line.
 function render(ctx) {
-  const lines = [];
-  lines.push('## Memory Context');
-  lines.push('');
   const remainder = ctx.userTotal - ctx.userCore.length;
-  const moreHint = remainder > 0 ? ` (+${remainder} more — query with graph-query)` : '';
-  lines.push(`**User (top ${ctx.userCore.length} of ${ctx.userTotal}, by importance):** ${ctx.userCore.join(', ') || '(none)'}${moreHint}`);
-  lines.push('');
-  if (ctx.slug) {
-    lines.push(`**Project [${ctx.slug}]:** ${ctx.projectNodes} nodes in brain — query: \`graph-query.js ${ctx.slug} <keywords>\` (run from repo root)`);
-  } else {
-    lines.push('**Project:** cwd not in a registered repo');
-  }
-  lines.push('');
-  lines.push(`**Recent patterns:** ${ctx.sona.join(' | ') || '(none)'}`);
-  return lines.join('\n');
+  const moreHint = remainder > 0 ? ` (+${remainder} more)` : '';
+  const project = ctx.slug
+    ? `[${ctx.slug}] ${ctx.projectNodes} nodes`
+    : 'not in a registered repo';
+  return [
+    '## Memory Context',
+    `User (top ${ctx.userCore.length}/${ctx.userTotal}): ${ctx.userCore.join(', ') || '(none)'}${moreHint}`,
+    `Project: ${project} — query: graph-query.js <slug> <keywords>`,
+    `Recent: ${ctx.sona.join(' | ') || '(none)'}`,
+  ].join('\n');
 }
 
 const isMain = process.argv[1] &&
