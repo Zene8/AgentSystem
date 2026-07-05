@@ -9,8 +9,9 @@
 // Modes (any combination; default with no flags is report-only, no writes):
 //   --fix           Apply importance tuning (boost accessed nodes, decay stale ones), write back
 //   --sona          Compact sona-patterns.md (archive >30d entries, cap live file), write back
+//   --routing-log   Cap routing-log.jsonl (#124) by line count/bytes, archive overflow (#117 policy)
 //   --avoid-facts   Scan SONA success:no entries, write "avoid" facts into agent-brain
-//   --all           Shorthand for --fix --sona --avoid-facts
+//   --all           Shorthand for --fix --sona --routing-log --avoid-facts
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,6 +26,11 @@ const BASELINE_IMPORTANCE = 0.5;
 const STALE_DECAY_DAYS = 30; // never accessed in this many days -> eligible for decay
 const SONA_MAX_ENTRIES = 200;
 const SONA_MAX_BYTES = 40 * 1024;
+// #124/#117: routing-log.jsonl gets the same cap-and-archive treatment as sona-patterns.md —
+// it's an unbounded append-only log fed by hooks/memory-router.js + hooks/sona-writeback-hook.js
+// on every prompt/Stop, so left unmanaged it grows without bound.
+const ROUTING_LOG_MAX_LINES = 5000;
+const ROUTING_LOG_MAX_BYTES = 2 * 1024 * 1024;
 const SONA_ARCHIVE_AGE_DAYS = 30;
 
 // Pure: read visits.log JSONL, return Map<nodeId, {count, lastVisited}>.
@@ -120,6 +126,51 @@ export function planSonaCompaction(entries, now = Date.now(), {
     bytes -= Buffer.byteLength(victim.raw, 'utf8');
   }
   return { keep, archive };
+}
+
+// Pure: cap JSONL routing-log lines by count and total bytes, oldest-first eviction. Unlike
+// SONA entries (which carry a parseable date), routing-log.jsonl is strictly append-only, so
+// array order already implies chronological order — no age parsing needed.
+export function planRoutingLogCompaction(lines, {
+  maxLines = ROUTING_LOG_MAX_LINES, maxBytes = ROUTING_LOG_MAX_BYTES,
+} = {}) {
+  const nonEmpty = lines.filter(l => l.trim());
+  let keep = nonEmpty.slice();
+  const archive = [];
+  let bytes = keep.reduce((s, l) => s + Buffer.byteLength(l, 'utf8') + 1, 0);
+  while ((keep.length > maxLines || bytes > maxBytes) && keep.length > 0) {
+    const victim = keep.shift();
+    archive.push(victim);
+    bytes -= Buffer.byteLength(victim, 'utf8') + 1;
+  }
+  return { keep, archive };
+}
+
+function compactRoutingLog(nexus, quiet) {
+  const logPath = join(nexus, 'routing-log.jsonl');
+  if (!existsSync(logPath)) {
+    if (!quiet) console.log('  [routing-log] no routing-log.jsonl, skipping');
+    return { archived: 0, kept: 0 };
+  }
+  const raw = readFileSync(logPath, 'utf8');
+  const lines = raw.split('\n');
+  const { keep, archive } = planRoutingLogCompaction(lines);
+  if (archive.length === 0) {
+    if (!quiet) console.log(`  [routing-log] ${keep.length} entries, under cap — no compaction needed`);
+    return { archived: 0, kept: keep.length };
+  }
+
+  const archiveDir = join(nexus, 'routing-log-archive');
+  mkdirSync(archiveDir, { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 10);
+  const archivePath = join(archiveDir, `routing-log-archive-${stamp}.jsonl`);
+  appendFileSync(archivePath, archive.join('\n') + '\n', 'utf8');
+  writeFileSync(logPath, keep.length ? keep.join('\n') + '\n' : '', 'utf8');
+
+  if (!quiet) {
+    console.log(`  [routing-log] archived ${archive.length}, kept ${keep.length} (${archivePath})`);
+  }
+  return { archived: archive.length, kept: keep.length };
 }
 
 // Pure: cluster archived entries by a coarse task-type key (first two words of the id tag,
@@ -255,6 +306,10 @@ if (isMain) {
     compactSona(nexus, quiet);
   }
 
+  if (doAll || flags['routing-log']) {
+    compactRoutingLog(nexus, quiet);
+  }
+
   if (doAll || flags['avoid-facts']) {
     const sonaPath = join(nexus, 'sona-patterns.md');
     const entries = existsSync(sonaPath) ? parseEntries(readFileSync(sonaPath, 'utf8')) : [];
@@ -262,7 +317,7 @@ if (isMain) {
     writeAvoidFacts(nexus, facts, quiet);
   }
 
-  if (!doAll && !flags.fix && !flags.sona && !flags['avoid-facts']) {
+  if (!doAll && !flags.fix && !flags.sona && !flags['routing-log'] && !flags['avoid-facts']) {
     if (!quiet) console.log('  (report-only run — pass --fix, --sona, --avoid-facts, or --all to apply changes)');
   }
 }

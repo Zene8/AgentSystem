@@ -38,8 +38,14 @@ test('one-off script task falls back to r2d2', () => {
   assert.match(out, /r2d2/);
 });
 
-test('matchDomain returns empty string when nothing matches', () => {
-  assert.strictEqual(matchDomain('hello there, how is your day'), '');
+test('matchDomain returns null when nothing matches', () => {
+  assert.strictEqual(matchDomain('hello there, how is your day'), null);
+});
+
+test('matchDomain returns the rule id alongside the display hint', () => {
+  const m = matchDomain('write a database migration for the schema');
+  assert.equal(m.id, 'schema');
+  assert.match(m.agentDisplay, /Friday/);
 });
 
 // #121: task-aware retrieval helpers.

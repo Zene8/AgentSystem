@@ -1,0 +1,23 @@
+# Single source of truth for prompt-routing rules (#124, complements #114's dedup fix).
+# Consumed by:
+#   - hooks/routing-config.js -> hooks/memory-router.js (the live UserPromptSubmit hint)
+#   - tools/generate-routing-table.js -> .agents/agents/jarvis.md's routing table
+# Format (NOT real YAML — deliberately dependency-free, parsed by a 6-line splitter):
+#   one rule per non-comment/non-blank line, pipe-delimited, matched top-to-bottom, first hit wins.
+#   id | regex | agent_short | command | hint_display | keywords_display
+#
+# id               short slug, used as the routing-log.jsonl / routing-report.js branch key
+# regex            JS regex source (no slashes), tested against the lowercased prompt
+# agent_short      plain agent name, used in jarvis.md's "Route to" column
+# command          CLI invocation shown in jarvis.md's "Command" column
+# hint_display     full text used in the router's advisory hint (may include a clause
+#                   noting the domain lead dispatches a worker-tier agent internally)
+# keywords_display human-readable keyword list for jarvis.md's "Task signal" column
+
+infra | \b(deploy|ci\/?cd|pipeline|infra|terraform|runner|docker|kubernetes)\b | Friday | claude @friday | Friday (engineering — dispatches Leo for infra/CI) | deploy, CI/CD, pipeline, infra, terraform, runner, docker, kubernetes
+security | \b(security audit|vulnerab|cve|compliance audit|secrets? (leak|exposure|scan)|phi\b) | Sam | claude @sam | Sam (security — hard gate on main merges) | security audit, vulnerability, CVE, compliance audit, secrets leak/exposure, PHI
+schema | \b(schema|migration|prisma|sql|database|query plan)\b | Friday | claude @friday | Friday (engineering — dispatches Pym for schema/DB) | schema, migration, prisma, SQL, database, query plan
+business | \b(pricing|gtm|revenue|market|sales|forecast|strategy|customer)\b | Nat | claude @nat | Nat (business) | pricing, GTM, revenue, market, sales, forecast, strategy, customer
+docs | \b(readme|changelog|docs|documentation|release notes|announcement)\b | Threepio | claude @threepio | Threepio (docs) | README, changelog, docs, documentation, release notes, announcement
+engineering | \b(code|bug|fix|refactor|api|test|pr|merge|build|backend|frontend|component)\b | Friday | claude @friday | Friday (engineering — dispatches Ultron/Astra/etc) | code, bug, fix, refactor, API, test, PR, merge, build, backend, frontend, component
+utility | \b(one-?off script|quick calculation|quick lookup|web lookup|utility task)\b | r2d2 | claude @r2d2 | r2d2 (general technical worker — no domain lead fit) | one-off scripts, web lookups, quick calculations, explicitly non-domain utility tasks
