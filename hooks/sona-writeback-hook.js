@@ -187,7 +187,30 @@ function writeEpisodicNode(facts, transcriptPath) {
   }
 }
 
+// #118: extraction (transcript tail read + JSONL parse) used to run synchronously on the
+// main hook process before it could exit. On a slow cold start or a large transcript delta
+// this can exceed the hook's configured timeout (5s in settings.json), silently dropping the
+// episodic write when the harness kills the process. Fix: do NOT extract inline. Immediately
+// re-spawn this same script in a detached `--worker` mode that does the extraction AND the
+// write-back, then exit the foreground process with 'OK' right away — mirroring the existing
+// fire-and-forget pattern already used by hooks/memory-capture-hook.js.
 if (require.main === module) {
+  const workerFlagIdx = process.argv.indexOf('--worker');
+
+  if (workerFlagIdx !== -1) {
+    // Detached worker mode: argv[workerFlagIdx + 1] is the transcript path.
+    const transcriptPath = process.argv[workerFlagIdx + 1];
+    try {
+      if (transcriptPath) {
+        const facts = extractEpisodicFacts(transcriptPath);
+        if (facts) writeEpisodicNode(facts, transcriptPath);
+      }
+    } catch {
+      // Non-fatal — worker has no one to report to.
+    }
+    process.exit(0);
+  }
+
   let transcriptPath = null;
 
   try {
@@ -205,10 +228,11 @@ if (require.main === module) {
   }
 
   try {
-    const facts = extractEpisodicFacts(transcriptPath);
-    if (facts) {
-      writeEpisodicNode(facts, transcriptPath);
-    }
+    const child = spawn(process.execPath, [__filename, '--worker', transcriptPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
   } catch {
     // Non-fatal — never block session end.
   }
