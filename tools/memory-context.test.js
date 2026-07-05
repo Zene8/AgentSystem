@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectProject, selectCoreFacts, relevantSona } from './memory-context.js';
+import { detectProject, detectRepo, selectCoreFacts, relevantSona } from './memory-context.js';
+import { resolveRepoBrainDir, resolveRepoGraphPath } from './graph/graph-lib.js';
+import { sep } from 'node:path';
 
 const reg = { repos: [
   { slug: 'agentsystem', path: 'C:/Users/natha/dev/AgentSystem' },
@@ -19,6 +21,33 @@ test('detectProject returns null outside any repo', () => {
 
 test('detectProject longest-prefix wins for nested-name repos', () => {
   assert.strictEqual(detectProject('D:/Documents/DEV/basely-brain/docs', reg), 'basely-brain');
+});
+
+test('detectRepo returns the full registry entry, not just the slug', () => {
+  const repo = detectRepo('C:/Users/natha/dev/AgentSystem/tools', reg);
+  assert.strictEqual(repo.slug, 'agentsystem');
+  assert.strictEqual(repo.path, 'C:/Users/natha/dev/AgentSystem');
+});
+
+test('detectRepo returns null outside any repo', () => {
+  assert.strictEqual(detectRepo('C:/Users/natha/Desktop', reg), null);
+});
+
+test('resolveRepoGraphPath uses brain_path when present (relative to repo.path)', () => {
+  const repo = { slug: 'agentsystem', path: 'C:/Users/natha/dev/AgentSystem', brain_path: 'nexus/agentsystem/graph.json' };
+  assert.strictEqual(resolveRepoBrainDir(repo), 'C:/Users/natha/dev/AgentSystem/nexus/agentsystem'.replace(/\//g, sep));
+  assert.strictEqual(resolveRepoGraphPath(repo), 'C:/Users/natha/dev/AgentSystem/nexus/agentsystem/graph.json'.replace(/\//g, sep));
+});
+
+test('resolveRepoGraphPath falls back to nexus/<slug> when brain_path is absent', () => {
+  const repo = { slug: 'basely', path: 'D:/Documents/DEV/Basely' };
+  assert.strictEqual(resolveRepoGraphPath(repo), 'D:/Documents/DEV/Basely/nexus/basely/graph.json'.replace(/\//g, sep));
+});
+
+test('resolveRepoGraphPath/resolveRepoBrainDir return null when repo is null or has no path', () => {
+  assert.strictEqual(resolveRepoBrainDir(null), null);
+  assert.strictEqual(resolveRepoGraphPath(null), null);
+  assert.strictEqual(resolveRepoBrainDir({ slug: 'x' }), null);
 });
 
 test('selectCoreFacts returns exactly N ids for N < total', () => {
