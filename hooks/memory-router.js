@@ -16,6 +16,36 @@ const PB = '~/agent-memory/nexus/personal-brain';
 const TRUST_SCORES_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'trust-scores.md');
 const AGENT_TRUST_PATH = path.join(os.homedir(), 'dev', 'AgentSystem', 'tools', 'agent-trust.js');
 
+// Single source of truth for domain routing, shared by classify() and the CLI trust-lookup
+// path below (#114: previously duplicated as two independently-maintained regex lists that
+// had drifted — this table is matched top-to-bottom, first hit wins, mirroring jarvis.md's
+// routing table).
+// #114: infra/deploy/CI and schema/migration/DB route to Friday (CTO), matching jarvis.md.
+// Friday is the domain lead and dispatches worker-tier agents (Leo for infra, Pym for schema)
+// internally — routing straight to Leo/Pym here contradicted jarvis.md and let prompts bypass
+// Friday's ownership entirely.
+// #114: bare "audit" (e.g. "audit my config") is not itself a security signal and was
+// misrouting non-security work to Sam — tightened to require an explicit security phrase.
+// #114: r2d2 fallback added for one-off scripts/lookups/utility tasks with no domain-lead fit,
+// mirroring jarvis.md's "one-off scripts, web lookups, quick calculations" → r2d2 row.
+const DOMAIN_RULES = [
+  [/\b(deploy|ci\/?cd|pipeline|infra|terraform|runner|docker|kubernetes)\b/, 'Friday (engineering — dispatches Leo for infra/CI)'],
+  [/\b(security audit|vulnerab|cve|compliance audit|secrets? (leak|exposure|scan)|phi\b)/, 'Sam (security — hard gate on main merges)'],
+  [/\b(schema|migration|prisma|sql|database|query plan)\b/, 'Friday (engineering — dispatches Pym for schema/DB)'],
+  [/\b(pricing|gtm|revenue|market|sales|forecast|strategy|customer)\b/, 'Nat (business)'],
+  [/\b(readme|changelog|docs|documentation|release notes|announcement)\b/, 'Threepio (docs)'],
+  [/\b(code|bug|fix|refactor|api|test|pr|merge|build|backend|frontend|component)\b/, 'Friday (engineering — dispatches Ultron/Astra/etc)'],
+  [/\b(one-?off script|quick calculation|quick lookup|web lookup|utility task)\b/, 'r2d2 (general technical worker — no domain lead fit)'],
+];
+
+// Returns the agent display name for the first matching rule, or '' if none match.
+function matchDomain(p) {
+  for (const [re, agentDisplay] of DOMAIN_RULES) {
+    if (re.test(p)) return agentDisplay;
+  }
+  return '';
+}
+
 function classify(promptRaw) {
   const p = (promptRaw || '').toLowerCase().trim();
   if (!p) return '';
@@ -26,15 +56,8 @@ function classify(promptRaw) {
       `Use: node tools/graph/graph-query.js personal-brain <keywords> --brain-path=${PB} --record-access`;
   }
 
-  // Strong domain signals → suggest the lead (advisory; main loop still decides).
-  if (/\b(deploy|ci\/?cd|pipeline|infra|terraform|runner|docker|kubernetes)\b/.test(p)) return hint('Leo (DevOps)');
-  if (/\b(security|vulnerab|audit|cve|secret|phi|compliance)\b/.test(p)) return hint('Sam (security — hard gate on main merges)');
-  if (/\b(schema|migration|prisma|sql|database|query plan)\b/.test(p)) return hint('Pym (database)');
-  if (/\b(pricing|gtm|revenue|market|sales|forecast|strategy|customer)\b/.test(p)) return hint('Nat (business)');
-  if (/\b(readme|changelog|docs|documentation|release notes|announcement)\b/.test(p)) return hint('Threepio (docs)');
-  if (/\b(code|bug|fix|refactor|api|test|pr|merge|build|backend|frontend|component)\b/.test(p)) return hint('Friday (engineering — dispatches Ultron/Astra/etc)');
-
-  return '';
+  const matched = matchDomain(p);
+  return matched ? hint(matched) : '';
 }
 
 function hint(agentDisplay) {
@@ -56,7 +79,7 @@ async function augmentWithTrust(baseHint, agentDisplay) {
   }
 }
 
-module.exports = { classify };
+module.exports = { classify, matchDomain, DOMAIN_RULES };
 
 if (require.main === module) {
   let input = '';
@@ -65,15 +88,10 @@ if (require.main === module) {
     let prompt = '';
     try { prompt = JSON.parse(input || '{}').prompt || ''; } catch { /* ignore */ }
 
-    // Identify which domain branch matched to pass its agent display name for trust lookup.
+    // Identify which domain branch matched to pass its agent display name for trust lookup
+    // (single source of truth: DOMAIN_RULES, see #114).
     const p = (prompt || '').toLowerCase().trim();
-    let matched = '';
-    if (/\b(deploy|ci\/?cd|pipeline|infra|terraform|runner|docker|kubernetes)\b/.test(p)) matched = 'Leo (DevOps)';
-    else if (/\b(security|vulnerab|audit|cve|secret|phi|compliance)\b/.test(p)) matched = 'Sam (security — hard gate on main merges)';
-    else if (/\b(schema|migration|prisma|sql|database|query plan)\b/.test(p)) matched = 'Pym (database)';
-    else if (/\b(pricing|gtm|revenue|market|sales|forecast|strategy|customer)\b/.test(p)) matched = 'Nat (business)';
-    else if (/\b(readme|changelog|docs|documentation|release notes|announcement)\b/.test(p)) matched = 'Threepio (docs)';
-    else if (/\b(code|bug|fix|refactor|api|test|pr|merge|build|backend|frontend|component)\b/.test(p)) matched = 'Friday (engineering — dispatches Ultron/Astra/etc)';
+    const matched = matchDomain(p);
 
     const base = classify(prompt);
     const augmented = matched ? await augmentWithTrust(base, matched) : base;
