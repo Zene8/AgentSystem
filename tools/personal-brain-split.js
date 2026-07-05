@@ -56,6 +56,10 @@ function extractKeywords(text) {
     .slice(0, 3);
 }
 
+// Unfilled template placeholder bullets (e.g. "[Add your preferences here]",
+// "[Goal 1]", "[e.g. React, Postgres]") — never real user facts, must not become nodes.
+const PLACEHOLDER_RE = /\[\s*(add your|e\.g\.|your |goal\s*\d|project name|list your)/i;
+
 // Parse user-brain.md → { section, text } candidates (one per bullet).
 export function parseBrainCandidates(raw) {
   const candidates = [];
@@ -66,8 +70,11 @@ export function parseBrainCandidates(raw) {
     const bulletMatch = line.match(/^[-*]\s+(.+)$/);
     if (bulletMatch) {
       const text = bulletMatch[1].trim();
-      // Skip superseded facts (struck-through by memory-reconcile UPDATE).
-      if (text && !text.startsWith('~~')) candidates.push({ section: currentSection, text: `- ${text}` });
+      // Skip superseded facts (struck-through by memory-reconcile UPDATE) and
+      // unfilled template placeholders (bracketed instructional text).
+      if (text && !text.startsWith('~~') && !PLACEHOLDER_RE.test(text)) {
+        candidates.push({ section: currentSection, text: `- ${text}` });
+      }
     }
   }
   return candidates;

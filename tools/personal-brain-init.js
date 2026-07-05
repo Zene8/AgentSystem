@@ -39,10 +39,13 @@ const content = `# ${name}'s Brain — Personal Context for All Agents
 
 ## Who I Am
 
-- [Your role — e.g., solo founder, developer, team lead]
-- Subscriptions: [e.g., Claude Max, Gemini Pro, GitHub Copilot]
-- Primary repos: [list your repos]
-- Communication style: [e.g., direct, concise, no fluff]
+<!-- Edit this file to add real bullets, e.g.:
+- Your role — e.g., solo founder, developer, team lead
+- Subscriptions: e.g., Claude Max, Gemini Pro, GitHub Copilot
+- Primary repos: list your repos
+- Communication style: e.g., direct, concise, no fluff
+-->
+
 
 ---
 
@@ -53,28 +56,33 @@ const content = `# ${name}'s Brain — Personal Context for All Agents
 - TDD: tests first, code passes them
 - SOLID principles throughout
 - No premature abstraction
-- [Add your preferences here]
+<!-- - Add your own code-style preferences here -->
+
 
 ### Workflow preferences
 - Always branch from \`dev\`, never from \`main\`
 - PR to \`dev\`, squash merge
 - Conventional commits: \`feat:\`, \`fix:\`, \`refactor:\`, \`test:\`, \`chore:\`
 - Complex task = 2 issues (design + implementation); simple = 1 issue
-- [Add your preferences here]
+<!-- - Add your own workflow preferences here -->
+
 
 ### What I don't want
 - Asking for confirmation on reversible actions
 - Long summaries of what you just did
 - Rebuilding things that already exist
-- [Add your preferences here]
+<!-- - Add anything else you don't want here -->
+
 
 ---
 
 ## Current Goals (update regularly)
 
-### [Project Name]
-- [Goal 1]
-- [Goal 2]
+<!-- ### Project Name
+- Goal 1
+- Goal 2
+-->
+
 
 ---
 
@@ -82,14 +90,16 @@ const content = `# ${name}'s Brain — Personal Context for All Agents
 
 | Repo | Status | Current Focus |
 |------|--------|---------------|
-| [repo-name] | Active | [what's in progress] |
+<!-- | repo-name | Active | what's in progress | -->
+
 
 ---
 
 ## Technical Preferences
 
-- Language: [your primary language]
-- [Other preferences]
+<!-- - Language: your primary language
+- Other preferences -->
+
 
 ---
 
