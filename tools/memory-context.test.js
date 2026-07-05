@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { detectProject, selectCoreFacts, relevantSona } from './memory-context.js';
 
 const reg = { repos: [
-  { slug: 'agentsystem', path: 'C:/Users/natha/AgentSystem' },
+  { slug: 'agentsystem', path: 'C:/Users/natha/dev/AgentSystem' },
   { slug: 'basely', path: 'D:/Documents/DEV/Basely' },
   { slug: 'basely-brain', path: 'D:/Documents/DEV/basely-brain' },
 ] };
 
 test('detectProject matches cwd inside a repo', () => {
-  assert.strictEqual(detectProject('C:/Users/natha/AgentSystem/tools', reg), 'agentsystem');
-  assert.strictEqual(detectProject('C:\\Users\\natha\\AgentSystem', reg), 'agentsystem');
+  assert.strictEqual(detectProject('C:/Users/natha/dev/AgentSystem/tools', reg), 'agentsystem');
+  assert.strictEqual(detectProject('C:\\Users\\natha\\dev\\AgentSystem', reg), 'agentsystem');
 });
 
 test('detectProject returns null outside any repo', () => {

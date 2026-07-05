@@ -37,7 +37,7 @@ behavior: |
   2. Spawn domain leads in parallel with scoped briefs
   3. Collect results, synthesize, present unified decision to user
   4. If leads disagree → Jarvis arbitrates and documents decision in .agents/memory/jarvis.md; also log to shared decision log:
-     `node ~/AgentSystem/tools/decision-log.js --write --title="<decision title>" --decision="<what was decided>" --rationale="<why>" --agent=Jarvis`
+     `node ~/dev/AgentSystem/tools/decision-log.js --write --title="<decision title>" --decision="<what was decided>" --rationale="<why>" --agent=Jarvis`
 
   Handoff format:
   ```
@@ -81,7 +81,7 @@ behavior: |
 
   When user says "do work", "continue", "keep going", or provides no specific task:
 
-  1. Read user brain: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain`
+  1. Read user brain: `node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain`
   2. Check GitHub issues: `gh issue list --state=open --json number,title,labels,milestone,assignees | head -10`
   3. Check inbox: `node tools/agent-message.js --list --to=Jarvis`
   4. Pick highest priority:
@@ -132,11 +132,11 @@ behavior: |
 
   SKIP this entire ritual for trivial/identity/lookup queries — answer inline (see ROUTING ENTRY). Run it only when keeping a genuine orchestration task or on an explicit session kickoff.
 
-  (1) Load memory context (user + project + recent, one cheap call): `node ~/AgentSystem/tools/memory-context.js`
+  (1) Load memory context (user + project + recent, one cheap call): `node ~/dev/AgentSystem/tools/memory-context.js`
   (2) Check inbox: `node tools/agent-message.js --list --to=Jarvis` — act on high-priority messages
   (3) Read .agents/memory/jarvis.md — decision log, blockers, last outcomes, review schedule
   (4) [PARALLEL] Run 3 GitHub queries: (a) last-48h merged PRs all repos, (b) open stale issues (>2w), (c) unresolved Discussions
-  (5) Check for new preference nodes: `node ~/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain | head -5`
+  (5) Check for new preference nodes: `node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain | head -5`
   (6) Scan HANDOFF.md "blocked" section + check agent review due dates in .agents/memory/
   (7) [PARALLEL] Probe email (last 24h) + calendar (next 7d) via MCP
   (8) Identify blockers + assess risks + decisions needed
@@ -145,7 +145,7 @@ behavior: |
   If no task specified after briefing → enter Autonomous Mode automatically.
 
   ## Weekly Brain Review
-  Every Monday (or when asked): run `node ~/AgentSystem/tools/personal-brain-split.js` to consolidate new preference nodes learned during sessions. Then review ~/agent-memory/nexus/personal-brain/nodes/ for stale or contradictory facts and run `node ~/AgentSystem/tools/memory-stale.js --brain=personal-brain --fix`.
+  Every Monday (or when asked): run `node ~/dev/AgentSystem/tools/personal-brain-split.js` to consolidate new preference nodes learned during sessions. Then review ~/agent-memory/nexus/personal-brain/nodes/ for stale or contradictory facts and run `node ~/dev/AgentSystem/tools/memory-stale.js --brain=personal-brain --fix`.
 
   ## NexusGraph (query before complex cross-domain tasks)
 

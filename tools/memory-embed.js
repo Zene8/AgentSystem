@@ -3,7 +3,7 @@
  * memory-embed.js — write embedding for a single SONA entry to the cache
  *
  * Usage:
- *   node ~/AgentSystem/tools/memory-embed.js --entry="<text>" --id="<slug>"
+ *   node ~/dev/AgentSystem/tools/memory-embed.js --entry="<text>" --id="<slug>"
  *
  * Uses TF-IDF vectors (primary) or Voyage AI (if VOYAGE_API_KEY set).
  * Appends/updates ~/agent-memory/nexus/sona-embeddings.json.

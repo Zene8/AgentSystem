@@ -16,8 +16,8 @@
 param([switch]$Uninstall)
 
 $NodePath  = (Get-Command node -ErrorAction Stop).Source
-$ToolsRoot = "C:\Users\natha\AgentSystem\tools"
-$LogDir    = "C:\Users\natha\AgentSystem\logs"
+$ToolsRoot = "C:\Users\natha\dev\AgentSystem\tools"
+$LogDir    = "C:\Users\natha\dev\AgentSystem\logs"
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force $LogDir | Out-Null }
 

@@ -40,7 +40,7 @@ if (require.main === module) {
       if (/\b(who am i|what.?s my name|what do you know about me|my (preferences|profile)|remind me who i am)\b/.test(prompt)) {
         hints.push(
           'ROUTINE [identity-query-inline]: Answer this identity query INLINE — do NOT spawn a heavyweight agent. ' +
-          'Run: node ~/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> ' +
+          'Run: node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> ' +
           '--brain-path=~/agent-memory/nexus/personal-brain --record-access'
         );
       }
