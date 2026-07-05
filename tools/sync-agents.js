@@ -24,15 +24,24 @@ const MODELS = {
   gemini:  { jarvis:'gemini-3.1-pro-preview', sam:'gemini-3.1-pro-preview', friday:'gemini-3-flash-preview', nat:'gemini-3-flash-preview', ultron:'gemini-3.1-flash-lite-preview', pym:'gemini-3.1-flash-lite-preview', leo:'gemini-3.1-flash-lite-preview', astra:'gemini-3.1-flash-lite-preview', wanda:'gemini-3.1-flash-lite-preview', threepio:'gemini-3.1-flash-lite-preview', r2d2:'gemini-3.1-flash-lite-preview' },
 };
 
-function ok(msg)   { console.log('[SUCCESS]', msg); }
-function info(msg) { console.log('[INFO]', msg); }
-function warn(msg) { console.warn('[WARN]', msg); }
+const SYNC_LOG = join(REPO_ROOT, '.agents', 'sync.log');
+function logLine(level, msg) {
+  const line = `[${new Date().toISOString()}] [${level}] [sync-agents.js] ${msg}\n`;
+  try { writeFileSync(SYNC_LOG, line, { flag: 'a' }); } catch { /* best-effort */ }
+}
+
+function ok(msg)   { console.log('[SUCCESS]', msg); logLine('SUCCESS', msg); }
+function info(msg) { console.log('[INFO]', msg); logLine('INFO', msg); }
+function warn(msg) { console.warn('[WARN]', msg); logLine('ERROR', msg); }
 
 function parseFrontmatter(content) {
-  const m = content.match(/^---\n([\s\S]*?)\n---/);
+  // Source files are CRLF (Windows-authored); frontmatter fence is "---\r\n", not "---\n".
+  // A CRLF-blind regex here silently fails to match -- meta ends up {} and any agent not
+  // in the MODELS map (e.g. clarification-needed) is deployed with an empty model: line.
+  const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!m) return {};
   const meta = {};
-  for (const line of m[1].split('\n')) {
+  for (const line of m[1].split(/\r?\n/)) {
     const idx = line.indexOf(':');
     if (idx === -1) continue;
     meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
@@ -45,8 +54,10 @@ function setModel(content, model) {
 }
 
 function stripFrontmatter(content) {
-  return content.replace(/^---[\s\S]*?---\n/, '');
+  return content.replace(/^---[\s\S]*?---\r?\n/, '');
 }
+
+export { parseFrontmatter, stripFrontmatter, stripToolsLine };
 
 // Remove the `tools:` line from the frontmatter block.
 // Our agent defs list abstract tool names (github-cli, bash, git, npm, docker, figma, ...)
