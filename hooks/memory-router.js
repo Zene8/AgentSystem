@@ -200,15 +200,20 @@ if (require.main === module) {
     const augmented = matched ? await augmentWithTrust(base, matched) : base;
 
     // #121: fire task-aware retrieval once per session, only on substantive prompts.
+    // Wrapped defensively — a throw here must never take down the pre-existing routing-hint
+    // output below (queryBrain/detectRepoSlug/alreadyInjected already degrade gracefully on
+    // their own, but this guards the orchestration glue itself too).
     let taskContext = '';
-    const wordCount = p.split(/\s+/).filter(Boolean).length;
-    if (wordCount >= MIN_WORDS) {
-      const marker = markerPath(payload);
-      if (!alreadyInjected(marker)) {
-        taskContext = retrieveTaskContext(prompt, payload.cwd || process.cwd());
-        markInjected(marker);
+    try {
+      const wordCount = prompt.split(/\s+/).filter(Boolean).length;
+      if (wordCount >= MIN_WORDS) {
+        const marker = markerPath(payload);
+        if (!alreadyInjected(marker)) {
+          taskContext = retrieveTaskContext(prompt, payload.cwd || process.cwd());
+          markInjected(marker);
+        }
       }
-    }
+    } catch { /* never let task-aware retrieval break the base routing hint */ }
 
     const parts = [augmented, taskContext].filter(Boolean);
     process.stdout.write(parts.join('\n'));
