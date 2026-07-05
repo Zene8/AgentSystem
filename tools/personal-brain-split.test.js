@@ -59,6 +59,24 @@ describe('parseBrainCandidates', () => {
   it('returns empty array for empty brain', () => {
     assert.equal(parseBrainCandidates('').length, 0);
   });
+
+  it('skips unfilled template placeholder bullets', () => {
+    const raw = [
+      '## Who I Am',
+      '- [Your role — e.g., solo founder, developer, team lead]',
+      '- Subscriptions: [e.g., Claude Max, Gemini Pro, GitHub Copilot]',
+      '- Primary repos: [list your repos]',
+      '## Current Goals',
+      '### [Project Name]',
+      '- [Goal 1]',
+      '- [Goal 2]',
+      '## Real facts',
+      '- I actually prefer dark mode',
+    ].join('\n');
+    const candidates = parseBrainCandidates(raw);
+    assert.equal(candidates.length, 1, `expected only the real fact, got: ${JSON.stringify(candidates)}`);
+    assert.ok(candidates[0].text.includes('dark mode'));
+  });
 });
 
 describe('sectionImportance', () => {
