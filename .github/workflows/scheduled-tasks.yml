@@ -63,5 +63,5 @@ jobs:
         run: |
           $prNumber = '${{ github.event.pull_request.number }}'
           $repo = '${{ github.repository }}'
-          $result = claude -p "You are cavecrew-reviewer. Review the diff for PR #$prNumber in repo $repo and post findings as a PR comment. Be concise -- list any correctness bugs, missing tests, or standards violations." --model claude-sonnet-4-6 2>&1
+          $result = claude -p "You are cavecrew-reviewer. Review the diff for PR #$prNumber in repo $repo and post findings as a PR comment. Be concise -- list any correctness bugs, missing tests, or standards violations." --model claude-sonnet-5 2>&1
           gh pr comment $prNumber --body "$result"

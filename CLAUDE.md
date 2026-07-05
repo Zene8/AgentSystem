@@ -28,6 +28,12 @@ Edit `.agents/agents/<name>.md`, then run `node tools/sync-agents.js` to sync to
 
 - **CI/CD workflows** (`.github/workflows/**`):
   Test on feature branch before merging. Self-hosted runner required for agent-dispatch.yml.
+  **Single point of failure (see #115):** `agent-dispatch.yml`, `sam-audit.yml`, and sync-verification
+  workflows all pin `runs-on: self-hosted`. If that runner is offline, dispatched `/agent`, `/merge`,
+  `/close` comments and label triggers silently no-op — no PR comment, no failure signal, nothing
+  queues or retries. `.github/workflows/runner-health-check.yml` runs on a schedule and opens/updates
+  a tracking issue labeled `runner:down` if the self-hosted runner has no recent job; check that issue
+  (or `gh api repos/:owner/:repo/actions/runners`) if a dispatched command appears to hang.
 
 - **Memory tools** (`tools/**`):
   No npm deps. Pure Node.js builtins + graph-lib.js imports only.
