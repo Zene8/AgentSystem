@@ -1,0 +1,70 @@
+name: Self-Hosted Runner Health Check
+
+# agent-dispatch.yml, sam-audit.yml, and sync-verification.yml all require `runs-on: self-hosted`.
+# If the self-hosted runner is offline, jobs targeting it never start — no failure notification,
+# no PR comment, nothing queues or retries. This is a documented single point of failure (#115).
+# This workflow runs on GitHub-hosted infra (ubuntu-latest) specifically so it can detect and
+# report that condition even when the self-hosted runner itself is unreachable.
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # hourly
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+
+jobs:
+  check-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check self-hosted runner status
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          runners_json=$(gh api "repos/${{ github.repository }}/actions/runners")
+          online_self_hosted=$(echo "$runners_json" | jq '[.runners[] | select(.status == "online")] | length')
+          echo "online_count=$online_self_hosted" >> "$GITHUB_OUTPUT"
+          if [ "$online_self_hosted" -lt 1 ]; then
+            echo "down=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "down=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find existing tracking issue
+        id: find
+        if: steps.check.outputs.down == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          issue_number=$(gh issue list --state open --label "runner:down" --json number --jq '.[0].number // empty')
+          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update tracking issue (runner down)
+        if: steps.check.outputs.down == 'true' && steps.find.outputs.issue_number == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "[Infra]: self-hosted runner offline — agent-dispatch/sam-audit/sync-verification blocked" \
+            --label "runner:down" \
+            --body "No online self-hosted runner detected as of $(date -u +%Y-%m-%dT%H:%M:%SZ). \`/agent\`, \`/merge\`, \`/close\` dispatch and the Sam CI audit check will silently no-op until it's back online. This issue auto-closes on the next hourly check once a runner is online again."
+
+      - name: Comment ping on existing tracking issue
+        if: steps.check.outputs.down == 'true' && steps.find.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment "${{ steps.find.outputs.issue_number }}" \
+            --body "Still offline as of $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+
+      - name: Auto-close tracking issue (runner back online)
+        if: steps.check.outputs.down == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          issue_number=$(gh issue list --state open --label "runner:down" --json number --jq '.[0].number // empty')
+          if [ -n "$issue_number" ]; then
+            gh issue close "$issue_number" --comment "Self-hosted runner back online as of $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+          fi
