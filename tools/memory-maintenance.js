@@ -41,6 +41,7 @@ export function runMaintenance({ reflect = false, quiet = false } = {}) {
   results.push(step('reconsolidate', 'memory-reconsolidate.js', [`--brain-path=${pbPath}`], quiet));
   results.push(step('decay', 'memory-decay.js', ['--brain=personal-brain'], quiet));
   results.push(step('stale-prune', 'memory-stale.js', ['--brain=personal-brain', '--fix'], quiet));
+  results.push(step('memory-tune', 'memory-tune.js', ['--brain=personal-brain', '--all', '--quiet'], quiet));
   results.push(step('consolidate', 'graph/graph-consolidate.js', ['personal-brain', `--brain-path=${pbPath}`], quiet));
   results.push(step('wikilink-sync', 'graph/wikilink-sync.js', [`--brain-path=${pbPath}`], quiet));
   results.push(step('agent-brain-seed', 'agent-brain-seed.js', ['--all'], quiet));
