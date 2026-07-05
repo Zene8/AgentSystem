@@ -10,10 +10,21 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
 
 const LOG = `${homedir()}/agent-memory/nexus/session-log.jsonl`;
 const args = process.argv.slice(2);
 const mode = args[0] || '--today';
+
+// #122: startup overhead line — sums fixed per-session context injection (CLAUDE.md files,
+// routines.generated.md, memory-context SessionStart output). Delegates to startup-overhead.js
+// (single source of truth for the measurement) rather than re-summing here.
+if (mode === '--startup') {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  await import(pathToFileURL(join(__dirname, 'startup-overhead.js')).href);
+  process.exit(0);
+}
 
 if (!existsSync(LOG)) {
   console.log('No session log yet. Sessions logged after next Stop hook fires.');
