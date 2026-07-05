@@ -66,14 +66,26 @@ function hint(agentDisplay) {
 
 // Asynchronously augment a routing hint with trust score from trust-scores.md.
 // Returns the original hint on any failure — never throws, always fast.
+//
+// #118: a cold-start dynamic import() of agent-trust.js plus a graph-scale trust-scores.md
+// read/parse can be slow enough to risk the hook's configured timeout (5s in settings.json).
+// Since this augmentation is purely cosmetic (the base hint is already correct/complete),
+// race it against a short internal timeout and fall back to the un-augmented hint rather than
+// risk the whole hook getting killed and the routing hint being dropped entirely.
+const TRUST_AUGMENT_TIMEOUT_MS = 1500;
+
 async function augmentWithTrust(baseHint, agentDisplay) {
   if (!baseHint || !agentDisplay) return baseHint;
-  try {
+  const attempt = (async () => {
     if (!fs.existsSync(AGENT_TRUST_PATH)) return baseHint;
     const { parseTrustScores, composeHintWithTrust } = await import(pathToFileURL(AGENT_TRUST_PATH).href);
     const md = fs.existsSync(TRUST_SCORES_PATH) ? fs.readFileSync(TRUST_SCORES_PATH, 'utf8') : '';
     const scores = parseTrustScores(md);
     return composeHintWithTrust(baseHint, agentDisplay, scores);
+  })();
+  const timeout = new Promise(resolve => setTimeout(() => resolve(baseHint), TRUST_AUGMENT_TIMEOUT_MS));
+  try {
+    return await Promise.race([attempt, timeout]);
   } catch {
     return baseHint;
   }
