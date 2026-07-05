@@ -105,10 +105,38 @@ jobs:
               body: msg
             });
 
+      - name: Gate /merge on pr-guard (hard security gate — #112)
+        id: guard
+        if: steps.parse.outputs.command == 'merge'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $prNumber = "${{ github.event.issue.number }}"
+          node tools/pr-guard.js $prNumber
+          $guardExit = $LASTEXITCODE
+          "guard_exit=$guardExit" >> $env:GITHUB_OUTPUT
+          if ($guardExit -ne 0) {
+            Write-Host "pr-guard blocked merge of PR #$prNumber (exit $guardExit)"
+          }
+        continue-on-error: true
+
+      - name: Post blocked-merge comment (pr-guard failed)
+        if: steps.parse.outputs.command == 'merge' && steps.guard.outputs.guard_exit != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '🚫 **Merge blocked.** `pr-guard.js` reports this PR is not ready — CI must be green, no blocking review threads, and an explicit Sam (CSO) APPROVED security-audit review is required before merge. This is a hard, non-bypassable gate (see issue #112). Re-run `/merge` once Sam approves and CI is green.'
+            });
+
       - name: Run agent (claude)
         id: run_claude
         shell: pwsh
-        if: steps.parse.outputs.agent != ''
+        if: steps.parse.outputs.agent != '' && (steps.parse.outputs.command != 'merge' || steps.guard.outputs.guard_exit == '0')
         run: |
           $task = Get-Content "$env:RUNNER_TEMP\task.txt" -Raw
 

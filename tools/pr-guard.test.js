@@ -9,21 +9,23 @@ import assert from 'node:assert/strict';
 import { checkPr } from './pr-guard.js';
 
 // Helper to simulate checkPr result shape
-function makeResult({ checksOk, threadsOk, prNumber = '99' }) {
+function makeResult({ checksOk, threadsOk, samAuditOk = true, prNumber = '99' }) {
   return {
     prNumber,
     checksOk,
     threadsOk,
-    ok: checksOk && threadsOk,
+    samAuditOk,
+    ok: checksOk && threadsOk && samAuditOk,
     summary: [
       checksOk ? 'CI: all green' : 'CI: 1 check(s) not green',
       threadsOk ? 'Reviews: no blocking change requests' : 'Reviews: 1 reviewer(s) requested changes',
+      samAuditOk ? 'Sam audit: APPROVED review found' : 'Sam audit: no APPROVED review from Sam (CSO) found',
     ],
   };
 }
 
-test('result ok only when both checks and threads pass', () => {
-  const r = makeResult({ checksOk: true, threadsOk: true });
+test('result ok only when checks, threads, and sam audit all pass', () => {
+  const r = makeResult({ checksOk: true, threadsOk: true, samAuditOk: true });
   assert.strictEqual(r.ok, true);
 });
 
@@ -39,6 +41,13 @@ test('result not ok when reviews block', () => {
 
 test('result not ok when both fail', () => {
   const r = makeResult({ checksOk: false, threadsOk: false });
+  assert.strictEqual(r.ok, false);
+});
+
+// #112: a PR with green CI and no CHANGES_REQUESTED reviews must still fail pr-guard if there is
+// no explicit Sam (CSO) APPROVED review — this is the hard security gate, not an advisory check.
+test('result not ok when CI and threads pass but Sam never approved', () => {
+  const r = makeResult({ checksOk: true, threadsOk: true, samAuditOk: false });
   assert.strictEqual(r.ok, false);
 });
 

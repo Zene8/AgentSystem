@@ -70,7 +70,10 @@ export async function checkPr(prArg) {
     results.checksOk = false;
   }
 
-  // 2. Unresolved review threads via gh api
+  // 2. Unresolved review threads + explicit Sam (CSO) security-audit approval via gh api.
+  // (#112) A generic "no CHANGES_REQUESTED" is NOT sufficient as the hard security gate — a PR
+  // with zero reviews at all would otherwise pass. Require an actual APPROVE review whose body
+  // is Sam's automated audit post (sam-audit.yml posts "**Sam (CSO)**" + "APPROVED:" on approval).
   try {
     // Get the repo from the PR
     const prInfo = ghJson(['pr', 'view', prNumber, '--json', 'url,number']);
@@ -79,7 +82,7 @@ export async function checkPr(prArg) {
     const repo = urlParts[1];
 
     const reviewsData = ghJson(['api', `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
-      '--jq', '[.[] | {state, user: .user.login}]']);
+      '--jq', '[.[] | {state, user: .user.login, body}]']);
 
     // Count unresolved: state = CHANGES_REQUESTED and not subsequently APPROVED
     const latestByUser = {};
@@ -94,12 +97,27 @@ export async function checkPr(prArg) {
       results.summary.push(`Reviews: no blocking change requests`);
     }
     results.threadsOk = changesRequested.length === 0;
+
+    const samApproval = reviewsData.find(r =>
+      r.state === 'APPROVED' &&
+      typeof r.body === 'string' &&
+      r.body.includes('Sam (CSO)') &&
+      r.body.includes('APPROVED:')
+    );
+
+    if (samApproval) {
+      results.summary.push('Sam audit: APPROVED review found');
+    } else {
+      results.summary.push('Sam audit: no APPROVED review from Sam (CSO) found — sam-audit check must pass first');
+    }
+    results.samAuditOk = !!samApproval;
   } catch (e) {
-    results.summary.push(`Review threads: ${e.message}`);
+    results.summary.push(`Review threads / Sam audit: ${e.message}`);
     results.threadsOk = false;
+    results.samAuditOk = false;
   }
 
-  results.ok = !!(results.checksOk && results.threadsOk);
+  results.ok = !!(results.checksOk && results.threadsOk && results.samAuditOk);
   return results;
 }
 
