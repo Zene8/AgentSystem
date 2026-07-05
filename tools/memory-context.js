@@ -4,7 +4,7 @@
 // (3) recent episodic (latest SONA patterns). One cheap, oriented load instead of ls+read.
 // Usage: node tools/memory-context.js [--cwd=PATH] [--recent=3]
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentMemoryRoot, readGraph, parseFrontmatter, resolveRepoGraphPath } from './graph/graph-lib.js';
@@ -56,6 +56,45 @@ export function relevantSona(entries, query, { top = 3, scorer = null } = {}) {
     .sort((a, b) => b.score - a.score)
     .slice(0, top)
     .map(r => r.id);
+}
+
+// Leads get the fuller slice (still capped); everyone else is treated as a worker and gets
+// repo facts + their own agent-brain nodes only — no personal user facts, minimal sona.
+// See #120: workers routinely skip the "query memory manually" ritual, so this must be pushed.
+const LEAD_AGENTS = new Set(['jarvis', 'friday', 'sam', 'nat']);
+
+export function agentTier(agentName) {
+  return LEAD_AGENTS.has((agentName || '').toLowerCase()) ? 'lead' : 'worker';
+}
+
+// Pure: scan agent-brain/nodes/*.md frontmatter for `agent: <agentName>` (or the agent's own
+// identity node `agent-<agentName>`), return up to n ids, most-recent first.
+export function agentBrainNodes(agentBrainDir, agentName, n = 3) {
+  if (!agentName || !existsSync(agentBrainDir)) return [];
+  const nodesDir = join(agentBrainDir, 'nodes');
+  if (!existsSync(nodesDir)) return [];
+  const name = agentName.toLowerCase();
+  const identityId = `agent-${name}`;
+  const matches = [];
+  for (const file of readdirSyncSafe(nodesDir)) {
+    if (!file.endsWith('.md')) continue;
+    const id = file.slice(0, -3);
+    let frontmatter;
+    try {
+      ({ frontmatter } = parseFrontmatter(readFileSync(join(nodesDir, file), 'utf8')));
+    } catch { continue; }
+    if (id === identityId || (frontmatter.agent || '').toLowerCase() === name) {
+      matches.push({ id, created: frontmatter.created || '' });
+    }
+  }
+  return matches
+    .sort((a, b) => (a.id === identityId ? -1 : b.id === identityId ? 1 : (b.created > a.created ? 1 : -1)))
+    .slice(0, n)
+    .map(m => m.id);
+}
+
+function readdirSyncSafe(dir) {
+  try { return readdirSync(dir); } catch { return []; }
 }
 
 function hotUserFacts(nexus) {
@@ -114,6 +153,71 @@ export function buildContext({ cwd = process.cwd(), recent = 3, core = 7, keywor
   return { slug, userCore, userTotal, projectNodes, sona };
 }
 
+// Character budget standing in for a token cap (~4 chars/token, conservative rounding down
+// so 500 tokens of budget maps to ~1800 chars of rendered text — leaves headroom).
+const SUBAGENT_CHAR_BUDGET = 1800;
+
+// Builds the compact, tiered slice injected at SubagentStart (#120). Cheaper than buildContext:
+// leads get a trimmed version of the same three layers; workers get repo facts + their own
+// agent-brain nodes only (no personal user facts) to keep worker spawns memory-light and fast.
+export function buildSubagentContext({ agent, cwd = process.cwd(), keywords = '' } = {}) {
+  const tier = agentTier(agent);
+  const nexus = join(agentMemoryRoot(), 'nexus');
+  const registryPath = join(nexus, 'known-repos.json');
+  const registry = existsSync(registryPath) ? JSON.parse(readFileSync(registryPath, 'utf8')) : { repos: [] };
+  const repo = detectRepo(cwd, registry);
+  const slug = repo ? repo.slug : null;
+
+  const projectGraphPath = repo ? resolveRepoGraphPath(repo) : null;
+  const projectNodes = projectGraphPath && existsSync(projectGraphPath) ? readGraph(projectGraphPath).nodes.length : 0;
+
+  const agentBrainDir = join(nexus, 'agent-brain');
+  const brainNodes = agentBrainNodes(agentBrainDir, agent, tier === 'lead' ? 5 : 3);
+
+  let userCore = [];
+  let userTotal = 0;
+  let sona = [];
+
+  if (tier === 'lead') {
+    const allFacts = hotUserFacts(nexus);
+    userTotal = allFacts.length;
+    userCore = selectCoreFacts(allFacts, 4);
+
+    const query = [slug, agent, keywords].filter(Boolean).join(' ').trim();
+    const sonaPath = join(nexus, 'sona-patterns.md');
+    const entries = existsSync(sonaPath) ? parseEntries(readFileSync(sonaPath, 'utf8')) : [];
+    const ids = query ? relevantSona(entries, query, { top: 3 }) : [];
+    sona = ids.length > 0 ? ids : recentSona(nexus, 3);
+  } else {
+    // Worker tier: no personal user facts, one recent sona pattern at most.
+    sona = recentSona(nexus, 1);
+  }
+
+  return { agent, tier, slug, projectNodes, brainNodes, userCore, userTotal, sona };
+}
+
+function renderSubagent(ctx) {
+  const lines = [];
+  lines.push(`## Memory Context (${ctx.agent || 'agent'}, ${ctx.tier})`);
+  if (ctx.slug) {
+    lines.push(`Project [${ctx.slug}]: ${ctx.projectNodes} brain nodes — query: graph-query.js ${ctx.slug} <keywords>`);
+  }
+  if (ctx.brainNodes.length > 0) {
+    lines.push(`Agent-brain: ${ctx.brainNodes.join(', ')}`);
+  }
+  if (ctx.tier === 'lead') {
+    const remainder = ctx.userTotal - ctx.userCore.length;
+    const moreHint = remainder > 0 ? ` (+${remainder} more)` : '';
+    lines.push(`User (top ${ctx.userCore.length} of ${ctx.userTotal}): ${ctx.userCore.join(', ') || '(none)'}${moreHint}`);
+  }
+  if (ctx.sona.length > 0) {
+    lines.push(`Recent patterns: ${ctx.sona.join(' | ')}`);
+  }
+  let out = lines.join('\n');
+  if (out.length > SUBAGENT_CHAR_BUDGET) out = out.slice(0, SUBAGENT_CHAR_BUDGET - 3) + '...';
+  return out;
+}
+
 function render(ctx) {
   const lines = [];
   lines.push('## Memory Context');
@@ -137,7 +241,18 @@ const isMain = process.argv[1] &&
 
 if (isMain) {
   const flags = {};
-  for (const a of process.argv.slice(2)) { const m = a.match(/^--([\w-]+)=(.*)$/); if (m) flags[m[1]] = m[2]; }
-  const ctx = buildContext({ cwd: flags.cwd || process.cwd(), recent: parseInt(flags.recent || '3'), core: parseInt(flags.core || '7') });
-  console.log(render(ctx));
+  const bools = new Set();
+  for (const a of process.argv.slice(2)) {
+    const m = a.match(/^--([\w-]+)=(.*)$/);
+    if (m) { flags[m[1]] = m[2]; continue; }
+    const b = a.match(/^--([\w-]+)$/);
+    if (b) bools.add(b[1]);
+  }
+  if (bools.has('subagent')) {
+    const ctx = buildSubagentContext({ agent: flags.agent || '', cwd: flags.cwd || process.cwd(), keywords: flags.keywords || '' });
+    console.log(renderSubagent(ctx));
+  } else {
+    const ctx = buildContext({ cwd: flags.cwd || process.cwd(), recent: parseInt(flags.recent || '3'), core: parseInt(flags.core || '7') });
+    console.log(render(ctx));
+  }
 }
