@@ -6,24 +6,67 @@ import assert from 'node:assert/strict';
 // Integration test (real PR) is run separately in the acceptance matrix.
 
 // Import only the pure function (avoids running gh in test env)
-import { checkPr } from './pr-guard.js';
+import { checkPr, isSamApproval } from './pr-guard.js';
+
+// #112 follow-up (Sam's own audit of this fix): body-text matching alone is spoofable --
+// submitting an "Approve" review does NOT require write/maintainer permission on GitHub, so
+// any collaborator could forge "Sam (CSO)" + "APPROVED:" in their own review body. isSamApproval
+// must also verify the reviewer identity is the github-actions[bot] service account that
+// sam-audit.yml actually posts as.
+test('isSamApproval accepts a real Sam audit review (bot identity + markers)', () => {
+  const review = {
+    state: 'APPROVED',
+    user: { login: 'github-actions[bot]', type: 'Bot' },
+    body: '✅ **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: looks fine',
+  };
+  assert.strictEqual(isSamApproval(review), true);
+});
+
+test('isSamApproval rejects a forged review from a non-bot account with spoofed body text', () => {
+  const review = {
+    state: 'APPROVED',
+    user: { login: 'some-collaborator', type: 'User' },
+    body: '✅ **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: looks fine',
+  };
+  assert.strictEqual(isSamApproval(review), false);
+});
+
+test('isSamApproval rejects bot-authored review missing the required markers', () => {
+  const review = {
+    state: 'APPROVED',
+    user: { login: 'github-actions[bot]', type: 'Bot' },
+    body: 'Looks good to me!',
+  };
+  assert.strictEqual(isSamApproval(review), false);
+});
+
+test('isSamApproval rejects non-APPROVED review even from the trusted bot identity', () => {
+  const review = {
+    state: 'COMMENTED',
+    user: { login: 'github-actions[bot]', type: 'Bot' },
+    body: '🚫 **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: looks fine',
+  };
+  assert.strictEqual(isSamApproval(review), false);
+});
 
 // Helper to simulate checkPr result shape
-function makeResult({ checksOk, threadsOk, prNumber = '99' }) {
+function makeResult({ checksOk, threadsOk, samAuditOk = true, prNumber = '99' }) {
   return {
     prNumber,
     checksOk,
     threadsOk,
-    ok: checksOk && threadsOk,
+    samAuditOk,
+    ok: checksOk && threadsOk && samAuditOk,
     summary: [
       checksOk ? 'CI: all green' : 'CI: 1 check(s) not green',
       threadsOk ? 'Reviews: no blocking change requests' : 'Reviews: 1 reviewer(s) requested changes',
+      samAuditOk ? 'Sam audit: APPROVED review found' : 'Sam audit: no APPROVED review from Sam (CSO) found',
     ],
   };
 }
 
-test('result ok only when both checks and threads pass', () => {
-  const r = makeResult({ checksOk: true, threadsOk: true });
+test('result ok only when checks, threads, and sam audit all pass', () => {
+  const r = makeResult({ checksOk: true, threadsOk: true, samAuditOk: true });
   assert.strictEqual(r.ok, true);
 });
 
@@ -39,6 +82,13 @@ test('result not ok when reviews block', () => {
 
 test('result not ok when both fail', () => {
   const r = makeResult({ checksOk: false, threadsOk: false });
+  assert.strictEqual(r.ok, false);
+});
+
+// #112: a PR with green CI and no CHANGES_REQUESTED reviews must still fail pr-guard if there is
+// no explicit Sam (CSO) APPROVED review — this is the hard security gate, not an advisory check.
+test('result not ok when CI and threads pass but Sam never approved', () => {
+  const r = makeResult({ checksOk: true, threadsOk: true, samAuditOk: false });
   assert.strictEqual(r.ok, false);
 });
 

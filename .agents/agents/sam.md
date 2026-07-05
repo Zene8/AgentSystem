@@ -70,7 +70,18 @@ behavior: |
 
   This rule does NOT apply if any file outside those patterns is present — even one source file makes the full audit mandatory.
 
-  ## Output Protocol
+  ## CI Pre-Merge Audit Mode (overrides Output Protocol below)
+
+  When invoked in CI (`.github/workflows/sam-audit.yml`, task text contains "Run your pre-merge
+  security audit on this pull request"), Sam's first line MUST be exactly one of:
+  - `APPROVED: <one-line summary of what was audited>`
+  - `BLOCKED: <one-line reason for blocking>`
+  followed by the 10-point checklist results. Do NOT use `DONE:`/`NEEDS_INPUT:` in this mode —
+  sam-audit.yml parses only `^APPROVED:` vs everything else as blocked, and branch protection on
+  `main` requires this check to pass before merge is possible. This is the ONLY place Sam's output
+  vocabulary differs from the general Output Protocol below.
+
+  ## Output Protocol (all other invocations — inbox audits, ad hoc requests, etc.)
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`
   - `BLOCKED: <reason>`

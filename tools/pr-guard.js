@@ -24,6 +24,28 @@ function ghJson(args) {
   }
 }
 
+// Trusted identity that sam-audit.yml's review-posting step authors as (it uses the
+// workflow's built-in GITHUB_TOKEN via actions/github-script, which always creates
+// content as this service account -- no human account or PAT can produce this identity).
+const SAM_BOT_LOGIN = 'github-actions[bot]';
+
+// Reviewer identity check (not just body text): submitting an "Approve" review does NOT
+// require write/maintainer permission on GitHub -- any collaborator (or, on a public repo,
+// any GitHub user) can leave an approving review with arbitrary body text. Checking body
+// text alone lets anyone forge "Sam (CSO)" + "APPROVED:" and pass the gate (#112 follow-up
+// finding from Sam's own audit of this file). Require BOTH the trusted bot identity AND the
+// body markers sam-audit.yml actually posts.
+function isSamApproval(review) {
+  return !!review &&
+    review.state === 'APPROVED' &&
+    !!review.user && review.user.type === 'Bot' && review.user.login === SAM_BOT_LOGIN &&
+    typeof review.body === 'string' &&
+    review.body.includes('Sam (CSO)') &&
+    review.body.includes('APPROVED:');
+}
+
+export { isSamApproval };
+
 function extractPrNumber(arg) {
   if (!arg) return null;
   // URL form: https://github.com/owner/repo/pull/123
@@ -70,7 +92,10 @@ export async function checkPr(prArg) {
     results.checksOk = false;
   }
 
-  // 2. Unresolved review threads via gh api
+  // 2. Unresolved review threads + explicit Sam (CSO) security-audit approval via gh api.
+  // (#112) A generic "no CHANGES_REQUESTED" is NOT sufficient as the hard security gate — a PR
+  // with zero reviews at all would otherwise pass. Require an actual APPROVE review whose body
+  // is Sam's automated audit post (sam-audit.yml posts "**Sam (CSO)**" + "APPROVED:" on approval).
   try {
     // Get the repo from the PR
     const prInfo = ghJson(['pr', 'view', prNumber, '--json', 'url,number']);
@@ -79,12 +104,12 @@ export async function checkPr(prArg) {
     const repo = urlParts[1];
 
     const reviewsData = ghJson(['api', `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
-      '--jq', '[.[] | {state, user: .user.login}]']);
+      '--jq', '[.[] | {state, user: {login: .user.login, type: .user.type}, body}]']);
 
     // Count unresolved: state = CHANGES_REQUESTED and not subsequently APPROVED
     const latestByUser = {};
     for (const r of reviewsData) {
-      latestByUser[r.user] = r.state;
+      latestByUser[r.user.login] = r.state;
     }
     const changesRequested = Object.values(latestByUser).filter(s => s === 'CHANGES_REQUESTED');
 
@@ -94,12 +119,23 @@ export async function checkPr(prArg) {
       results.summary.push(`Reviews: no blocking change requests`);
     }
     results.threadsOk = changesRequested.length === 0;
+
+    // Reviewer identity check (not just body text) -- see isSamApproval() below.
+    const samApproval = reviewsData.find(isSamApproval);
+
+    if (samApproval) {
+      results.summary.push('Sam audit: APPROVED review found from trusted identity (github-actions[bot])');
+    } else {
+      results.summary.push('Sam audit: no APPROVED review from github-actions[bot] with Sam (CSO) markers found — sam-audit check must pass first');
+    }
+    results.samAuditOk = !!samApproval;
   } catch (e) {
-    results.summary.push(`Review threads: ${e.message}`);
+    results.summary.push(`Review threads / Sam audit: ${e.message}`);
     results.threadsOk = false;
+    results.samAuditOk = false;
   }
 
-  results.ok = !!(results.checksOk && results.threadsOk);
+  results.ok = !!(results.checksOk && results.threadsOk && results.samAuditOk);
   return results;
 }
 

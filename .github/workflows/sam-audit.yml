@@ -70,7 +70,10 @@ If BLOCKED, list each specific issue that must be resolved before merge.
 "@
 
           $task | Out-File "$env:RUNNER_TEMP\sam-task.txt" -Encoding utf8
-          $result = claude -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
+          # --agent sam: run the real Sam agent definition (.agents/agents/sam.md), not a bare
+          # model call. Sam's "CI Pre-Merge Audit Mode" there emits the APPROVED:/BLOCKED:
+          # vocabulary this workflow parses below (aligned with sam.md, see issue #112).
+          $result = claude --agent sam -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
           if ($result -match "^APPROVED:") {
