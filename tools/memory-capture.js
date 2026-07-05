@@ -5,10 +5,10 @@
 // the same classifier + descriptions used by /onboard-memory. Conservative by design:
 // high precision over recall. On LLM failure it captures nothing — never guesses.
 //
-// This is the auto-capture safety net wired to the Stop hook (session-end.sh): whatever
-// durable facts surfaced during a session get persisted and correctly routed without the
-// user having to run /onboard-memory by hand. Agents can also self-capture mid-session
-// via brain-remember.js when they judge a specific fact relevant.
+// This is the auto-capture safety net wired to the SessionEnd hook (hooks/memory-capture-hook.js,
+// spawned detached/non-blocking): whatever durable facts surfaced during a session get persisted
+// and correctly routed without the user having to run /onboard-memory by hand. Agents can also
+// self-capture mid-session via brain-remember.js when they judge a specific fact relevant.
 //
 // Usage: node tools/memory-capture.js <transcript-path>
 //
