@@ -4,7 +4,12 @@
 // r2d2 fallback, and not misroute on the bare word "audit".
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { classify, matchDomain } = require('./memory-router.js');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {
+  classify, matchDomain, extractKeywords, markerPath, alreadyInjected, detectRepoSlug,
+} = require('./memory-router.js');
 
 test('infra/deploy/CI routes to Friday, not directly to Leo', () => {
   const out = classify('please deploy this to the ci pipeline');
@@ -35,4 +40,34 @@ test('one-off script task falls back to r2d2', () => {
 
 test('matchDomain returns empty string when nothing matches', () => {
   assert.strictEqual(matchDomain('hello there, how is your day'), '');
+});
+
+// #121: task-aware retrieval helpers.
+test('extractKeywords drops short/stopword-length tokens and punctuation', () => {
+  const kw = extractKeywords('Deploy the CI pipeline to production ASAP!!');
+  assert.ok(kw.includes('deploy'));
+  assert.ok(kw.includes('pipeline'));
+  assert.ok(kw.includes('production'));
+  assert.ok(!kw.includes('the'));
+  assert.ok(!kw.includes('ci')); // length <= 3, filtered
+});
+
+test('markerPath is stable per transcript_path and distinct across sessions', () => {
+  const a = markerPath({ transcript_path: '/tmp/session-a.jsonl' });
+  const b = markerPath({ transcript_path: '/tmp/session-a.jsonl' });
+  const c = markerPath({ transcript_path: '/tmp/session-b.jsonl' });
+  assert.strictEqual(a, b);
+  assert.notStrictEqual(a, c);
+});
+
+test('alreadyInjected: once-per-session marker gates a second call', () => {
+  const marker = path.join(os.tmpdir(), `test-marker-${Date.now()}-${Math.random()}.marker`);
+  assert.strictEqual(alreadyInjected(marker), false);
+  fs.writeFileSync(marker, '1');
+  assert.strictEqual(alreadyInjected(marker), true);
+  fs.rmSync(marker, { force: true });
+});
+
+test('detectRepoSlug: unmatched cwd returns null without throwing', () => {
+  assert.strictEqual(detectRepoSlug('/some/nonexistent/path/xyz'), null);
 });
