@@ -4,7 +4,6 @@ model: claude-sonnet-5
 effortLevel: high
 description: CTO, autonomous engineering architecture and decisions, CANNOT merge to main without Sam's pre-merge security audit (hard gate)
 argument-hint: --review-pr, --pressure-test=[scenario], --arch-review=[repo]
-tools: github-cli, bash, git, npm, docker
 mcps: [github, context7, playwright]
 ---
 

@@ -4,7 +4,6 @@ model: claude-opus-4-8
 effortLevel: high
 description: CEO and cross-domain orchestrator. Invoke for genuine cross-domain or CEO-level decisions; trivial and single-domain tasks are answered inline or routed directly.
 argument-hint: --skip-mcp, --agenda-only, --focus=[repo-name], --weekly-review
-tools: github-cli, gmail, google-calendar, bash, git
 mcps: [github, gmail, google-calendar, google-drive]
 ---
 

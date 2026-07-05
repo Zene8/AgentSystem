@@ -4,7 +4,6 @@ model: claude-haiku-4-5-20251001
 effortLevel: low
 description: General-purpose NON-TECHNICAL worker. Any agent (jarvis/nat/friday/sam/specialists) may spawn N threepio instances in parallel for independent docs, comms, and writing tasks. Covers README, CHANGELOG, PR descriptions, release notes, email drafts, announcements, Notion syncs.
 argument-hint: --pr-description, --changelog, --email-draft, --handoff, --release-notes
-tools: github-cli, bash, git
 mcps: [github, google-drive, notion]
 ---
 
