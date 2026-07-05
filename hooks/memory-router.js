@@ -15,6 +15,93 @@ const { pathToFileURL } = require('url');
 const PB = '~/agent-memory/nexus/personal-brain';
 const TRUST_SCORES_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'trust-scores.md');
 const AGENT_TRUST_PATH = path.join(os.homedir(), 'dev', 'AgentSystem', 'tools', 'agent-trust.js');
+const GRAPH_QUERY_PATH = path.join(os.homedir(), 'dev', 'AgentSystem', 'tools', 'graph', 'graph-query.js');
+const KNOWN_REPOS_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'known-repos.json');
+const { execFileSync } = require('child_process');
+
+// #121: task-aware memory injection. Static SessionStart core is now trimmed to 3 nodes
+// (identity/role/hard-pref); this fires ONCE per session on the first substantive prompt
+// (>= MIN_WORDS) and runs graph-query's existing BM25 retrieval (no re-implementation) over
+// personal-brain + the detected repo brain, injecting top relevant nodes and recording access
+// via --record-access so relevance feeds importance (graph-query.js already does the write).
+const MIN_WORDS = 10;
+const RETRIEVAL_TOP = 4;
+
+// Extract keywords: drop stopwords-ish short tokens, keep the rest. Cheap, no NLP dependency.
+function extractKeywords(promptRaw) {
+  return (promptRaw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 3)
+    .slice(0, 12);
+}
+
+// Once-per-session marker: keyed by transcript_path (stable per session) if provided, else
+// session_id, else a process-lifetime fallback. Lives in os.tmpdir() — mirrors the pattern of
+// other session-scoped state files in this codebase (e.g. sona-writeback-hook's offset files).
+function markerPath(payload) {
+  const key = (payload && (payload.transcript_path || payload.session_id)) || 'unknown-session';
+  const safe = key.replace(/[^a-zA-Z0-9]/g, '_').slice(-120);
+  return path.join(os.tmpdir(), `memory-router-injected-${safe}.marker`);
+}
+
+function alreadyInjected(marker) {
+  try { return fs.existsSync(marker); } catch { return false; }
+}
+
+function markInjected(marker) {
+  try { fs.writeFileSync(marker, String(Date.now())); } catch { /* non-fatal */ }
+}
+
+// Detect the repo slug for the given cwd via known-repos.json, without importing the ESM
+// memory-context.js module (memory-router.js is CommonJS) — a light local re-implementation
+// of the same "cwd is under repo.path" match used by tools/memory-context.js:detectRepo.
+function detectRepoSlug(cwd) {
+  try {
+    if (!fs.existsSync(KNOWN_REPOS_PATH)) return null;
+    const registry = JSON.parse(fs.readFileSync(KNOWN_REPOS_PATH, 'utf8'));
+    const norm = p => path.resolve(p || '').replace(/\\/g, '/').toLowerCase();
+    const cwdNorm = norm(cwd);
+    for (const repo of registry.repos || []) {
+      const repoNorm = norm(repo.path);
+      if (repoNorm && cwdNorm.startsWith(repoNorm)) return repo.slug;
+    }
+  } catch { /* non-fatal */ }
+  return null;
+}
+
+// Run graph-query.js as a subprocess (reuses its existing BM25 scoring + --record-access
+// write-back verbatim — no duplicated retrieval logic) against one brain, returns top node ids.
+function queryBrain(slug, brainPathFlag, keywords, cwd) {
+  if (!fs.existsSync(GRAPH_QUERY_PATH) || keywords.length === 0) return [];
+  try {
+    const args = [GRAPH_QUERY_PATH, slug, ...keywords, `--top=${RETRIEVAL_TOP}`, '--json', '--record-access'];
+    if (brainPathFlag) args.push(`--brain-path=${brainPathFlag}`);
+    const out = execFileSync(process.execPath, args, { timeout: 1200, encoding: 'utf8', cwd: cwd || process.cwd() });
+    const parsed = JSON.parse(out);
+    const direct = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.direct) ? parsed.direct : []);
+    return direct.map(r => (typeof r === 'string' ? r : r.nodeId)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// Retrieve task-relevant nodes across personal-brain + the detected repo brain. Never throws;
+// returns '' (no injection) on any failure, including timeout — this must stay well under the
+// hook's timeout budget (<1.5s target per #121 DoD).
+function retrieveTaskContext(promptRaw, cwd) {
+  const keywords = extractKeywords(promptRaw);
+  if (keywords.length === 0) return '';
+
+  const personal = queryBrain('personal-brain', PB, keywords, cwd);
+  const slug = detectRepoSlug(cwd);
+  const repoNodes = slug ? queryBrain(slug, null, keywords, cwd) : [];
+
+  const ids = [...personal, ...repoNodes].slice(0, RETRIEVAL_TOP + 1);
+  if (ids.length === 0) return '';
+  return `RELEVANT MEMORY (task-aware retrieval): ${ids.join(', ')} — query full content with graph-query.js if needed.`;
+}
 
 // Single source of truth for domain routing, shared by classify() and the CLI trust-lookup
 // path below (#114: previously duplicated as two independently-maintained regex lists that
@@ -91,14 +178,18 @@ async function augmentWithTrust(baseHint, agentDisplay) {
   }
 }
 
-module.exports = { classify, matchDomain, DOMAIN_RULES };
+module.exports = {
+  classify, matchDomain, DOMAIN_RULES,
+  extractKeywords, markerPath, alreadyInjected, detectRepoSlug, retrieveTaskContext,
+};
 
 if (require.main === module) {
   let input = '';
   process.stdin.on('data', d => (input += d));
   process.stdin.on('end', async () => {
-    let prompt = '';
-    try { prompt = JSON.parse(input || '{}').prompt || ''; } catch { /* ignore */ }
+    let payload = {};
+    try { payload = JSON.parse(input || '{}'); } catch { /* ignore */ }
+    const prompt = payload.prompt || '';
 
     // Identify which domain branch matched to pass its agent display name for trust lookup
     // (single source of truth: DOMAIN_RULES, see #114).
@@ -107,7 +198,20 @@ if (require.main === module) {
 
     const base = classify(prompt);
     const augmented = matched ? await augmentWithTrust(base, matched) : base;
-    process.stdout.write(augmented);
+
+    // #121: fire task-aware retrieval once per session, only on substantive prompts.
+    let taskContext = '';
+    const wordCount = p.split(/\s+/).filter(Boolean).length;
+    if (wordCount >= MIN_WORDS) {
+      const marker = markerPath(payload);
+      if (!alreadyInjected(marker)) {
+        taskContext = retrieveTaskContext(prompt, payload.cwd || process.cwd());
+        markInjected(marker);
+      }
+    }
+
+    const parts = [augmented, taskContext].filter(Boolean);
+    process.stdout.write(parts.join('\n'));
     process.exit(0);
   });
 }

@@ -16,7 +16,9 @@ const TOOLS = process.env.AGENT_TOOLS_ROOT ||
 if (require.main === module) {
   let out = '';
   try {
-    out = execFileSync(process.execPath, [path.join(TOOLS, 'memory-context.js'), `--cwd=${process.cwd()}`, '--core=7'], {
+    // #121: static SessionStart core trimmed 7 -> 3 (identity/role/hard-pref only). Task-relevant
+    // facts are now injected on-demand by memory-router.js's UserPromptSubmit-stage BM25 retrieval.
+    out = execFileSync(process.execPath, [path.join(TOOLS, 'memory-context.js'), `--cwd=${process.cwd()}`, '--core=3'], {
       timeout: 8000, encoding: 'utf8',
     });
   } catch { /* non-fatal — never block session start */ }
