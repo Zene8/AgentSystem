@@ -152,12 +152,24 @@ function text(res, code, body) {
   res.end(body);
 }
 
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) {
+    // Still run timingSafeEqual against an equal-length buffer so comparison
+    // time doesn't leak the correct secret length to a network attacker.
+    timingSafeEqual(bufA, Buffer.alloc(bufA.length));
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
 function checkAuth(req) {
   const h = req.headers.authorization || '';
-  if (h === `Bearer ${SECRET}` || h === SECRET) return true;
+  if (safeEqual(h, `Bearer ${SECRET}`) || safeEqual(h, SECRET)) return true;
   // Also allow ?key= query param for panel bookmarks
   const url = new URL(req.url, `http://localhost`);
-  return url.searchParams.get('key') === SECRET;
+  return safeEqual(url.searchParams.get('key') || '', SECRET);
 }
 
 function verifyGitHubSig(raw, sig) {
@@ -893,6 +905,16 @@ server.listen(PORT, HOST, () => {
   console.log(`  Windows: http://172.22.128.1:${PORT} (after port forward)`);
   console.log(`  Panel:   http://${HOST}:${PORT}/panel?key=<key>`);
   console.log(`  Key:     ${SECRET.slice(0,8)}...${SECRET.slice(-4)}\n`);
+  if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
+    console.warn(
+      `  WARNING: bound to ${HOST}, not loopback-only. Anyone who can reach this ` +
+      `host/port on the network can spawn agent runs if they obtain the bearer key. ` +
+      `Bearer-key auth (timing-safe) + a 100 req/min per-IP rate limit are the only ` +
+      `guards — there is no IP allowlist. Prefer an SSH tunnel or a trusted-LAN-only ` +
+      `network for phone access; rotate the key (~/.claude/remote-webhook.key) ` +
+      `periodically and keep its file ACL restricted to the owning user.\n`
+    );
+  }
 });
 
 server.on('error', err => { console.error('Server error:', err); process.exit(1); });
