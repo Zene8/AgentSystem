@@ -4,7 +4,7 @@ model: claude-haiku-4-5-20251001
 effortLevel: low
 description: Design, UX/UI, design systems, components, domain authority (escalates to Jarvis for cross-domain)
 argument-hint: --design-review=[component], --system-audit, --ux-feedback
-mcps: [figma, canva]
+mcps: [figma]  # canva not connected (#119, auth stub only)
 ---
 
 behavior: |

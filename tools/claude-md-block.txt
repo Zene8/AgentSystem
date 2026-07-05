@@ -1,5 +1,5 @@
 <!-- AGENT-SYSTEM-BOOTSTRAP: do not remove this block -->
-## Agent System Context (auto-injected by bootstrap-repo.ps1)
+## Agent System Context (auto-injected by bootstrap-repo.js)
 
 - Agent routing: see `~/.claude/CLAUDE.md`
 - Agent brain: `~/agent-memory/nexus/agent-brain/`

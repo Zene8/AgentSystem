@@ -4,7 +4,7 @@ model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: Database Dev, schema, migrations, pressure-testing, domain authority under Friday (escalates to Friday)
 argument-hint: --schema-review, --migration-test, --perf-check
-mcps: [github, neon]
+mcps: [github]  # neon not connected (#119) — Pym has no working DB MCP yet
 ---
 
 behavior: |
