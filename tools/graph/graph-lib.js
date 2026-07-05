@@ -9,6 +9,25 @@ export function agentMemoryRoot() {
   return process.env.AGENT_MEMORY_ROOT || join(homedir(), 'agent-memory');
 }
 
+// Single source of truth for "where does this repo's graph brain live on disk".
+// Repo brains live IN the repo working tree (<repo path>/nexus/<slug>/graph.json),
+// not under agentMemoryRoot() — only the personal-brain / agent-brain tiers live there.
+// `repo` is a known-repos.json entry: { slug, path, brain_path? }.
+// brain_path (when present) is relative to repo.path; falls back to 'nexus/<slug>'
+// for entries registered before brain_path existed.
+export function resolveRepoBrainDir(repo) {
+  if (!repo || !repo.path) return null;
+  const rel = repo.brain_path
+    ? dirname(repo.brain_path)
+    : join('nexus', repo.slug);
+  return join(repo.path, rel);
+}
+
+export function resolveRepoGraphPath(repo) {
+  const dir = resolveRepoBrainDir(repo);
+  return dir ? join(dir, 'graph.json') : null;
+}
+
 // --- Fix 2: Context-adaptive weight profiles ---
 // Different task modes weight graph dimensions differently.
 // Debugging: co_change matters most (what changed together when this broke?)

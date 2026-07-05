@@ -7,11 +7,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { agentMemoryRoot, readGraph, parseFrontmatter } from './graph/graph-lib.js';
+import { agentMemoryRoot, readGraph, parseFrontmatter, resolveRepoGraphPath } from './graph/graph-lib.js';
 import { parseEntries, tfidfEmbedding, cosineSimilarity } from './memory-search.js';
 
-// Pure: find the repo whose path is a prefix of cwd (longest match wins). Returns slug or null.
-export function detectProject(cwd, registry) {
+// Pure: find the repo whose path is a prefix of cwd (longest match wins). Returns the
+// full registry entry (or null) so callers can also read brain_path etc.
+export function detectRepo(cwd, registry) {
   const norm = p => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
   const c = norm(cwd);
   let best = null;
@@ -21,7 +22,13 @@ export function detectProject(cwd, registry) {
       if (!best || rp.length > norm(best.path).length) best = repo;
     }
   }
-  return best ? best.slug : null;
+  return best;
+}
+
+// Pure: find the repo whose path is a prefix of cwd (longest match wins). Returns slug or null.
+export function detectProject(cwd, registry) {
+  const repo = detectRepo(cwd, registry);
+  return repo ? repo.slug : null;
 }
 
 // Pure: given an array of { id, importance } objects (any order), return the top-N ids
@@ -81,13 +88,16 @@ export function buildContext({ cwd = process.cwd(), recent = 3, core = 7, keywor
   const nexus = join(agentMemoryRoot(), 'nexus');
   const registryPath = join(nexus, 'known-repos.json');
   const registry = existsSync(registryPath) ? JSON.parse(readFileSync(registryPath, 'utf8')) : { repos: [] };
-  const slug = detectProject(cwd, registry);
+  const repo = detectRepo(cwd, registry);
+  const slug = repo ? repo.slug : null;
 
   const allFacts = hotUserFacts(nexus);
   const userCore = selectCoreFacts(allFacts, core);
   const userTotal = allFacts.length;
 
-  const projectGraphPath = slug ? join(nexus, slug, 'graph.json') : null;
+  // Repo brains live IN the repo working tree, not under agentMemoryRoot() — see
+  // resolveRepoGraphPath in graph-lib.js (single source of truth, shared with graph-query.js).
+  const projectGraphPath = repo ? resolveRepoGraphPath(repo) : null;
   const projectNodes = projectGraphPath && existsSync(projectGraphPath) ? readGraph(projectGraphPath).nodes.length : 0;
 
   const query = [slug, keywords].filter(Boolean).join(' ').trim();
@@ -113,7 +123,7 @@ function render(ctx) {
   lines.push(`**User (top ${ctx.userCore.length} of ${ctx.userTotal}, by importance):** ${ctx.userCore.join(', ') || '(none)'}${moreHint}`);
   lines.push('');
   if (ctx.slug) {
-    lines.push(`**Project [${ctx.slug}]:** ${ctx.projectNodes} nodes in brain — query: \`graph-query.js ${ctx.slug} <keywords>\``);
+    lines.push(`**Project [${ctx.slug}]:** ${ctx.projectNodes} nodes in brain — query: \`graph-query.js ${ctx.slug} <keywords>\` (run from repo root)`);
   } else {
     lines.push('**Project:** cwd not in a registered repo');
   }
