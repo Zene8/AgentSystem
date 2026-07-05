@@ -1,6 +1,15 @@
 # routines.yml — Agent routines registry.
 # Each routine is enforced by default (enforce: hard) unless bypassed at runtime.
 #
+# IMPORTANT — what "enforce: hard" actually means (#119): for `mechanism: agent-rule` routines,
+# "hard" means the action text is ALWAYS injected as context at SessionStart via
+# .agents/rules/routines.generated.md — it is NOT mechanically blocked or validated by the
+# harness. The agent is instructed to follow it, but nothing prevents the agent from ignoring
+# it short of its own compliance. Only `mechanism: hook` routines that are wired through an
+# actual blocking hook (e.g. guard-git.sh) can mechanically prevent an action. Read "hard" as
+# "always-injected / expected-to-follow", not "impossible to bypass without the CLI bypass
+# command" — the bypass command just stops the text from being injected in the first place.
+#
 # To bypass a routine without editing this file:
 #   node tools/routines.js bypass <id> [--session]
 #   node tools/routines.js unbypass <id>

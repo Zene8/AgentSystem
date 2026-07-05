@@ -36,7 +36,7 @@ Edit `.agents/agents/<name>.md`, then run `node tools/sync-agents.js` to sync to
   Run `node --test <file>` before committing. All tests must pass on dev before PR to main.
 
 <!-- AGENT-SYSTEM-BOOTSTRAP: do not remove this block -->
-## Agent System Context (auto-injected by bootstrap-repo.ps1)
+## Agent System Context (auto-injected by bootstrap-repo.js)
 
 - Agent routing: see `~/.claude/CLAUDE.md`
 - Agent brain: `~/agent-memory/nexus/agent-brain/`
