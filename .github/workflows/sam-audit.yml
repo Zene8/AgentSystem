@@ -36,38 +36,59 @@ jobs:
       - name: Run Sam security audit
         id: audit
         shell: pwsh
+        # #131/#154: this step used to build $task with a PowerShell here-string (@" ... "@)
+        # whose body lines started at column 0. A YAML literal block scalar (`run: |`) requires
+        # every content line to be indented at least as much as its first content line — a
+        # column-0 line ends the block early, so YAML tried to parse "PR #<num>: <title>" as a
+        # new mapping key and failed with "can not read a block mapping entry; a multiline key
+        # may not be an implicit key". That made this entire workflow file unparseable, which is
+        # why every run (regardless of trigger) showed a 0s "workflow file issue" failure —
+        # confirmed via `npx js-yaml .github/workflows/sam-audit.yml`.
+        #
+        # Fixed by building the task text from a properly-indented array of lines instead of a
+        # bare here-string, AND by passing the untrusted PR title/branch values in via `env:`
+        # (below) rather than substituting `${{ github.event.pull_request.title }}` directly
+        # into the script text — GitHub Actions expression substitution happens before pwsh ever
+        # sees the script, so a title containing quotes/backticks/`$(...)` could otherwise break
+        # or inject into the script. Reading them from $env:* is the standard mitigation.
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
-          $task = @"
-You are Sam (CSO). Run your pre-merge security audit on this pull request.
-
-PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
-Base branch: ${{ github.base_ref }}
-Head branch: ${{ github.head_ref }}
-
-## Your 10-item Audit Checklist
-1. Data access patterns reviewed
-2. Auth/authz logic correct
-3. Credential handling secure (no secrets in diff)
-4. PHI exposure assessment
-5. Compliance with applicable standards
-6. Audit trail logging present
-7. Input validation at system boundaries
-8. Error messages don't leak sensitive data
-9. No secrets, API keys, or credentials in code/config
-10. Vendor contracts reviewed if new vendor with PHI
-
-## Diff
-$diff
-
-## Required Output Format
-Your FIRST LINE must be exactly one of:
-  APPROVED: <one-line summary of what was audited>
-  BLOCKED: <one-line reason for blocking>
-
-Then list each checklist item result: PASS / FAIL / N/A with a brief note.
-If BLOCKED, list each specific issue that must be resolved before merge.
-"@
+          $lines = @(
+            'You are Sam (CSO). Run your pre-merge security audit on this pull request.'
+            ''
+            "PR #$env:PR_NUMBER`: $env:PR_TITLE"
+            "Base branch: $env:BASE_REF"
+            "Head branch: $env:HEAD_REF"
+            ''
+            '## Your 10-item Audit Checklist'
+            '1. Data access patterns reviewed'
+            '2. Auth/authz logic correct'
+            '3. Credential handling secure (no secrets in diff)'
+            '4. PHI exposure assessment'
+            '5. Compliance with applicable standards'
+            '6. Audit trail logging present'
+            '7. Input validation at system boundaries'
+            '8. Error messages don''t leak sensitive data'
+            '9. No secrets, API keys, or credentials in code/config'
+            '10. Vendor contracts reviewed if new vendor with PHI'
+            ''
+            '## Diff'
+            $diff
+            ''
+            '## Required Output Format'
+            'Your FIRST LINE must be exactly one of:'
+            '  APPROVED: <one-line summary of what was audited>'
+            '  BLOCKED: <one-line reason for blocking>'
+            ''
+            'Then list each checklist item result: PASS / FAIL / N/A with a brief note.'
+            'If BLOCKED, list each specific issue that must be resolved before merge.'
+          )
+          $task = $lines -join "`n"
 
           $task | Out-File "$env:RUNNER_TEMP\sam-task.txt" -Encoding utf8
           # --agent sam: run the real Sam agent definition (.agents/agents/sam.md), not a bare
