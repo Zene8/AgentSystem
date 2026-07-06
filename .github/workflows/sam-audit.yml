@@ -23,6 +23,38 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve gh/claude PATH for runner service context
+        # #131/#154 follow-up: the self-hosted runner (nathan-desktop) runs as a Windows service
+        # under a logon task, which does NOT reliably inherit the interactive user's PATH — this
+        # is the same root cause class as the earlier `pwsh: command not found` failure. `gh pr
+        # diff` failed here with $LASTEXITCODE -1 (native "term not recognized"), meaning `gh`
+        # itself isn't resolvable in this job's PATH even though it works in an interactive
+        # `natha` shell. Search common Windows install locations and prepend anything found to
+        # $GITHUB_PATH so it's available for the rest of this job's steps (gh is also required by
+        # actions/github-script indirectly via the CLI-based steps below, and `claude` by the
+        # "Run Sam security audit" step).
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $candidates = @(
+            "$env:ProgramFiles\GitHub CLI",
+            "${env:ProgramFiles(x86)}\GitHub CLI",
+            "$env:LOCALAPPDATA\Programs\GitHub CLI",
+            "$env:ProgramFiles\nodejs",
+            "$env:APPDATA\npm",
+            "$env:LOCALAPPDATA\Programs\claude",
+            "$env:USERPROFILE\.local\bin",
+            "$env:USERPROFILE\AppData\Roaming\npm"
+          )
+          foreach ($dir in $candidates) {
+            if ($dir -and (Test-Path $dir)) {
+              Write-Host "Adding to PATH: $dir"
+              Add-Content -Path $env:GITHUB_PATH -Value $dir
+            }
+          }
+          Write-Host "gh found at: $((Get-Command gh -ErrorAction SilentlyContinue).Source)"
+          Write-Host "claude found at: $((Get-Command claude -ErrorAction SilentlyContinue).Source)"
+
       - name: Get PR diff
         # #131/#154 follow-up: self-hosted runner (nathan-desktop) has Windows PowerShell 5.1
         # (powershell.exe) but not PowerShell Core (pwsh.exe) on PATH — `shell: pwsh` failed with
