@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { SessionRegistry } from './session-registry.js';
 import { validateRepo } from './repo-validator.js';
 import { spawnAgyOneShotDirect, spawnAgyPersistent } from './agy-dispatcher.js';
+import { ipAllowed as ipAllowedFor, normalizeIp } from './ip-utils.js';
 
 const HOME      = homedir();
 const KEY_FILE  = `${HOME}/.claude/remote-webhook.key`;
@@ -50,6 +51,18 @@ if (!SECRET) { console.error('No ~/.claude/remote-webhook.key found'); process.e
 const HOST      = process.env.HOST || '127.0.0.1';
 const AUDIT_LOG = `${HOME}/.claude/mission-control-audit.jsonl`;
 
+// ── CORS origin restriction ───────────────────────────────────────────────────
+// The panel is served same-origin from this server, so cross-origin browser
+// access is not required by default. Set ALLOWED_ORIGIN to a specific origin
+// (e.g. "https://panel.example.com") to opt in to CORS from that origin only.
+// `Access-Control-Allow-Origin: *` is never emitted.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+function corsOriginFor(req) {
+  const reqOrigin = req.headers.origin;
+  if (!ALLOWED_ORIGIN || !reqOrigin) return null;
+  return reqOrigin === ALLOWED_ORIGIN ? reqOrigin : null;
+}
+
 const rateLimitWindowMs = 60 * 1000;
 const rateLimitMaxRequests = 100;
 const ipRequestCounts = new Map();
@@ -66,28 +79,10 @@ function loadAllowlist() {
 }
 const ALLOWLIST = loadAllowlist();
 
-function ipToInt(ip) {
-  const p = ip.split('.').map(Number);
-  if (p.length !== 4 || p.some(n => Number.isNaN(n) || n < 0 || n > 255)) return null;
-  return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0;
-}
+// IP parsing/matching helpers (ipToInt, normalizeIp, ipAllowed) live in
+// ./ip-utils.js so they can be unit tested in isolation.
 function ipAllowed(rawIp) {
-  if (!ALLOWLIST.length) return true;
-  const ip = String(rawIp || '').replace(/^::ffff:/, '');
-  if (ip === '::1' || ip === '127.0.0.1') return true; // loopback always allowed
-  const ipInt = ipToInt(ip);
-  for (const entry of ALLOWLIST) {
-    if (entry === ip) return true;
-    const m = entry.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
-    if (m && ipInt !== null) {
-      const base = ipToInt(m[1]); const bits = parseInt(m[2], 10);
-      if (base !== null && bits >= 0 && bits <= 32) {
-        const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-        if ((ipInt & mask) === (base & mask)) return true;
-      }
-    }
-  }
-  return false;
+  return ipAllowedFor(rawIp, ALLOWLIST);
 }
 
 // ── Failed-auth lockout ───────────────────────────────────────────────────────
@@ -195,7 +190,6 @@ function json(res, code, obj) {
   res.writeHead(code, {
     'Content-Type': 'application/json',
     'X-Content-Type-Options': 'nosniff',
-    'Access-Control-Allow-Origin': '*',
   });
   res.end(body);
 }
@@ -208,7 +202,6 @@ function html(res, body) {
 function text(res, code, body) {
   res.writeHead(code, {
     'Content-Type': 'text/plain; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
   });
   res.end(body);
 }
@@ -482,11 +475,19 @@ function routeGitHubEvent(event, payload) {
 // ── Request router ────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Restricted CORS: only echo back an Access-Control-Allow-Origin when the
+  // request's Origin header matches the configured ALLOWED_ORIGIN. No
+  // wildcard is ever emitted — the panel itself is served same-origin and
+  // does not need CORS at all.
+  const allowedOrigin = corsOriginFor(req);
+  if (allowedOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Hub-Signature-256');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  const clientIp = String(req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+  const clientIp = normalizeIp(req.socket.remoteAddress || 'unknown');
 
   // IP allowlist (if configured)
   if (!ipAllowed(clientIp)) {
@@ -723,7 +724,11 @@ const server = http.createServer(async (req, res) => {
         return json(res, 500, { error: `Dispatch failed: ${e.message}` });
       }
     } else {
-      // LEGACY FORMAT: Panel dispatch (backward compat)
+      // LEGACY FORMAT: Panel dispatch (backward compat).
+      // Routed through SessionRegistry (same as the Mission Control format)
+      // so legacy /run calls are subject to the same per-harness concurrency
+      // cap and show up in /sessions, /stop, and audit history — this used
+      // to call spawnAgent() directly and bypass the registry entirely.
       const { agent = 'jarvis', prompt, cwd = HOME } = parsed;
       if (!prompt) return json(res, 400, { error: 'prompt required' });
 
@@ -732,13 +737,39 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: `Unknown agent. Valid: ${validAgents.join(', ')}` });
       }
 
+      const running = registry.getRunning().filter(s => s.harness === 'claude');
+      if (running.length > 0) {
+        return json(res, 409, {
+          error: 'claude harness already running',
+          running: running[0],
+          message: 'Max 1 concurrent session per harness. Wait for current session to complete.',
+        });
+      }
+
+      const sessionRecord = registry.createSession({
+        harness: 'claude',
+        repo: cwd,
+        prompt,
+        agent: agent.toLowerCase(),
+        model: null,
+      });
+
       const run = await spawnAgent(agent.toLowerCase(), prompt, cwd);
       if (run.skipped) {
+        registry.exitSession(sessionRecord.id, 1);
         console.log(`[run-legacy] ${agent} SKIPPED (${run.reason}) prompt="${prompt.slice(0, 60)}"`);
         return json(res, 429, { status: 'skipped', agent, reason: run.reason, active: run.active, cap: run.cap });
       }
-      console.log(`[run-legacy] ${agent} id=${run.shortId || run.logId} prompt="${prompt.slice(0, 60)}"`);
-      return json(res, 200, { status: 'dispatched', agent, shortId: run.shortId, logId: run.logId,
+
+      registry.updateSession(sessionRecord.id, {
+        status: 'running',
+        logPath: run.logFile || null,
+        harnessSessionId: run.shortId || run.logId,
+        pid: run.pid || null,
+      });
+
+      console.log(`[run-legacy] ${agent} id=${sessionRecord.id} shortId=${run.shortId || run.logId} prompt="${prompt.slice(0, 60)}"`);
+      return json(res, 200, { status: 'dispatched', id: sessionRecord.id, agent, shortId: run.shortId, logId: run.logId,
         monitor: run.shortId ? `claude attach ${run.shortId}` : null });
     }
   }
