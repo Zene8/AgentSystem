@@ -4,6 +4,9 @@
 - Edit: `.agents/agents/<name>.md`
 - Sync to all CLIs: `node tools/sync-agents.js` (all platforms)
 - Verify: check `.agents/sync.log` for ERROR lines
+- Code-location searches ("where is X defined", "what calls Y"): prefer
+  `caveman:cavecrew-investigator` over the generic `Explore` agent — same result, ~60% less
+  context consumed by the tool-result injected back into the caller (#164).
 
 ## Memory
 Root: `~/agent-memory/nexus/` — shared across Claude, Antigravity
@@ -34,6 +37,17 @@ Edit `.agents/agents/<name>.md`, then run `node tools/sync-agents.js` to sync to
   queues or retries. `.github/workflows/runner-health-check.yml` runs on a schedule and opens/updates
   a tracking issue labeled `runner:down` if the self-hosted runner has no recent job; check that issue
   (or `gh api repos/:owner/:repo/actions/runners`) if a dispatched command appears to hang.
+
+  **Sam pre-merge audit timing (#164):** `sam-audit.yml` no longer runs on every `synchronize`
+  push — it fires once per PR at merge-prep time: on `opened` (non-draft PRs only), on
+  `ready_for_review` (draft→ready transition), or when the `ready-to-merge` label is added to an
+  already-open PR. To (re-)trigger Sam's gate on an open PR — e.g. after addressing feedback —
+  mark the PR "ready for review" if it's a draft, or add the `ready-to-merge` label. A non-draft
+  PR opened directly still gets exactly one automatic audit on `opened`.
+  `friday-audit.yml` (engineering review, informational only) fires once, on `opened`. Both
+  workflows skip docs-only changes (`docs/**`, `**/*.md` via `paths-ignore`) and PRs labeled
+  `spec`. `pr-auto-review` (cavecrew reviewer, formerly in `scheduled-tasks.yml`) is retired —
+  `friday-audit.yml` is the single engineering reviewer.
 
 - **Memory tools** (`tools/**`):
   No npm deps. Pure Node.js builtins + graph-lib.js imports only.

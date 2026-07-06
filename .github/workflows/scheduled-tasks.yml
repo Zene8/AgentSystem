@@ -1,10 +1,13 @@
 # #154: every job below reads or writes local-machine state that only exists on the
-# self-hosted runner's host (~/agent-memory/nexus/*, ~/.claude, or the local `claude` CLI for
-# pr-auto-review) — none of it is portable to a GitHub-hosted runner, so none of these jobs can
-# be migrated to ubuntu-latest. When the self-hosted runner is offline these jobs simply never
-# start (no failure signal on their own); `.github/workflows/runner-health-check.yml` runs on
-# ubuntu-latest specifically to detect that condition from outside and open/update a
-# `runner:down` tracking issue, which is the loud-failure signal for this whole file.
+# self-hosted runner's host (~/agent-memory/nexus/*, ~/.claude) — none of it is portable to a
+# GitHub-hosted runner, so none of these jobs can be migrated to ubuntu-latest. When the
+# self-hosted runner is offline these jobs simply never start (no failure signal on their own);
+# `.github/workflows/runner-health-check.yml` runs on ubuntu-latest specifically to detect that
+# condition from outside and open/update a `runner:down` tracking issue, which is the loud-failure
+# signal for this whole file.
+#
+# #164: pr-auto-review (cavecrew reviewer) job removed. friday-audit.yml is now the single
+# engineering reviewer on every PR; sam-audit.yml remains the security gate.
 name: Scheduled Tasks
 
 on:
@@ -13,9 +16,6 @@ on:
     - cron: '0 8 * * 1'
     # weekly-memory-decay + weekly-trust-scores + weekly-hygiene: Sunday midnight UTC
     - cron: '0 0 * * 0'
-  pull_request:
-    types: [opened]
-    branches: [dev]
 
 jobs:
   # memory-maintenance.js operates on the local ~/agent-memory brain — local machine state.
@@ -71,21 +71,3 @@ jobs:
         shell: pwsh
         run: node ${{ github.workspace }}\tools\deploy-hooks.js --check
         continue-on-error: true
-
-  # Requires the local `claude` CLI (not installable/licensed for use on hosted runners here).
-  pr-auto-review:
-    if: github.event_name == 'pull_request'
-    runs-on: self-hosted
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cavecrew review
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $prNumber = '${{ github.event.pull_request.number }}'
-          $repo = '${{ github.repository }}'
-          $result = claude -p "You are cavecrew-reviewer. Review the diff for PR #$prNumber in repo $repo and post findings as a PR comment. Be concise -- list any correctness bugs, missing tests, or standards violations." --model claude-sonnet-5 2>&1
-          gh pr comment $prNumber --body "$result"

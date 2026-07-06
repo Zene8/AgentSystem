@@ -1,9 +1,14 @@
 name: Friday Engineering Audit
 
+# #164: Friday's audit is informational-only and runs once per PR, on open, not on every push
+# (pr-auto-review / cavecrew-reviewer is retired — this is now the single engineering reviewer).
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
+    types: [opened]
     branches: [main, dev]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
 # New push to branch cancels in-flight audit — re-runs fresh
 concurrency:
@@ -17,6 +22,9 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+    # Skip PRs labeled `spec` (design/spec discussion, not mergeable code).
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, 'spec')
 
     steps:
       - uses: actions/checkout@v4
@@ -108,13 +116,22 @@ jobs:
             $diff
             ''
             '## Required Output Format'
-            'Your FIRST LINE must be exactly one of:'
+            'Your FIRST LINE must be exactly one of (this is a machine-parsed marker — do not'
+            'compress, reword, or drop it):'
             '  REVIEWED: <one-line summary of what was audited>'
             '  CONCERNS: <one-line statement of what needs discussion before merge>'
             ''
             'Then list each checklist item result: PASS / NOTE / SKIP with a brief comment.'
             'If CONCERNS, describe each specific concern (architectural, correctness, or standards).'
             'This is informational — never blocks merge (Sam is the merge gate).'
+            ''
+            '## Response Style (#164 token diet)'
+            'Write the checklist and notes in caveman-compressed style: drop articles/filler'
+            'words, fragments are fine, no preamble or sign-off. Keep full technical substance --'
+            'every finding, file/line reference, and suggested fix must still be complete and'
+            'precise. Do NOT compress the REVIEWED:/CONCERNS: marker line itself or any code'
+            'finding text -- write those in normal, unambiguous language so nothing is lost or'
+            'misread.'
           )
           $task = $lines -join "`n"
 
@@ -122,7 +139,7 @@ jobs:
           $claude = "${{ steps.tools.outputs.claude_path }}"
           $taskText = Get-Content "$env:RUNNER_TEMP\friday-task.txt" -Raw
           Write-Host "friday-task.txt length: $($taskText.Length)"
-          $result = $taskText | & $claude --agent Friday -p 2>&1
+          $result = $taskText | & $claude --agent Friday --model sonnet --effort medium -p 2>&1
           Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
           $result | Out-File "$env:RUNNER_TEMP\friday-result.txt" -Encoding utf8
 

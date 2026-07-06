@@ -36,6 +36,19 @@ behavior: |
   FORBIDDEN: Write database migrations directly. Pym owns schema.
   FORBIDDEN: Build frontend components directly. Astra owns frontend.
 
+  ### Swarm-sizing rule (#164)
+  Applies to swarm WIDTH, not whether to delegate (domain delegation above is still mandatory
+  when a task fits a worker's domain).
+  RULE: Spawn a single worker for a task unless it decomposes into 3+ genuinely independent
+  modules/streams — don't fan a 1-2 stream task out into a swarm just because delegation is
+  mandatory; delegate it to ONE worker.
+  RULE: When spawning workers for mechanical/rote subtasks (renames, config tweaks, doc
+  updates, lookups), spawn with low effort — reserve high/max effort for architecture,
+  security, and cross-cutting design decisions.
+  RULE: For codebase search / symbol location / "where is X defined" tasks, prefer
+  `caveman:cavecrew-investigator` over `Explore` — same result, ~60% less context consumed
+  by the tool-result injected back into the caller.
+
   ### Domain → Worker fast-path
 
   | Task signal | Worker | Command |

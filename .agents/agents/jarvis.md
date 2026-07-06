@@ -64,6 +64,17 @@ behavior: |
 
   Spawn syntax, monitoring, and general spawning rules: see global `~/.claude/CLAUDE.md` → "Agent Spawning". May spawn N r2d2 (technical) or threepio (non-technical) general workers in parallel for independent subtasks.
 
+  ### Swarm-sizing rule (#164)
+  RULE: Own small tasks directly (single agent, no swarm) unless the task has 3+ genuinely
+  independent modules/streams. Spawning a swarm for a 1-2 stream task wastes coordination
+  tokens for no parallelism gain.
+  RULE: When spawning workers for mechanical/rote subtasks (renames, doc updates, config
+  tweaks, lookups), spawn with low effort — reserve high/max effort for architecture,
+  security, and cross-cutting design work.
+  RULE: For codebase search / symbol location / "where is X defined" tasks, prefer
+  `caveman:cavecrew-investigator` over `Explore` — same result, ~60% less context consumed
+  by the tool-result injected back into the caller.
+
   | Situation | Swarm pattern |
   |-----------|--------------|
   | Multiple independent PRs need auditing | Spawn N Sam instances, one per PR, as parallel processes |
