@@ -10,6 +10,11 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+// #124: routing accuracy telemetry — reuse memory-router.js's promptHash algorithm and
+// routing-log.jsonl writer verbatim (do NOT reimplement the hash) so the "actual agent"
+// record we append here joins cleanly against the "hint" record memory-router.js already
+// wrote for the same prompt.
+const { promptHash, logRoutingEvent } = require('./memory-router');
 
 const TOOLS = process.env.AGENT_TOOLS_ROOT ||
   'C:/Users/natha/dev/AgentSystem/tools';
@@ -165,6 +170,55 @@ function extractEpisodicFacts(transcriptPath) {
   }
 }
 
+// #124: find the FIRST user-turn's text in the transcript (not just the newly-read tail —
+// the tail-offset optimization above exists for episodic extraction, but the first user
+// prompt may have scrolled out of the "new bytes" window by the time Stop fires, so this
+// reads the transcript independently). Returns the raw prompt text, or null if none found.
+function extractFirstUserPromptText(transcriptPath) {
+  try {
+    const raw = fs.readFileSync(transcriptPath, 'utf8');
+    const lines = raw.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      const msg = parsed && parsed.message;
+      if (!msg || msg.role !== 'user') continue;
+      const contentArr = Array.isArray(msg.content) ? msg.content : [msg.content];
+      for (const block of contentArr) {
+        const text = typeof block === 'string' ? block :
+          (block && block.type === 'text' ? block.text : '');
+        if (text && text.trim()) return text;
+      }
+    }
+  } catch {
+    // Non-fatal — routing telemetry is best-effort.
+  }
+  return null;
+}
+
+// #124: append the "actual agent used" half of the routing-accuracy telemetry pair to
+// routing-log.jsonl, keyed by the same promptHash memory-router.js used for its hint record.
+// Never throws — telemetry must never affect the episodic write-back it rides alongside.
+function logRoutingActual(facts, transcriptPath) {
+  try {
+    const firstPrompt = extractFirstUserPromptText(transcriptPath);
+    if (!firstPrompt) return;
+    logRoutingEvent({
+      ts: new Date().toISOString(),
+      promptHash: promptHash(firstPrompt),
+      agent: (facts && facts.agent) || 'unknown',
+    });
+  } catch {
+    // Non-fatal.
+  }
+}
+
 // Write an episodic node directly to sona-patterns.md (no CLI arg constraints).
 function writeEpisodicNode(facts, transcriptPath) {
   const writerScript = path.join(TOOLS, 'sona-episodic-write.js');
@@ -203,7 +257,10 @@ if (require.main === module) {
     try {
       if (transcriptPath) {
         const facts = extractEpisodicFacts(transcriptPath);
-        if (facts) writeEpisodicNode(facts, transcriptPath);
+        if (facts) {
+          writeEpisodicNode(facts, transcriptPath);
+          logRoutingActual(facts, transcriptPath);
+        }
       }
     } catch {
       // Non-fatal — worker has no one to report to.
@@ -239,3 +296,7 @@ if (require.main === module) {
 
   process.stdout.write('OK');
 }
+
+module.exports = {
+  extractEpisodicFacts, extractFirstUserPromptText, logRoutingActual, writeEpisodicNode,
+};

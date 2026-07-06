@@ -1,0 +1,88 @@
+'use strict';
+// #124: routing accuracy telemetry — sona-writeback-hook.js must extract the transcript's
+// first user-turn text and append {ts, promptHash, agent} to routing-log.jsonl, using the
+// EXACT promptHash algorithm from hooks/memory-router.js (sha1, trimmed, first 16 hex chars).
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { promptHash } = require('./memory-router.js');
+const { extractFirstUserPromptText, logRoutingActual } = require('./sona-writeback-hook.js');
+
+function writeTranscript(lines) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sona-writeback-test-'));
+  const p = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(p, lines.map(l => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+  return p;
+}
+
+test('extractFirstUserPromptText: finds the first user-turn text block', () => {
+  const p = writeTranscript([
+    { message: { role: 'system', content: [{ type: 'text', text: 'sys' }] } },
+    { message: { role: 'user', content: [{ type: 'text', text: '  fix the router bug  ' }] } },
+    { message: { role: 'assistant', content: [{ type: 'text', text: 'DONE: fixed it' }] } },
+  ]);
+  assert.equal(extractFirstUserPromptText(p), '  fix the router bug  ');
+});
+
+test('extractFirstUserPromptText: handles string content (not array)', () => {
+  const p = writeTranscript([
+    { message: { role: 'user', content: 'plain string prompt' } },
+  ]);
+  assert.equal(extractFirstUserPromptText(p), 'plain string prompt');
+});
+
+test('extractFirstUserPromptText: skips a user turn with only empty/whitespace text', () => {
+  const p = writeTranscript([
+    { message: { role: 'user', content: [{ type: 'text', text: '   ' }] } },
+    { message: { role: 'user', content: [{ type: 'text', text: 'real prompt' }] } },
+  ]);
+  assert.equal(extractFirstUserPromptText(p), 'real prompt');
+});
+
+test('extractFirstUserPromptText: returns null when no user turn exists', () => {
+  const p = writeTranscript([{ message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }]);
+  assert.equal(extractFirstUserPromptText(p), null);
+});
+
+test('extractFirstUserPromptText: returns null on nonexistent file (never throws)', () => {
+  assert.equal(extractFirstUserPromptText('/nonexistent/transcript.jsonl'), null);
+});
+
+test('extractFirstUserPromptText: tolerates malformed JSON lines', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sona-writeback-test-'));
+  const p = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(p, 'not-json\n' + JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'ok prompt' }] } }) + '\n', 'utf8');
+  assert.equal(extractFirstUserPromptText(p), 'ok prompt');
+});
+
+test('logRoutingActual: writes a record to routing-log.jsonl keyed by the shared promptHash', () => {
+  const uniquePrompt = `deploy this to prod ${Date.now()}-${Math.random()}`;
+  const p = writeTranscript([
+    { message: { role: 'user', content: [{ type: 'text', text: uniquePrompt }] } },
+  ]);
+  const expectedHash = promptHash(uniquePrompt);
+  assert.equal(expectedHash.length, 16);
+
+  assert.doesNotThrow(() => logRoutingActual({ agent: 'Friday' }, p));
+
+  // logRoutingActual delegates to memory-router.js's logRoutingEvent, which writes to the
+  // real ~/agent-memory/nexus/routing-log.jsonl (shared, fixed path — see #124 design).
+  // Verify the record landed and is joinable by promptHash + carries the actual agent.
+  const realLog = path.join(os.homedir(), 'agent-memory', 'nexus', 'routing-log.jsonl');
+  const raw = fs.readFileSync(realLog, 'utf8');
+  const lines = raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  const match = lines.find(l => l.promptHash === expectedHash);
+  assert.ok(match, 'expected a routing-log.jsonl record with the computed promptHash');
+  assert.equal(match.agent, 'Friday');
+});
+
+test('logRoutingActual: never throws when transcript has no user turn', () => {
+  const p = writeTranscript([{ message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }]);
+  assert.doesNotThrow(() => logRoutingActual({ agent: 'Friday' }, p));
+});
+
+test('logRoutingActual: never throws on nonexistent transcript path', () => {
+  assert.doesNotThrow(() => logRoutingActual({ agent: 'Friday' }, '/nonexistent/path.jsonl'));
+});

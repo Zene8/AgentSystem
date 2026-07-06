@@ -6,6 +6,7 @@ import {
   planSonaCompaction,
   summarizeArchive,
   extractAvoidFacts,
+  planRoutingLogCompaction,
 } from './memory-tune.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -107,4 +108,35 @@ test('extractAvoidFacts: only pulls success:no entries with an agent', () => {
   assert.equal(facts.length, 1);
   assert.equal(facts[0].agent, 'Ultron');
   assert.match(facts[0].fact, /^Avoid: wrong approach used/);
+});
+
+// #124: routing-log.jsonl compaction (same cap-and-archive policy as SONA, per #117).
+test('planRoutingLogCompaction: under cap → keeps everything, archives nothing', () => {
+  const lines = ['{"a":1}', '{"a":2}', ''];
+  const { keep, archive } = planRoutingLogCompaction(lines);
+  assert.equal(keep.length, 2);
+  assert.equal(archive.length, 0);
+});
+
+test('planRoutingLogCompaction: over line-count cap → archives oldest-first', () => {
+  const lines = ['{"n":1}', '{"n":2}', '{"n":3}', '{"n":4}', '{"n":5}'];
+  const { keep, archive } = planRoutingLogCompaction(lines, { maxLines: 3, maxBytes: 1e9 });
+  assert.equal(keep.length, 3);
+  assert.deepEqual(keep, ['{"n":3}', '{"n":4}', '{"n":5}']);
+  assert.deepEqual(archive, ['{"n":1}', '{"n":2}']);
+});
+
+test('planRoutingLogCompaction: over byte cap → archives oldest until under budget', () => {
+  const lines = ['a'.repeat(10), 'b'.repeat(10), 'c'.repeat(10)];
+  const { keep, archive } = planRoutingLogCompaction(lines, { maxLines: 1e9, maxBytes: 22 });
+  assert.equal(archive.length, 1);
+  assert.deepEqual(archive, ['a'.repeat(10)]);
+  assert.equal(keep.length, 2);
+});
+
+test('planRoutingLogCompaction: ignores blank lines', () => {
+  const lines = ['{"n":1}', '', '  ', '{"n":2}'];
+  const { keep, archive } = planRoutingLogCompaction(lines);
+  assert.equal(keep.length, 2);
+  assert.equal(archive.length, 0);
 });
