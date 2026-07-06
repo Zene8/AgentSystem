@@ -77,13 +77,26 @@ jobs:
           # stop stderr noise from becoming a terminating exception.
           $ErrorActionPreference = 'Continue'
           $gh = "${{ steps.tools.outputs.gh_path }}"
-          # Cap at 400 lines — enough for full context, stays inside prompt window
-          & $gh pr diff ${{ github.event.pull_request.number }} `
-            | Select-Object -First 400 `
-            | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "gh pr diff failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
+          Write-Host "Using gh: $gh"
+          Write-Host "Exists: $(Test-Path $gh)"
+          try {
+            $verOut = & $gh --version 2>&1
+            Write-Host "gh --version exit=$LASTEXITCODE output=$verOut"
+          } catch {
+            Write-Host "gh --version threw: $($_.Exception.Message)"
+          }
+          try {
+            $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
+            $ghExit = $LASTEXITCODE
+            Write-Host "gh pr diff exit=$ghExit"
+            $diffOut | Select-Object -First 400 | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+          } catch {
+            Write-Host "gh pr diff threw: $($_.Exception.Message)"
+            $ghExit = 1
+          }
+          if ($ghExit -ne 0) {
+            Write-Error "gh pr diff failed with exit code $ghExit"
+            exit $ghExit
           }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
