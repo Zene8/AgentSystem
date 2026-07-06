@@ -23,44 +23,38 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve gh/claude PATH for runner service context
+      - name: Resolve gh/claude absolute paths for runner service context
+        id: tools
         # #131/#154 follow-up: the self-hosted runner (nathan-desktop) runs as a Windows service
-        # under a logon task, which does NOT reliably inherit the interactive user's PATH — this
-        # is the same root cause class as the earlier `pwsh: command not found` failure. `gh pr
-        # diff` failed here with $LASTEXITCODE -1 (native "term not recognized"), meaning `gh`
-        # itself isn't resolvable in this job's PATH even though it works in an interactive
-        # `natha` shell. Search common Windows install locations and prepend anything found to
-        # $GITHUB_PATH so it's available for the rest of this job's steps (gh is also required by
-        # actions/github-script indirectly via the CLI-based steps below, and `claude` by the
-        # "Run Sam security audit" step).
+        # under a logon task, which does NOT reliably inherit the interactive user's PATH — same
+        # root cause class as the earlier `pwsh: command not found` failure. `gh pr diff` failed
+        # here with $LASTEXITCODE -1 (native "term not recognized") even after prepending known
+        # install dirs to $GITHUB_PATH (both a plain and a BOM-less UTF8 write were tried — the
+        # runner never picked up either for the next step, for reasons not further diagnosable
+        # from the workflow file alone). Bypassing PATH resolution entirely by resolving absolute
+        # exe paths once here and invoking them by full path in every later step is more reliable
+        # than depending on $GITHUB_PATH/service PATH inheritance behaving as documented.
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
-          $candidates = @(
-            "$env:ProgramFiles\GitHub CLI",
-            "${env:ProgramFiles(x86)}\GitHub CLI",
-            "$env:LOCALAPPDATA\Programs\GitHub CLI",
-            "$env:ProgramFiles\nodejs",
-            "$env:APPDATA\npm",
-            "$env:LOCALAPPDATA\Programs\claude",
-            "$env:USERPROFILE\.local\bin",
-            "$env:USERPROFILE\AppData\Roaming\npm"
+          $ghCandidates = @(
+            "$env:ProgramFiles\GitHub CLI\gh.exe",
+            "${env:ProgramFiles(x86)}\GitHub CLI\gh.exe",
+            "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
           )
-          foreach ($dir in $candidates) {
-            if ($dir -and (Test-Path $dir)) {
-              Write-Host "Adding to PATH: $dir"
-              # Add-Content's default encoding in Windows PowerShell 5.1 is UTF-16LE, and
-              # `-Encoding utf8` in 5.1 writes a UTF-8 BOM. $GITHUB_PATH is a plain UTF-8 (no BOM)
-              # file the runner appends to across all steps in the job — either variant can
-              # corrupt/break parsing of the file's existing lines, which is why `gh` was "found"
-              # via its absolute path in THIS step's own diagnostic but still unresolvable by name
-              # in the very next step (the PATH update silently failed to apply). Use
-              # System.IO.File::AppendAllLines with a plain UTF8Encoding($false) to avoid any BOM.
-              [System.IO.File]::AppendAllLines($env:GITHUB_PATH, [string[]]@($dir), (New-Object System.Text.UTF8Encoding($false)))
-            }
-          }
-          Write-Host "gh found at: $((Get-Command gh -ErrorAction SilentlyContinue).Source)"
-          Write-Host "claude found at: $((Get-Command claude -ErrorAction SilentlyContinue).Source)"
+          $claudeCandidates = @(
+            "$env:USERPROFILE\.local\bin\claude.exe",
+            "$env:LOCALAPPDATA\Programs\claude\claude.exe",
+            "$env:APPDATA\npm\claude.cmd"
+          )
+          $gh = ($ghCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+          $claude = ($claudeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+          if (-not $gh) { $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source }
+          if (-not $claude) { $claude = (Get-Command claude -ErrorAction SilentlyContinue).Source }
+          Write-Host "Resolved gh: $gh"
+          Write-Host "Resolved claude: $claude"
+          "gh_path=$gh" >> $env:GITHUB_OUTPUT
+          "claude_path=$claude" >> $env:GITHUB_OUTPUT
 
       - name: Get PR diff
         # #131/#154 follow-up: self-hosted runner (nathan-desktop) has Windows PowerShell 5.1
@@ -82,8 +76,9 @@ jobs:
           # if any land in the pipeline. $ErrorActionPreference = 'Continue' alone is enough to
           # stop stderr noise from becoming a terminating exception.
           $ErrorActionPreference = 'Continue'
+          $gh = "${{ steps.tools.outputs.gh_path }}"
           # Cap at 400 lines — enough for full context, stays inside prompt window
-          gh pr diff ${{ github.event.pull_request.number }} `
+          & $gh pr diff ${{ github.event.pull_request.number }} `
             | Select-Object -First 400 `
             | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
           if ($LASTEXITCODE -ne 0) {
@@ -158,7 +153,8 @@ jobs:
           # --agent sam: run the real Sam agent definition (.agents/agents/sam.md), not a bare
           # model call. Sam's "CI Pre-Merge Audit Mode" there emits the APPROVED:/BLOCKED:
           # vocabulary this workflow parses below (aligned with sam.md, see issue #112).
-          $result = claude --agent sam -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
+          $claude = "${{ steps.tools.outputs.claude_path }}"
+          $result = & $claude --agent sam -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
           if ($result -match "^APPROVED:") {
