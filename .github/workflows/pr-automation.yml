@@ -75,6 +75,40 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
 
+      - name: Add spec/implementation label based on branch/title
+        run: |
+          # Check if this is a spec/plan PR
+          if [[ "$BRANCH" =~ issue-[0-9]+-spec ]] || [[ "$TITLE" =~ ^\[(Spec|Plan)\] ]]; then
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label spec
+            echo "Added 'spec' label"
+          # Check if this is an implementation PR (has issue number but NOT spec)
+          elif [[ "$BRANCH" =~ issue-[0-9]+- ]] && ! [[ "$BRANCH" =~ issue-[0-9]+-spec ]]; then
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label implementation
+            echo "Added 'implementation' label"
+
+            # Try to find linked spec PR for this issue
+            if [[ "$BRANCH" =~ issue-([0-9]+) ]]; then
+              ISSUE_NUM="${BASH_REMATCH[1]}"
+              # Search for spec PRs for this issue
+              SPEC_PR=$(gh pr list --repo "$REPO" --search "issue-${ISSUE_NUM}-spec in:head" --json number --jq '.[0].number // empty')
+              if [ -z "$SPEC_PR" ]; then
+                # Fallback: search by title for [Spec] or [Plan] mentioning the issue
+                SPEC_PR=$(gh pr list --repo "$REPO" --search "#${ISSUE_NUM} [Spec] OR #${ISSUE_NUM} [Plan]" --json number --jq '.[0].number // empty')
+              fi
+              if [ -n "$SPEC_PR" ]; then
+                gh pr comment "$PR_NUMBER" --repo "$REPO" --body "Implementation PR for spec/plan PR #${SPEC_PR}."
+                echo "Linked to spec PR #$SPEC_PR"
+              fi
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        continue-on-error: true
+
   issue-opened:
     if: github.event_name == 'issues'
     name: Assign issue to Zene8

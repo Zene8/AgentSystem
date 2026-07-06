@@ -50,5 +50,5 @@ Edit `.agents/agents/<name>.md`, then run `node tools/sync-agents.js` to sync to
 - Query graph: `node tools/graph/graph-query.js agentsystem <keywords>`
 - Update weights: `node tools/graph/graph-weight.js visit agentsystem <source> <target>`
 - Known repos: `~/agent-memory/nexus/known-repos.json`
-- Shared memory: `~/agent-memory/nexus/` — same path for Claude, Gemini, Copilot
+- Shared memory: `~/agent-memory/nexus/` — same path for Claude Code and Gemini
 <!-- END AGENT-SYSTEM-BOOTSTRAP -->

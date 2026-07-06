@@ -253,7 +253,6 @@ See `agents-memory/quarterly-reviews.md` for full schedule and framework.
 
 Generates agent configs for:
 - Claude Code: `%USERPROFILE%\.claude\agents\`
-- Copilot: `%USERPROFILE%\.copilot\agents\`
 - Gemini: `%USERPROFILE%\.gemini\agents\`
 
 **Verification after sync:**
