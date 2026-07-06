@@ -26,17 +26,29 @@ function extractAgentName(payload) {
     payload.subagent_type || payload.agent_type || payload.agent || payload.name || ''
   ).trim();
 }
-module.exports = { extractAgentName };
+
+// Pull task keywords from the spawn prompt so the injected slice is task-relevant,
+// not just tier-relevant. Top ~8 distinctive words (>=4 chars, deduped) is enough for
+// BM25 to bias retrieval without shipping the whole prompt to a subprocess arg.
+function extractKeywords(payload) {
+  const prompt = String(payload?.prompt || payload?.task || payload?.description || '');
+  if (!prompt) return '';
+  const words = prompt.toLowerCase().match(/[a-z][a-z0-9-]{3,}/g) || [];
+  return [...new Set(words)].slice(0, 8).join(' ');
+}
+module.exports = { extractAgentName, extractKeywords };
 
 if (require.main === module) {
   let agent = '';
   let cwd = process.cwd();
+  let keywords = '';
 
   try {
     const raw = fs.readFileSync(0, 'utf8');
     const payload = JSON.parse(raw);
     agent = extractAgentName(payload);
     cwd = payload.cwd || cwd;
+    keywords = extractKeywords(payload);
   } catch {
     // Malformed/missing stdin — proceed with empty agent name (worker-tier default).
   }
@@ -44,6 +56,7 @@ if (require.main === module) {
   let out = '';
   try {
     const args = [path.join(TOOLS, 'memory-context.js'), '--subagent', `--agent=${agent}`, `--cwd=${cwd}`];
+    if (keywords) args.push(`--keywords=${keywords}`);
     out = execFileSync(process.execPath, args, { timeout: 1800, encoding: 'utf8' });
   } catch {
     // Never block subagent start on a memory-context failure.

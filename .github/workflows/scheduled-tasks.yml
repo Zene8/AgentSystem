@@ -6,7 +6,7 @@ on:
     - cron: '0 9 * * 1-5'
     # weekly-brain-consolidation: Monday 8am UTC
     - cron: '0 8 * * 1'
-    # weekly-memory-decay + weekly-trust-scores: Sunday midnight UTC
+    # weekly-memory-decay + weekly-trust-scores + weekly-hygiene: Sunday midnight UTC
     - cron: '0 0 * * 0'
   pull_request:
     types: [opened]
@@ -17,37 +17,60 @@ jobs:
     if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1-5'
     runs-on: self-hosted
     steps:
+      - uses: actions/checkout@v4
       - name: Daily standup
         shell: pwsh
         run: |
-          node C:\Users\natha\AgentSystem\tools\agent-message.js --from=Jarvis --to=Jarvis --subject='daily-standup' --action='review priority:high issues and post briefing'
+          node ${{ github.workspace }}\tools\agent-message.js --from=Jarvis --to=Jarvis --subject='daily-standup' --action='review priority:high issues and post briefing'
 
   weekly-brain-consolidation:
     if: github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1'
     runs-on: self-hosted
     steps:
+      - uses: actions/checkout@v4
       - name: Run full memory sleep cycle
         shell: pwsh
         run: |
-          node C:\Users\natha\AgentSystem\tools\memory-maintenance.js --reflect
+          node ${{ github.workspace }}\tools\memory-maintenance.js --reflect
 
   weekly-memory-decay:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
     runs-on: self-hosted
     steps:
+      - uses: actions/checkout@v4
       - name: Memory decay
         shell: pwsh
         run: |
-          node C:\Users\natha\AgentSystem\tools\memory-decay.js --brain=agentsystem
-          node C:\Users\natha\AgentSystem\tools\memory-decay.js --brain=personal-brain
+          node ${{ github.workspace }}\tools\memory-decay.js --brain=agentsystem
+          node ${{ github.workspace }}\tools\memory-decay.js --brain=personal-brain
 
   weekly-trust-scores:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
     runs-on: self-hosted
     steps:
+      - uses: actions/checkout@v4
       - name: Compute trust scores
         shell: pwsh
-        run: node C:\Users\natha\AgentSystem\tools\compute-trust-scores.js
+        run: node ${{ github.workspace }}\tools\compute-trust-scores.js
+
+  weekly-hygiene:
+    if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rotate jsonl logs (session-log etc.)
+        shell: pwsh
+        run: node ${{ github.workspace }}\tools\rotate-logs.js --threshold-mb=5 --keep=3
+      - name: Prune ~/.claude tmp orphans + backup churn
+        shell: pwsh
+        run: node ${{ github.workspace }}\tools\claude-json-hygiene.js --keep=5 --tmp-age-hours=24
+      - name: Dedupe caveman plugin cache
+        shell: pwsh
+        run: node ${{ github.workspace }}\tools\caveman-cache-fix.js
+      - name: Report hook drift (repo vs ~/.claude)
+        shell: pwsh
+        run: node ${{ github.workspace }}\tools\deploy-hooks.js --check
+        continue-on-error: true
 
   pr-auto-review:
     if: github.event_name == 'pull_request'

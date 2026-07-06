@@ -74,7 +74,15 @@ export function parseClassifiedFacts(raw, { repos = [], agents = [] } = {}) {
     const l = line.trim();
     if (!l) continue;
     let obj;
-    try { obj = JSON.parse(l); } catch { continue; }
+    try { obj = JSON.parse(l); } catch {
+      // Fallback: LLM emitted a plain bullet ("- fact") instead of JSONL — accept as personal.
+      const m = l.match(/^[-*]\s+(.+)$/);
+      if (m) {
+        out.push({ fact: m[1].trim(), tier: 'personal', target: '' });
+        if (out.length >= MAX_FACTS) break;
+      }
+      continue;
+    }
     if (!obj || typeof obj.fact !== 'string' || !obj.fact.trim()) continue;
 
     let tier = VALID_TIERS.has(obj.tier) ? obj.tier : 'personal';

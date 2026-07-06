@@ -2,18 +2,15 @@ name: Tests
 
 on:
   push:
-    branches: [main, dev, 'feat/**']
+    branches: [main, dev]
   pull_request:
     branches: [main, dev]
 
 jobs:
   test:
     name: Node.js tests
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        node-version: ['22']
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -21,25 +18,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '22'
 
-      - name: Run graph tests
-        run: node --test tests/test_graph.js
-
-      - name: Run memory-lookup tests
-        run: node --test tests/test_memory_lookup.js
-
-      - name: Run decision-log tests
-        run: node --test tests/test_decision_log.js
-
-      - name: Run known-repos tests
-        run: node --test tests/test_known_repos.js
-
-      - name: Run memory-search tests
-        run: node --test tests/test_memory_search.js
-
-      - name: Run session-namer tests
-        run: node --test tests/test_session_namer.js
-
-      - name: Run task-scratchpad tests
-        run: node --test tests/test_task_scratchpad.js
+      # node --test globs its args (Node >=22). Quoted so node expands, not bash.
+      - name: Run all tests
+        run: node --test "tests/test_*.js" "tools/*.test.js" "tools/graph/*.test.js" "hooks/*.test.js"

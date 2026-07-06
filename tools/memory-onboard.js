@@ -96,7 +96,11 @@ export function readTranscriptText(filePath) {
       }
     } catch { /* skip malformed lines */ }
   }
-  return texts.join('\n\n');
+  if (texts.length) return texts.join('\n\n');
+  // Plain-text transcript (not JSONL): no line parsed as JSON — return raw content.
+  const raw = lines.join('\n').trim();
+  const looksJsonl = lines.length > 0 && lines.every(l => l.trimStart().startsWith('{'));
+  return looksJsonl ? '' : raw;
 }
 
 // ── LLM extraction (same contract as memory-capture.js) ──────────────────────
