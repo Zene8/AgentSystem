@@ -1,9 +1,20 @@
 name: Sam Security Audit
 
+# #164: Sam runs exactly ONCE per PR at merge-prep time, not once per push.
+# - `opened` (non-draft only, see job `if:` below): a normal PR opened directly (not as a draft)
+#   is ready immediately — without this, a non-draft PR that never gets the ready-to-merge label
+#   or a draft->ready transition would merge un-audited.
+# - `ready_for_review`: covers the draft->ready transition.
+# - `labeled` (gated to `ready-to-merge` in the job `if:` below): lets a human re-request the
+#   audit at merge time on a PR that's already open (e.g. after addressing feedback).
+# `synchronize` is intentionally NOT a trigger — that was the old per-push behavior this replaces.
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
+    types: [opened, ready_for_review, labeled]
     branches: [main, dev]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
 # New push to branch cancels in-flight audit — re-runs fresh
 concurrency:
@@ -17,6 +28,15 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+    # De-dupe: exactly one audit per PR at merge-prep time (see trigger comment above). Also
+    # skip PRs labeled `spec` (design/spec discussion, not mergeable code).
+    if: >-
+      !contains(github.event.pull_request.labels.*.name, 'spec') &&
+      (
+        (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
+        github.event.action == 'ready_for_review' ||
+        (github.event.action == 'labeled' && github.event.label.name == 'ready-to-merge')
+      )
 
     steps:
       - uses: actions/checkout@v4
@@ -153,12 +173,21 @@ jobs:
             $diff
             ''
             '## Required Output Format'
-            'Your FIRST LINE must be exactly one of:'
+            'Your FIRST LINE must be exactly one of (this is a machine-parsed marker — do not'
+            'compress, reword, or drop it):'
             '  APPROVED: <one-line summary of what was audited>'
             '  BLOCKED: <one-line reason for blocking>'
             ''
             'Then list each checklist item result: PASS / FAIL / N/A with a brief note.'
             'If BLOCKED, list each specific issue that must be resolved before merge.'
+            ''
+            '## Response Style (#164 token diet)'
+            'Write the checklist and notes in caveman-compressed style: drop articles/filler'
+            'words, fragments are fine, no preamble or sign-off. Keep full technical substance --'
+            'every security finding, file/line reference, and required fix must still be'
+            'complete and precise. Do NOT compress the APPROVED:/BLOCKED: marker line itself or'
+            'any code/security finding text -- write those in normal, unambiguous language so'
+            'nothing is lost or misread.'
           )
           $task = $lines -join "`n"
 
@@ -182,7 +211,7 @@ jobs:
           $claude = "${{ steps.tools.outputs.claude_path }}"
           $taskText = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw
           Write-Host "sam-task.txt length: $($taskText.Length)"
-          $result = $taskText | & $claude --agent Sam -p 2>&1
+          $result = $taskText | & $claude --agent Sam --model sonnet --effort medium -p 2>&1
           Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
