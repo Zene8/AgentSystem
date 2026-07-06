@@ -142,11 +142,17 @@ if (isMain) {
 
   // Adaptive importance: blend section-assigned static importance with learned access signal
   // (raw normalised visit_count, recency-free) so frequently-recalled low-importance facts rise.
+  // Skip superseded nodes to avoid injecting conflicting information.
   const importanceMap = new Map();
+  const supersededNodes = new Set();
   for (const nodeId of graph.nodes) {
     const nodePath = join(nodesDir, `${nodeId}.md`);
     if (!existsSync(nodePath)) continue;
     const { frontmatter } = parseFrontmatter(readFileSync(nodePath, 'utf8'));
+    if (frontmatter.superseded_by) {
+      supersededNodes.add(nodeId);
+      continue;
+    }
     const staticImp = parseFloat(frontmatter.importance ?? frontmatter.salience ?? 0);
     const s = Number.isFinite(staticImp) ? staticImp : 0;
     const accessSig = nodeAccessSignal(graph.edges, nodeId);
@@ -213,31 +219,33 @@ if (isMain) {
 
   const MAX_BM25 = 10.0;
 
-  const scored = graph.nodes.map(nodeId => {
-    const rawEdgeScore = graph.edges
-      .filter(e => e.source === nodeId || e.target === nodeId)
-      .reduce((max, e) => Math.max(max, effectiveComposite(e)), 0);
+  const scored = graph.nodes
+    .filter(nodeId => !supersededNodes.has(nodeId)) // Skip superseded nodes
+    .map(nodeId => {
+      const rawEdgeScore = graph.edges
+        .filter(e => e.source === nodeId || e.target === nodeId)
+        .reduce((max, e) => Math.max(max, effectiveComposite(e)), 0);
 
-    const primed = primedNeighbors.has(nodeId);
-    const edgeScore = primed ? Math.min(1.0, rawEdgeScore + PRIMING_BONUS) : rawEdgeScore;
+      const primed = primedNeighbors.has(nodeId);
+      const edgeScore = primed ? Math.min(1.0, rawEdgeScore + PRIMING_BONUS) : rawEdgeScore;
 
-    let keywordScore = 0;
-    if (keywords.length > 0 && contentCache) {
-      const content = contentCache.get(nodeId);
-      if (content) {
-        const cacheN = contentCache.size;
-        const raw = computeBM25(keywords, content, dfMap, cacheN, bm25Avgdl);
-        keywordScore = Math.min(1.0, raw / (keywords.length * MAX_BM25));
+      let keywordScore = 0;
+      if (keywords.length > 0 && contentCache) {
+        const content = contentCache.get(nodeId);
+        if (content) {
+          const cacheN = contentCache.size;
+          const raw = computeBM25(keywords, content, dfMap, cacheN, bm25Avgdl);
+          keywordScore = Math.min(1.0, raw / (keywords.length * MAX_BM25));
+        }
       }
-    }
 
-    const base = keywords.length > 0
-      ? edgeScore * 0.4 + keywordScore * 0.6
-      : edgeScore;
-    const score = needProbabilityScore(base, importanceMap.get(nodeId));
+      const base = keywords.length > 0
+        ? edgeScore * 0.4 + keywordScore * 0.6
+        : edgeScore;
+      const score = needProbabilityScore(base, importanceMap.get(nodeId));
 
-    return { nodeId, score, edgeScore, keywordScore, primed };
-  });
+      return { nodeId, score, edgeScore, keywordScore, primed };
+    });
 
   const directResults = scored
     .filter(r => r.score > 0 || keywords.length === 0)

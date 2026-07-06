@@ -31,11 +31,13 @@ export function detectProject(cwd, registry) {
   return repo ? repo.slug : null;
 }
 
-// Pure: given an array of { id, importance } objects (any order), return the top-N ids
-// by descending importance. All facts remain queryable via graph-query; this is just the
+// Pure: given an array of { id, importance, superseded_by? } objects (any order), return the top-N ids
+// by descending importance, excluding superseded nodes. All facts remain queryable via graph-query; this is just the
 // working-set cap for injected context (human working memory ≈ 4-7 chunks, Cowan 2001).
+// Superseded nodes should be skipped to avoid injecting conflicting information.
 export function selectCoreFacts(facts, n) {
   return facts
+    .filter(f => !f.superseded_by) // Skip superseded nodes
     .slice()
     .sort((a, b) => b.importance - a.importance)
     .slice(0, n)
@@ -107,7 +109,13 @@ function hotUserFacts(nexus) {
     const p = join(dir, 'nodes', `${nodeId}.md`);
     if (!existsSync(p)) continue;
     const { frontmatter } = parseFrontmatter(readFileSync(p, 'utf8'));
-    if (frontmatter.hot === true) out.push({ id: nodeId, importance: parseFloat(frontmatter.importance ?? 0) || 0 });
+    if (frontmatter.hot === true) {
+      out.push({
+        id: nodeId,
+        importance: parseFloat(frontmatter.importance ?? 0) || 0,
+        superseded_by: frontmatter.superseded_by,
+      });
+    }
   }
   return out;
 }
