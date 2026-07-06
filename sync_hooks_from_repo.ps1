@@ -229,6 +229,20 @@ $injectEntries = @(
         matcher       = 'Write|Edit|NotebookEdit'
     },
     [PSCustomObject]@{
+        # #154: routine-dispatch.js already parses Bash PostToolUse payloads to detect
+        # `gh pr create` and schedule the auto-resolve-pr-comments routine (see
+        # hooks/routine-dispatch.js), but it was only ever wired up on the
+        # Write|Edit|NotebookEdit matcher above, so it never received Bash tool events and the
+        # auto-resolve-pr-comments routine was effectively dead. This entry gives it a second
+        # registration on the Bash matcher so both trigger paths are covered.
+        event         = 'PostToolUse'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
+        timeout       = 5
+        statusMessage = 'Checking routines (Bash)...'
+        matcher       = 'Bash'
+    },
+    [PSCustomObject]@{
         event         = 'PostToolUse'
         type          = 'command'
         command       = "node `"$claudeHooksNorm/tool-output-compress.js`""

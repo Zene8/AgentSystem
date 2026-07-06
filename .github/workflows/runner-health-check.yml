@@ -13,6 +13,11 @@ on:
 
 permissions:
   issues: write
+  # The `GET /repos/{owner}/{repo}/actions/runners` endpoint requires the
+  # "Administration" repo permission to read — without this the default
+  # GITHUB_TOKEN gets a 403 "Resource not accessible by integration" and the
+  # whole job fails before it can report anything (observed 2026-07-06).
+  administration: read
 
 jobs:
   check-runner:
@@ -31,6 +36,15 @@ jobs:
           else
             echo "down=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Ensure tracking label exists
+        if: steps.check.outputs.down == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "runner:down" --color "B60205" \
+            --description "Self-hosted runner offline; agent-dispatch/sam-audit/sync-verification blocked" \
+            2>/dev/null || true
 
       - name: Find existing tracking issue
         id: find
