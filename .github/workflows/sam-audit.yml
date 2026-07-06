@@ -32,10 +32,25 @@ jobs:
         # script bodies used here (no PS7-only features used).
         shell: powershell
         run: |
+          # GitHub Actions sets $ErrorActionPreference = 'Stop' for pwsh/powershell steps. Native
+          # exes like `gh` writing ANYTHING to stderr (even a benign notice) get turned into a
+          # terminating PowerShell error under that setting, aborting the script with no visible
+          # output — this is what caused a silent exit-code-1 failure here with zero log lines.
+          # Force 'Continue' for this native-command block and check $LASTEXITCODE explicitly
+          # instead of relying on PowerShell's stream-based error handling.
+          # Do NOT merge stderr with 2>&1 here: in PowerShell 5.1 that wraps each stderr line from
+          # a native exe in a NativeCommandError object, which corrupts the plain-text diff file
+          # if any land in the pipeline. $ErrorActionPreference = 'Continue' alone is enough to
+          # stop stderr noise from becoming a terminating exception.
+          $ErrorActionPreference = 'Continue'
           # Cap at 400 lines — enough for full context, stays inside prompt window
           gh pr diff ${{ github.event.pull_request.number }} `
             | Select-Object -First 400 `
             | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "gh pr diff failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -64,6 +79,9 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
+          # Same $ErrorActionPreference = 'Stop' trap as "Get PR diff" above — `claude` writing
+          # anything to stderr would otherwise abort this step before sam-result.txt is written.
+          $ErrorActionPreference = 'Continue'
           $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
           $lines = @(
             'You are Sam (CSO). Run your pre-merge security audit on this pull request.'
