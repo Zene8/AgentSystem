@@ -166,13 +166,21 @@ jobs:
           # --agent sam: run the real Sam agent definition (.agents/agents/sam.md), not a bare
           # model call. Sam's "CI Pre-Merge Audit Mode" there emits the APPROVED:/BLOCKED:
           # vocabulary this workflow parses below (aligned with sam.md, see issue #112).
-          # NOTE: agent names are case-sensitive — `--agent sam` silently fails with
-          # "--agent 'sam' not found" (the registered agent is `Sam`, capitalized). This produced
-          # a bogus "blocked" result (claude's error/version output didn't match "^APPROVED:", so
-          # every PR got auto-blocked regardless of actual diff content). Confirmed locally via
-          # `claude --agent sam -p "..."` -> "--agent 'sam' not found. Available agents: ... Sam ...".
+          # NOTE 1: agent names are case-sensitive — `--agent sam` silently fails with
+          # "--agent 'sam' not found" (the registered agent is `Sam`, capitalized).
+          #
+          # NOTE 2: passing the (large, quote/backtick-laden PR diff) prompt as a literal
+          # command-line ARGUMENT — `-p (Get-Content ... -Raw)` — is fragile on Windows: CreateProcess
+          # argv quoting can mis-split a multi-KB string containing embedded double-quotes/backticks
+          # from a diff, truncating what `claude` actually receives as its prompt. This produced
+          # near-instant (~1-2s) completions whose output never matched "^APPROVED:" (e.g. a bare
+          # greeting or the CLI's version banner), so every PR was auto-blocked regardless of diff
+          # content — the true root cause of #131 once the case-sensitivity bug (note 1) was also
+          # fixed. `claude -p` reads the prompt from stdin when no positional prompt is given, which
+          # avoids argv-length/quoting limits entirely — switched to piping the task text in via
+          # stdin instead.
           $claude = "${{ steps.tools.outputs.claude_path }}"
-          $result = & $claude --agent Sam -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
+          $result = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw | & $claude --agent Sam -p 2>&1
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
           if ($result -match "^APPROVED:") {
