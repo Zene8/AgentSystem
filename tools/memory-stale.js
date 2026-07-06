@@ -1,31 +1,34 @@
 #!/usr/bin/env node
 // memory-stale.js — scanner for orphaned nodes and weak facts
 
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   agentMemoryRoot,
   readGraph,
   writeGraph,
   pruneOrphanedEdges,
+  parseFrontmatter,
 } from './graph/graph-lib.js';
 
 function printHelp() {
   console.log(`
-memory-stale — scanner for orphaned nodes and weak facts
+memory-stale — scanner for orphaned nodes, weak facts, and contradictions
 
 Usage:
-  node tools/memory-stale.js --brain=<slug> [--fix] [--min-composite=0.1]
+  node tools/memory-stale.js --brain=<slug> [--fix] [--min-composite=0.1] [--contradictions]
 
 Options:
   --brain=<slug>            Brain slug (e.g. user-brain, friday, jarvis) [required]
   --fix                     Remove orphaned nodes from graph.nodes (do NOT delete .md files)
   --min-composite=<value>   Composite threshold for weak facts (default: 0.1)
+  --contradictions          Find and list contradicting facts (superseded nodes)
   --help                    Print this help message
 
 Behavior:
   1. Load graph from {agentMemoryRoot}/nexus/{brain}/graph.json
-  2. Detect orphaned nodes: in graph.nodes but have zero active edges (valid_until === null)
-  3. Detect weak facts: nodes where ALL their active edges have composite < min-composite
+  2. Default: Detect orphaned nodes and weak facts
+  3. --contradictions: List nodes marked as superseded (with their superseding node)
   4. Print report
   5. --fix: remove orphaned nodes from graph.nodes and call pruneOrphanedEdges
   6. Write graph back if --fix and changes made
@@ -65,9 +68,11 @@ function main() {
 
   const brain = args.brain;
   const shouldFix = flags.includes('fix');
+  const shouldShowContradictions = flags.includes('contradictions');
   const minComposite = parseFloat(args['min-composite'] || '0.1');
 
-  const graphPath = join(agentMemoryRoot(), 'nexus', brain, 'graph.json');
+  const nexusDir = join(agentMemoryRoot(), 'nexus', brain);
+  const graphPath = join(nexusDir, 'graph.json');
 
   let graph;
   try {
@@ -75,6 +80,38 @@ function main() {
   } catch (err) {
     console.error(`Error: graph.json not found at ${graphPath}`);
     process.exit(1);
+  }
+
+  // --contradictions mode: list superseded nodes
+  if (shouldShowContradictions) {
+    const nodesDir = join(nexusDir, 'nodes');
+    const contradictions = [];
+    for (const nodeId of graph.nodes) {
+      const nodePath = join(nodesDir, `${nodeId}.md`);
+      if (!existsSync(nodePath)) continue;
+      try {
+        const { frontmatter } = parseFrontmatter(readFileSync(nodePath, 'utf8'));
+        if (frontmatter.superseded_by) {
+          contradictions.push({
+            oldNodeId: nodeId,
+            newNodeId: frontmatter.superseded_by,
+            supersededDate: frontmatter.superseded_date || 'unknown',
+          });
+        }
+      } catch {
+        // Non-fatal: skip malformed nodes
+      }
+    }
+    console.log(`contradiction scan [${brain}]:`);
+    if (contradictions.length > 0) {
+      console.log(`  superseded pairs (${contradictions.length}):`);
+      for (const pair of contradictions) {
+        console.log(`    ${pair.oldNodeId} ~~> ${pair.newNodeId} (${pair.supersededDate})`);
+      }
+    } else {
+      console.log(`  superseded pairs (0)`);
+    }
+    process.exit(0);
   }
 
   // Find active edges (valid_until === null)

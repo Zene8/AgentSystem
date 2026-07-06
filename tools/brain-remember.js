@@ -19,6 +19,7 @@ import { splitPersonalBrain } from './personal-brain-split.js';
 import { reconcileFact, defaultLlm } from './memory-reconcile.js';
 import { readRegistry, findRepo } from './graph/known-repos.js';
 import { buildWikilinkMap, applyWikilinkMap } from './graph/wikilink-sync.js';
+import { findHighOverlapCandidates, loadNodesForSearch, markSuperseded } from './similarity-search.js';
 
 const GRAPH_INIT_PATH = join(dirname(fileURLToPath(import.meta.url)), 'graph', 'graph-init.js');
 
@@ -60,6 +61,34 @@ function syncWikilinks(brainDir) {
   } catch {
     // Non-fatal.
   }
+}
+
+// Detect and mark contradictions in a brain's graph.
+// Returns the ID of the superseded node (if any).
+// Non-fatal: contradiction detection never blocks fact persistence.
+function detectAndMarkContradictions(newFact, graph, nodesDir, newNodeId) {
+  try {
+    const { similarityThreshold = 0.45 } = {};
+    const existingNodes = loadNodesForSearch(nodesDir, graph.nodes);
+    const candidates = findHighOverlapCandidates(newFact, existingNodes, { top: 3, similarityThreshold });
+
+    // Find a contradicting candidate (high similarity + conflicting polarity)
+    for (const candidate of candidates) {
+      if (candidate.hasConflict) {
+        // Mark the old node as superseded
+        const oldNodePath = join(nodesDir, `${candidate.nodeId}.md`);
+        if (existsSync(oldNodePath)) {
+          const content = readFileSync(oldNodePath, 'utf8');
+          const supersededContent = markSuperseded(content, newNodeId);
+          writeFileSync(oldNodePath, supersededContent, 'utf8');
+        }
+        return candidate.nodeId; // Return the ID of the superseded node
+      }
+    }
+  } catch {
+    // Non-fatal: contradiction detection never blocks persistence.
+  }
+  return null;
 }
 
 // Resolve (and auto-init if missing) the on-disk location of a repo's brain.
@@ -105,9 +134,12 @@ function writeRepoFact({ fact, section, target }) {
     writeFileSync(nodeFile, serializeFrontmatter(fm, `- ${fact}`), 'utf8');
   }
 
+  // Detect and mark contradictions (non-fatal)
+  const supersededId = detectAndMarkContradictions(fact, graph, loc.nodesDir, id);
+
   writeGraph(loc.graphPath, graph);
   syncWikilinks(loc.nexusDir);
-  return { ok: true, added: isNew, action: isNew ? 'ADD' : 'NOOP', id };
+  return { ok: true, added: isNew, action: isNew ? 'ADD' : 'NOOP', id, supersededId };
 }
 
 // tier: 'agent' — addNode + addEdge to the existing agent-<target> identity node.
@@ -134,9 +166,12 @@ function writeAgentFact({ fact, section, target }) {
     writeFileSync(nodeFile, serializeFrontmatter(fm, `- ${fact}`), 'utf8');
   }
 
+  // Detect and mark contradictions (non-fatal)
+  const supersededId = detectAndMarkContradictions(fact, graph, nodesDir, id);
+
   writeGraph(graphPath, graph);
   syncWikilinks(brainDir);
-  return { ok: true, added: isNew, action: isNew ? 'ADD' : 'NOOP', id };
+  return { ok: true, added: isNew, action: isNew ? 'ADD' : 'NOOP', id, supersededId };
 }
 
 // Pure: insert a fact bullet under `section` in markdown `raw`.
