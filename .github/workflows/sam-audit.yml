@@ -183,11 +183,7 @@ jobs:
           $taskText = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw
           Write-Host "sam-task.txt length: $($taskText.Length)"
           $result = $taskText | & $claude --agent Sam -p 2>&1
-          $claudeExit = $LASTEXITCODE
-          Write-Host "claude exit=$claudeExit resultCount=$($result.Count)"
-          Write-Host "--- raw result (first 2000 chars) ---"
-          Write-Host (($result | Out-String).Substring(0, [Math]::Min(2000, ($result | Out-String).Length)))
-          Write-Host "--- end raw result ---"
+          Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
           if ($result -match "^APPROVED:") {
@@ -215,7 +211,14 @@ jobs:
             if (result.length > 60000) result = result.slice(0, 60000) + '\n\n...(truncated)';
 
             const emoji = status === 'approved' ? '✅' : '🚫';
-            const event = status === 'approved' ? 'APPROVE' : 'REQUEST_CHANGES';
+            // GitHub hard-blocks the built-in GITHUB_TOKEN from submitting an APPROVE review
+            // ("GitHub Actions is not permitted to approve pull requests") — this is a platform
+            // restriction to stop workflows from rubber-stamping their own PRs, not a permissions
+            // scope we can grant our way around. Use COMMENT for the approved case instead;
+            // REQUEST_CHANGES (used for blocked) is not restricted. The PR body text still says
+            // APPROVED/BLOCKED and the "ready to merge" comment step below still fires — human
+            // merge approval (the actual gate) is unaffected.
+            const event = status === 'approved' ? 'COMMENT' : 'REQUEST_CHANGES';
 
             // Submit as a formal GitHub review — branch protection can require it
             await github.rest.pulls.createReview({
