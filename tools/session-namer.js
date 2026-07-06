@@ -2,7 +2,11 @@
 /**
  * session-namer.js — Auto-name, search, group, and resume Claude Code sessions.
  *
- * Session name format: [repo] [5-word title] [YYYY-MM-DD]
+ * Legacy display name format: <repo> - <5-word title> - <YYYY-MM-DD HH:mm> [+ (done)]
+ * Deterministic status-lifecycle fields (issue #158, additive — zero AI calls):
+ *   status:     started | pr | done   (never regresses)
+ *   slug:       branch name minus "issue-N-" prefix (or first 4 words of title)
+ *   statusName: `<repo> - <slug> - <YYMMDD-HHmm> - <status>`
  * Registry: ~/agent-memory/nexus/session-registry.jsonl
  *
  * Usage:
@@ -108,6 +112,59 @@ function dateTimeStr(ts) { return (ts || new Date().toISOString()).slice(0, 16).
 function today()     { return new Date().toISOString().slice(0, 10); }
 function buildName(repo, title, ts) { return `${repo} - ${title} - ${dateTimeStr(ts)}`; }
 
+// ── Deterministic status-lifecycle naming (issue #158) ──────────────────────
+// Fully precalculable: pure string/date ops, zero model/claude CLI calls.
+// Format: `<repo> - <slug> - <YYMMDD-HHmm> - <status>`
+// status lifecycle: started (SessionStart/register) -> pr (PR-create detected)
+// -> done (SessionEnd/finalize-close). Never regresses (done is terminal).
+
+/** Valid values for the deterministic status field, in lifecycle order. */
+export const STATUS_LIFECYCLE = ['started', 'pr', 'done'];
+
+/** YYMMDD-HHmm, e.g. 2026-07-06T14:05:00Z -> 260706-1405. Pure string slicing, no AI. */
+export function formatStamp(ts) {
+  const iso = ts || new Date().toISOString();
+  const yy = iso.slice(2, 4), mo = iso.slice(5, 7), dd = iso.slice(8, 10);
+  const hh = iso.slice(11, 13), mm = iso.slice(14, 16);
+  return `${yy}${mo}${dd}-${hh}${mm}`;
+}
+
+/**
+ * slug = branch name minus the "issue-N-" prefix, e.g. "issue-158-deterministic-automation"
+ * -> "deterministic-automation". Falls back to the first 4 words of an existing
+ * generated title (e.g. when renaming an already-named session, or no branch is
+ * available) collapsed to a dash-slug. Pure string ops only.
+ */
+export function slugFromBranch(branch, fallbackTitle) {
+  if (branch && typeof branch === 'string') {
+    const stripped = branch.replace(/^issue-\d+-/, '').trim();
+    if (stripped) return stripped.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'session';
+  }
+  if (fallbackTitle && typeof fallbackTitle === 'string' && fallbackTitle !== 'pending') {
+    const words = fallbackTitle.trim().split(/\s+/).slice(0, 4);
+    if (words.length) return words.join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  }
+  return 'session';
+}
+
+/** Build the deterministic `<repo> - <slug> - <YYMMDD-HHmm> - <status>` name. */
+export function buildStatusName(repo, slug, ts, status) {
+  const s = STATUS_LIFECYCLE.includes(status) ? status : 'started';
+  return `${repo} - ${slug} - ${formatStamp(ts)} - ${s}`;
+}
+
+/**
+ * Never let status regress down the lifecycle (started -> pr -> done). "done"
+ * is terminal. Pure lookup, no AI.
+ */
+function nextStatus(current, proposed) {
+  const ci = STATUS_LIFECYCLE.indexOf(current);
+  const pi = STATUS_LIFECYCLE.indexOf(proposed);
+  if (pi < 0) return current || 'started';
+  if (ci < 0) return proposed;
+  return pi > ci ? proposed : current;
+}
+
 /** Marker appended to display name when a session is finalized. */
 const DONE_MARKER = ' + (done)';
 
@@ -198,11 +255,36 @@ function cmdRegister({ session, cwd }) {
     return;
   }
 
-  const repo  = repoFromCwd(cwd);
-  const ts    = new Date().toISOString();
+  const repo   = repoFromCwd(cwd);
+  const ts     = new Date().toISOString();
+  const branch = getGitBranch(cwd);
+  const slug   = slugFromBranch(branch);
+  const status = 'started';
   const entry = { session, repo, cwd: cwd || '', title: 'pending',
-                  name: buildName(repo, 'pending', ts), timestamp: ts, finalized: false };
+                  name: buildName(repo, 'pending', ts), timestamp: ts, finalized: false,
+                  status, slug, statusName: buildStatusName(repo, slug, ts, status) };
   saveEntry(entry);
+}
+
+/**
+ * cmdSetStatus — deterministic status-lifecycle transition (issue #158).
+ * Called from a PostToolUse hook that detects a `gh pr create` invocation
+ * (status -> "pr") and from SessionEnd (status -> "done"). Pure string/lookup
+ * logic, zero model/claude CLI calls. Never regresses the lifecycle.
+ */
+function cmdSetStatus({ session, status }) {
+  if (!session) { console.error('--session required'); process.exit(1); }
+  if (!STATUS_LIFECYCLE.includes(status)) { console.error(`--status must be one of ${STATUS_LIFECYCLE.join('|')}`); process.exit(1); }
+  const existing = loadRegistry().find(e => e.session === session);
+  if (!existing) return; // not registered yet — nothing to update
+
+  const repo   = existing.repo || 'unknown';
+  const branch = getGitBranch(existing.cwd);
+  const slug   = existing.slug || slugFromBranch(branch, existing.title);
+  const newStatus = nextStatus(existing.status, status);
+  const statusName = buildStatusName(repo, slug, existing.timestamp, newStatus);
+  saveEntry({ ...existing, status: newStatus, slug, statusName });
+  console.log(`[session-namer] ${session.slice(0, 8)}… status → "${newStatus}" ("${statusName}")`);
 }
 
 async function cmdFinalize({ session }) {
@@ -291,8 +373,12 @@ async function cmdFinalizeClose({ session }) {
   if (!existing.title || existing.title === 'pending') return;
 
   // Apply done marker to an already-named session
-  const name = applyDoneMarker(existing.name, existing.title);
-  saveEntry({ ...existing, finalized: true, name });
+  const name   = applyDoneMarker(existing.name, existing.title);
+  const repo   = existing.repo || 'unknown';
+  const slug   = existing.slug || slugFromBranch(getGitBranch(existing.cwd), existing.title);
+  const status = 'done';
+  const statusName = buildStatusName(repo, slug, existing.timestamp, status);
+  saveEntry({ ...existing, finalized: true, name, slug, status, statusName });
   console.log(`[session-namer] close-finalize ${session.slice(0, 8)}… → "${name}"`);
 }
 
@@ -553,6 +639,7 @@ async function main() {
   if      (flags.register)              cmdRegister({ session: flags.session, cwd: flags.cwd || process.env.CWD || process.cwd() });
   else if (flags.finalize)              await cmdFinalize({ session: flags.session });
   else if (flags['finalize-close'])     await cmdFinalizeClose({ session: flags.session });
+  else if (flags['set-status'])         cmdSetStatus({ session: flags.session, status: flags['set-status'] === true ? flags.status : flags['set-status'] });
   else if (flags['finalize-early'])     await cmdFinalizeEarly({ session: flags.session });
   else if (flags.sweep)                 await cmdSweep();
   else if (flags['print-title'])        await cmdPrintTitle({ session: flags.session, cwd: flags.cwd });
@@ -571,6 +658,7 @@ Commands:
   --register --session=ID [--cwd=PATH]   Register session on start (hook)
   --finalize --session=ID                Name session from first prompt (Stop hook, no marker)
   --finalize-close --session=ID          Apply done marker on session close (SessionEnd hook)
+  --set-status=pr|done --session=ID      Deterministic status-lifecycle transition (no AI; see issue #158)
   --finalize-early --session=ID          Name session early, skip if no transcript yet (UserPromptSubmit hook)
   --sweep                                Retroactively finalize all pending sessions with transcripts
   --print-title --session=ID [--cwd=PATH] Print best display title (SessionStart hook)

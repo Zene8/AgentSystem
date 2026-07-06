@@ -714,3 +714,128 @@ test('--print-title: shows a manual rename immediately, even before the session 
 
   rmSync(tmp, { recursive: true, force: true });
 });
+
+// ── Deterministic status-lifecycle naming (issue #158) ──────────────────────
+// Format: `<repo> - <slug> - <YYMMDD-HHmm> - <status>`. Pure string/date ops,
+// zero model/claude CLI calls anywhere in this lifecycle.
+
+test('slugFromBranch: strips issue-N- prefix', async () => {
+  const { slugFromBranch } = await import('../tools/session-namer.js');
+  assert.equal(slugFromBranch('issue-158-deterministic-automation'), 'deterministic-automation');
+  assert.equal(slugFromBranch('issue-7-fix-thing'), 'fix-thing');
+});
+
+test('slugFromBranch: falls back to first 4 words of an existing title when no branch', async () => {
+  const { slugFromBranch } = await import('../tools/session-namer.js');
+  assert.equal(slugFromBranch(null, 'refactor authentication middleware for login flow'), 'refactor-authentication-middleware-for');
+  assert.equal(slugFromBranch(null, 'pending'), 'session');
+  assert.equal(slugFromBranch(null, null), 'session');
+});
+
+test('formatStamp: produces YYMMDD-HHmm', async () => {
+  const { formatStamp } = await import('../tools/session-namer.js');
+  assert.equal(formatStamp('2026-07-06T14:05:00.000Z'), '260706-1405');
+});
+
+test('buildStatusName: assembles deterministic `<repo> - <slug> - <stamp> - <status>` format', async () => {
+  const { buildStatusName } = await import('../tools/session-namer.js');
+  assert.equal(
+    buildStatusName('myrepo', 'deterministic-automation', '2026-07-06T14:05:00.000Z', 'started'),
+    'myrepo - deterministic-automation - 260706-1405 - started'
+  );
+  // Invalid status falls back to "started"
+  assert.equal(
+    buildStatusName('myrepo', 'slug', '2026-07-06T14:05:00.000Z', 'bogus'),
+    'myrepo - slug - 260706-1405 - started'
+  );
+});
+
+test('--register: sets status=started and computes statusName deterministically (no branch → slug=session)', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+
+  const sessionId = 'status0001-0000-0000-0000-000000000001';
+  const cwd = join(tmp, 'not-a-git-repo');
+  mkdirSync(cwd, { recursive: true });
+
+  runNamer(['--register', `--session=${sessionId}`, `--cwd=${cwd}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].status, 'started');
+  assert.equal(entries[0].slug, 'session');
+  assert.match(entries[0].statusName, /^not-a-git-repo - session - \d{6}-\d{4} - started$/);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--set-status=pr: transitions status started -> pr and recomputes statusName', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+
+  const sessionId = 'status0002-0000-0000-0000-000000000002';
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'pending',
+      name: 'myrepo pending 2026-07-06', timestamp: '2026-07-06T14:05:00.000Z',
+      finalized: false, status: 'started', slug: 'my-feature',
+      statusName: 'myrepo - my-feature - 260706-1405 - started' }
+  ]);
+
+  runNamer(['--set-status=pr', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].status, 'pr');
+  assert.equal(entries[0].statusName, 'myrepo - my-feature - 260706-1405 - pr');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--set-status: never regresses the lifecycle (done stays done even if "started" requested again)', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+
+  const sessionId = 'status0003-0000-0000-0000-000000000003';
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'shipped it',
+      name: 'myrepo shipped it 2026-07-06 + (done)', timestamp: '2026-07-06T14:05:00.000Z',
+      finalized: true, status: 'done', slug: 'my-feature',
+      statusName: 'myrepo - my-feature - 260706-1405 - done' }
+  ]);
+
+  runNamer(['--set-status=started', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].status, 'done', 'status must not regress from done back to started');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--finalize-close: sets status=done and computes statusName alongside the legacy done marker', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+
+  const sessionId = 'status0004-0000-0000-0000-000000000004';
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd: '/home/test/myrepo', title: 'ship the thing',
+      name: 'myrepo - ship the thing - 260706-1405', timestamp: '2026-07-06T14:05:00.000Z',
+      finalized: false, status: 'pr', slug: 'ship-it',
+      statusName: 'myrepo - ship-it - 260706-1405 - pr' }
+  ]);
+
+  runNamer(['--finalize-close', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.equal(entries[0].status, 'done');
+  assert.equal(entries[0].statusName, 'myrepo - ship-it - 260706-1405 - done');
+  assert.ok(entries[0].name.endsWith(' + (done)'), 'legacy done marker still applied');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
