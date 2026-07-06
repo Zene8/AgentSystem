@@ -1,3 +1,10 @@
+# #154: every job below reads or writes local-machine state that only exists on the
+# self-hosted runner's host (~/agent-memory/nexus/*, ~/.claude, or the local `claude` CLI for
+# pr-auto-review) — none of it is portable to a GitHub-hosted runner, so none of these jobs can
+# be migrated to ubuntu-latest. When the self-hosted runner is offline these jobs simply never
+# start (no failure signal on their own); `.github/workflows/runner-health-check.yml` runs on
+# ubuntu-latest specifically to detect that condition from outside and open/update a
+# `runner:down` tracking issue, which is the loud-failure signal for this whole file.
 name: Scheduled Tasks
 
 on:
@@ -13,6 +20,7 @@ on:
     branches: [dev]
 
 jobs:
+  # Writes to ~/agent-memory/nexus/inbox via agent-message.js — local machine state.
   daily-standup:
     if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1-5'
     runs-on: self-hosted
@@ -23,6 +31,7 @@ jobs:
         run: |
           node ${{ github.workspace }}\tools\agent-message.js --from=Jarvis --to=Jarvis --subject='daily-standup' --action='review priority:high issues and post briefing'
 
+  # memory-maintenance.js operates on the local ~/agent-memory brain — local machine state.
   weekly-brain-consolidation:
     if: github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1'
     runs-on: self-hosted
@@ -33,6 +42,7 @@ jobs:
         run: |
           node ${{ github.workspace }}\tools\memory-maintenance.js --reflect
 
+  # memory-decay.js reads/writes ~/agent-memory/nexus/* brains directly — local machine state.
   weekly-memory-decay:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
     runs-on: self-hosted
@@ -44,6 +54,7 @@ jobs:
           node ${{ github.workspace }}\tools\memory-decay.js --brain=agentsystem
           node ${{ github.workspace }}\tools\memory-decay.js --brain=personal-brain
 
+  # compute-trust-scores.js reads ~/agent-memory/nexus/run-log/* — local machine state.
   weekly-trust-scores:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
     runs-on: self-hosted
@@ -53,6 +64,8 @@ jobs:
         shell: pwsh
         run: node ${{ github.workspace }}\tools\compute-trust-scores.js
 
+  # Operates on ~/.claude and ~/agent-memory directly (rotate-logs, claude-json-hygiene,
+  # caveman-cache-fix, deploy-hooks --check) — none of these paths exist on a hosted runner.
   weekly-hygiene:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
     runs-on: self-hosted
@@ -72,6 +85,7 @@ jobs:
         run: node ${{ github.workspace }}\tools\deploy-hooks.js --check
         continue-on-error: true
 
+  # Requires the local `claude` CLI (not installable/licensed for use on hosted runners here).
   pr-auto-review:
     if: github.event_name == 'pull_request'
     runs-on: self-hosted

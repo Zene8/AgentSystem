@@ -58,21 +58,93 @@ export function spliceTable(content, tableBody) {
   return `${before}\n${START_MARKER}\n${tableBody}\n${END_MARKER}\n${after}`;
 }
 
-export function generate(configPath, jarvisPath) {
+// Guard against #154: an unrecognized flag (typo'd or new) being silently swallowed as a
+// positional configPath/jarvisPath argument. loadRoutingRules() would then read a bogus path,
+// return [] (no rules), and generate() would happily overwrite jarvis.md with an EMPTY routing
+// table — wiping every routing rule with no error. Refusing to write when rules.length === 0 is
+// the real fix; the flag allowlist is defense-in-depth so a typo'd flag fails fast with a usage
+// message instead of ever reaching that code path.
+export class EmptyRoutingRulesError extends Error {}
+
+export function generate(configPath, jarvisPath, { allowEmpty = false, dryRun = false } = {}) {
   const rules = loadRoutingRules(configPath || defaultConfigPath());
+  if (rules.length === 0 && !allowEmpty) {
+    throw new EmptyRoutingRulesError(
+      `generate-routing-table: loadRoutingRules() returned 0 rules from ` +
+      `"${configPath || defaultConfigPath()}" — refusing to write an empty routing table. ` +
+      `Check that the config path is correct and the file has routing rules.`
+    );
+  }
   const tableBody = renderTable(rules);
   const targetPath = jarvisPath || JARVIS_MD_PATH;
   const content = readFileSync(targetPath, 'utf8');
   const updated = spliceTable(content, tableBody);
-  writeFileSync(targetPath, updated, 'utf8');
-  return { rulesCount: rules.length, path: targetPath };
+  if (!dryRun) {
+    writeFileSync(targetPath, updated, 'utf8');
+  }
+  return { rulesCount: rules.length, path: targetPath, content: updated, changed: content !== updated };
 }
 
 const isMain = process.argv[1] &&
   process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
 
+const USAGE = `Usage: node tools/generate-routing-table.js [--check] [--config <path>] [--jarvis-md <path>]
+
+  --check          Dry-run: report what would change without writing.
+  --config PATH    Path to routing.yml (default: hooks/routing-config.js's defaultConfigPath()).
+  --jarvis-md PATH Path to jarvis.md to update (default: .agents/agents/jarvis.md).
+  -h, --help       Show this message.`;
+
+// Strict allowlisted flag parser — any unrecognized flag exits loudly (exit 2) instead of being
+// silently consumed as a positional path argument (the root cause of #154).
+export function parseArgs(argv) {
+  const flags = { check: false, config: null, jarvisMd: null, help: false };
+  const KNOWN = new Set(['--check', '--config', '--jarvis-md', '-h', '--help']);
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!KNOWN.has(arg)) {
+      throw new Error(`Unknown flag: "${arg}"\n\n${USAGE}`);
+    }
+    if (arg === '--check') flags.check = true;
+    else if (arg === '-h' || arg === '--help') flags.help = true;
+    else if (arg === '--config') {
+      const val = argv[++i];
+      if (val === undefined) throw new Error(`--config requires a path argument\n\n${USAGE}`);
+      flags.config = val;
+    } else if (arg === '--jarvis-md') {
+      const val = argv[++i];
+      if (val === undefined) throw new Error(`--jarvis-md requires a path argument\n\n${USAGE}`);
+      flags.jarvisMd = val;
+    }
+  }
+  return flags;
+}
+
 if (isMain) {
-  const [configPathArg, jarvisPathArg] = process.argv.slice(2);
-  const result = generate(configPathArg, jarvisPathArg);
-  console.log(`generate-routing-table: wrote ${result.rulesCount} row(s) to ${result.path}`);
+  let flags;
+  try {
+    flags = parseArgs(process.argv.slice(2));
+  } catch (err) {
+    console.error(err.message);
+    process.exit(2);
+  }
+
+  if (flags.help) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  try {
+    const result = generate(flags.config, flags.jarvisMd, { dryRun: flags.check });
+    if (flags.check) {
+      console.log(result.changed
+        ? `generate-routing-table --check: jarvis.md is OUT OF DATE (${result.rulesCount} rule(s) would be written to ${result.path})`
+        : `generate-routing-table --check: jarvis.md is up to date (${result.rulesCount} rule(s))`);
+      process.exit(result.changed ? 1 : 0);
+    }
+    console.log(`generate-routing-table: wrote ${result.rulesCount} row(s) to ${result.path}`);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(err instanceof EmptyRoutingRulesError ? 1 : 2);
+  }
 }

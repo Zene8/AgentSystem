@@ -23,57 +23,167 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR diff
-        shell: pwsh
+      - name: Resolve gh/claude absolute paths for runner service context
+        id: tools
+        # #131/#154 follow-up: the self-hosted runner (nathan-desktop) runs as a Windows service
+        # under a logon task, which does NOT reliably inherit the interactive user's PATH — same
+        # root cause class as the earlier `pwsh: command not found` failure. `gh pr diff` failed
+        # here with $LASTEXITCODE -1 (native "term not recognized") even after prepending known
+        # install dirs to $GITHUB_PATH (both a plain and a BOM-less UTF8 write were tried — the
+        # runner never picked up either for the next step, for reasons not further diagnosable
+        # from the workflow file alone). Bypassing PATH resolution entirely by resolving absolute
+        # exe paths once here and invoking them by full path in every later step is more reliable
+        # than depending on $GITHUB_PATH/service PATH inheritance behaving as documented.
+        shell: powershell
         run: |
-          # Cap at 400 lines — enough for full context, stays inside prompt window
-          gh pr diff ${{ github.event.pull_request.number }} `
-            | Select-Object -First 400 `
-            | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+          $ErrorActionPreference = 'Continue'
+          $ghCandidates = @(
+            "$env:ProgramFiles\GitHub CLI\gh.exe",
+            "${env:ProgramFiles(x86)}\GitHub CLI\gh.exe",
+            "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
+          )
+          $claudeCandidates = @(
+            "$env:USERPROFILE\.local\bin\claude.exe",
+            "$env:LOCALAPPDATA\Programs\claude\claude.exe",
+            "$env:APPDATA\npm\claude.cmd"
+          )
+          $gh = ($ghCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+          $claude = ($claudeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+          if (-not $gh) { $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source }
+          if (-not $claude) { $claude = (Get-Command claude -ErrorAction SilentlyContinue).Source }
+          Write-Host "Resolved gh: $gh"
+          Write-Host "Resolved claude: $claude"
+          "gh_path=$gh" >> $env:GITHUB_OUTPUT
+          "claude_path=$claude" >> $env:GITHUB_OUTPUT
+
+      - name: Get PR diff
+        # #131/#154 follow-up: self-hosted runner (nathan-desktop) has Windows PowerShell 5.1
+        # (powershell.exe) but not PowerShell Core (pwsh.exe) on PATH — `shell: pwsh` failed with
+        # "pwsh: command not found" once the file finally parsed and the job actually started.
+        # Confirmed via `gh run view <id> --log-failed` on run 28776426326. Switched to
+        # `shell: powershell` (built into every Windows box) which is syntax-compatible with the
+        # script bodies used here (no PS7-only features used).
+        shell: powershell
+        run: |
+          # GitHub Actions sets $ErrorActionPreference = 'Stop' for pwsh/powershell steps. Native
+          # exes like `gh` writing ANYTHING to stderr (even a benign notice) get turned into a
+          # terminating PowerShell error under that setting, aborting the script with no visible
+          # output — this is what caused a silent exit-code-1 failure here with zero log lines.
+          # Force 'Continue' for this native-command block and check $LASTEXITCODE explicitly
+          # instead of relying on PowerShell's stream-based error handling.
+          # Do NOT merge stderr with 2>&1 here: in PowerShell 5.1 that wraps each stderr line from
+          # a native exe in a NativeCommandError object, which corrupts the plain-text diff file
+          # if any land in the pipeline. $ErrorActionPreference = 'Continue' alone is enough to
+          # stop stderr noise from becoming a terminating exception.
+          $ErrorActionPreference = 'Continue'
+          $gh = "${{ steps.tools.outputs.gh_path }}"
+          Write-Host "Using gh: $gh"
+          Write-Host "Exists: $(Test-Path $gh)"
+          try {
+            $verOut = & $gh --version 2>&1
+            Write-Host "gh --version exit=$LASTEXITCODE output=$verOut"
+          } catch {
+            Write-Host "gh --version threw: $($_.Exception.Message)"
+          }
+          try {
+            $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
+            $ghExit = $LASTEXITCODE
+            Write-Host "gh pr diff exit=$ghExit"
+            $diffOut | Select-Object -First 400 | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+          } catch {
+            Write-Host "gh pr diff threw: $($_.Exception.Message)"
+            $ghExit = 1
+          }
+          if ($ghExit -ne 0) {
+            Write-Error "gh pr diff failed with exit code $ghExit"
+            exit $ghExit
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Sam security audit
         id: audit
-        shell: pwsh
+        # See "Get PR diff" step comment above — pwsh not present on this self-hosted runner.
+        shell: powershell
+        # #131/#154: this step used to build $task with a PowerShell here-string (@" ... "@)
+        # whose body lines started at column 0. A YAML literal block scalar (`run: |`) requires
+        # every content line to be indented at least as much as its first content line — a
+        # column-0 line ends the block early, so YAML tried to parse "PR #<num>: <title>" as a
+        # new mapping key and failed with "can not read a block mapping entry; a multiline key
+        # may not be an implicit key". That made this entire workflow file unparseable, which is
+        # why every run (regardless of trigger) showed a 0s "workflow file issue" failure —
+        # confirmed via `npx js-yaml .github/workflows/sam-audit.yml`.
+        #
+        # Fixed by building the task text from a properly-indented array of lines instead of a
+        # bare here-string, AND by passing the untrusted PR title/branch values in via `env:`
+        # (below) rather than substituting `${{ github.event.pull_request.title }}` directly
+        # into the script text — GitHub Actions expression substitution happens before pwsh ever
+        # sees the script, so a title containing quotes/backticks/`$(...)` could otherwise break
+        # or inject into the script. Reading them from $env:* is the standard mitigation.
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
+          # Same $ErrorActionPreference = 'Stop' trap as "Get PR diff" above — `claude` writing
+          # anything to stderr would otherwise abort this step before sam-result.txt is written.
+          $ErrorActionPreference = 'Continue'
           $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
-          $task = @"
-You are Sam (CSO). Run your pre-merge security audit on this pull request.
-
-PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
-Base branch: ${{ github.base_ref }}
-Head branch: ${{ github.head_ref }}
-
-## Your 10-item Audit Checklist
-1. Data access patterns reviewed
-2. Auth/authz logic correct
-3. Credential handling secure (no secrets in diff)
-4. PHI exposure assessment
-5. Compliance with applicable standards
-6. Audit trail logging present
-7. Input validation at system boundaries
-8. Error messages don't leak sensitive data
-9. No secrets, API keys, or credentials in code/config
-10. Vendor contracts reviewed if new vendor with PHI
-
-## Diff
-$diff
-
-## Required Output Format
-Your FIRST LINE must be exactly one of:
-  APPROVED: <one-line summary of what was audited>
-  BLOCKED: <one-line reason for blocking>
-
-Then list each checklist item result: PASS / FAIL / N/A with a brief note.
-If BLOCKED, list each specific issue that must be resolved before merge.
-"@
+          $lines = @(
+            'You are Sam (CSO). Run your pre-merge security audit on this pull request.'
+            ''
+            "PR #$env:PR_NUMBER`: $env:PR_TITLE"
+            "Base branch: $env:BASE_REF"
+            "Head branch: $env:HEAD_REF"
+            ''
+            '## Your 10-item Audit Checklist'
+            '1. Data access patterns reviewed'
+            '2. Auth/authz logic correct'
+            '3. Credential handling secure (no secrets in diff)'
+            '4. PHI exposure assessment'
+            '5. Compliance with applicable standards'
+            '6. Audit trail logging present'
+            '7. Input validation at system boundaries'
+            '8. Error messages don''t leak sensitive data'
+            '9. No secrets, API keys, or credentials in code/config'
+            '10. Vendor contracts reviewed if new vendor with PHI'
+            ''
+            '## Diff'
+            $diff
+            ''
+            '## Required Output Format'
+            'Your FIRST LINE must be exactly one of:'
+            '  APPROVED: <one-line summary of what was audited>'
+            '  BLOCKED: <one-line reason for blocking>'
+            ''
+            'Then list each checklist item result: PASS / FAIL / N/A with a brief note.'
+            'If BLOCKED, list each specific issue that must be resolved before merge.'
+          )
+          $task = $lines -join "`n"
 
           $task | Out-File "$env:RUNNER_TEMP\sam-task.txt" -Encoding utf8
           # --agent sam: run the real Sam agent definition (.agents/agents/sam.md), not a bare
           # model call. Sam's "CI Pre-Merge Audit Mode" there emits the APPROVED:/BLOCKED:
           # vocabulary this workflow parses below (aligned with sam.md, see issue #112).
-          $result = claude --agent sam -p (Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw) 2>&1
+          # NOTE 1: agent names are case-sensitive — `--agent sam` silently fails with
+          # "--agent 'sam' not found" (the registered agent is `Sam`, capitalized).
+          #
+          # NOTE 2: passing the (large, quote/backtick-laden PR diff) prompt as a literal
+          # command-line ARGUMENT — `-p (Get-Content ... -Raw)` — is fragile on Windows: CreateProcess
+          # argv quoting can mis-split a multi-KB string containing embedded double-quotes/backticks
+          # from a diff, truncating what `claude` actually receives as its prompt. This produced
+          # near-instant (~1-2s) completions whose output never matched "^APPROVED:" (e.g. a bare
+          # greeting or the CLI's version banner), so every PR was auto-blocked regardless of diff
+          # content — the true root cause of #131 once the case-sensitivity bug (note 1) was also
+          # fixed. `claude -p` reads the prompt from stdin when no positional prompt is given, which
+          # avoids argv-length/quoting limits entirely — switched to piping the task text in via
+          # stdin instead.
+          $claude = "${{ steps.tools.outputs.claude_path }}"
+          $taskText = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw
+          Write-Host "sam-task.txt length: $($taskText.Length)"
+          $result = $taskText | & $claude --agent Sam -p 2>&1
+          Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
           if ($result -match "^APPROVED:") {
@@ -101,7 +211,14 @@ If BLOCKED, list each specific issue that must be resolved before merge.
             if (result.length > 60000) result = result.slice(0, 60000) + '\n\n...(truncated)';
 
             const emoji = status === 'approved' ? '✅' : '🚫';
-            const event = status === 'approved' ? 'APPROVE' : 'REQUEST_CHANGES';
+            // GitHub hard-blocks the built-in GITHUB_TOKEN from submitting an APPROVE review
+            // ("GitHub Actions is not permitted to approve pull requests") — this is a platform
+            // restriction to stop workflows from rubber-stamping their own PRs, not a permissions
+            // scope we can grant our way around. Use COMMENT for the approved case instead;
+            // REQUEST_CHANGES (used for blocked) is not restricted. The PR body text still says
+            // APPROVED/BLOCKED and the "ready to merge" comment step below still fires — human
+            // merge approval (the actual gate) is unaffected.
+            const event = status === 'approved' ? 'COMMENT' : 'REQUEST_CHANGES';
 
             // Submit as a formal GitHub review — branch protection can require it
             await github.rest.pulls.createReview({

@@ -11,6 +11,14 @@ on:
     - cron: '0 6 * * *'  # daily 6am UTC (was hourly - ~720 ubuntu-latest min/mo)
   workflow_dispatch: {}
 
+# NOTE: `administration` is NOT a valid key in a workflow `permissions:` block (valid set:
+# actions, checks, contents, deployments, id-token, issues, discussions, packages, pages,
+# pull-requests, repository-projects, security-events, statuses, attestations, models) — an
+# earlier revision of this file used it and failed to parse (0s "workflow file issue" runs).
+# Separately, `GET /repos/{owner}/{repo}/actions/runners` needs repo Administration:read, which
+# the ephemeral GITHUB_TOKEN can NEVER be granted regardless of the `permissions:` block — it
+# requires a real PAT. See the "Check self-hosted runner status" step below for how this is
+# handled (optional PAT with graceful indirect-detection fallback).
 permissions:
   issues: write
 
@@ -18,19 +26,64 @@ jobs:
   check-runner:
     runs-on: ubuntu-latest
     steps:
+      # Primary method: GET /actions/runners, which needs a PAT with Administration:read (the
+      # workflow's own GITHUB_TOKEN can't be granted this permission at all). If the optional
+      # `RUNNER_ADMIN_TOKEN` secret (a fine-grained PAT scoped to this repo with
+      # "Administration: Read-only") isn't configured, or the API call fails for any reason
+      # (bad/expired token, insufficient scope, etc.), degrade gracefully to an indirect method
+      # instead of failing the whole job: look for jobs stuck `queued` for a while on the
+      # self-hosted-targeting workflows (agent-dispatch.yml, sam-audit.yml,
+      # sync-verification.yml) — a queued job with no runner to pick it up is itself evidence
+      # the runner is down.
       - name: Check self-hosted runner status
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNNER_ADMIN_TOKEN: ${{ secrets.RUNNER_ADMIN_TOKEN }}
         run: |
-          runners_json=$(gh api "repos/${{ github.repository }}/actions/runners")
-          online_self_hosted=$(echo "$runners_json" | jq '[.runners[] | select(.status == "online")] | length')
-          echo "online_count=$online_self_hosted" >> "$GITHUB_OUTPUT"
-          if [ "$online_self_hosted" -lt 1 ]; then
-            echo "down=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "down=false" >> "$GITHUB_OUTPUT"
+          set +e
+          method=""
+          down=""
+
+          if [ -n "$RUNNER_ADMIN_TOKEN" ]; then
+            runners_json=$(GH_TOKEN="$RUNNER_ADMIN_TOKEN" gh api "repos/${{ github.repository }}/actions/runners" 2>/tmp/runners_err)
+            if [ $? -eq 0 ]; then
+              online_self_hosted=$(echo "$runners_json" | jq '[.runners[] | select(.status == "online")] | length')
+              method="direct"
+              [ "$online_self_hosted" -lt 1 ] && down=true || down=false
+            else
+              echo "RUNNER_ADMIN_TOKEN present but /actions/runners call failed, falling back to indirect detection:" >&2
+              cat /tmp/runners_err >&2
+            fi
           fi
+
+          if [ -z "$down" ]; then
+            # Indirect detection: any run of a self-hosted-targeting workflow still `queued`
+            # for more than 10 minutes strongly implies no runner picked it up.
+            method="indirect"
+            stuck=0
+            for wf in agent-dispatch.yml sam-audit.yml sync-verification.yml; do
+              runs_json=$(gh api "repos/${{ github.repository }}/actions/workflows/$wf/runs?status=queued&per_page=10" 2>/dev/null)
+              [ -z "$runs_json" ] && continue
+              count=$(echo "$runs_json" | jq --arg cutoff "$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)" \
+                '[.workflow_runs[]? | select(.created_at < $cutoff)] | length' 2>/dev/null || echo 0)
+              stuck=$((stuck + count))
+            done
+            [ "$stuck" -gt 0 ] && down=true || down=false
+          fi
+
+          echo "method=$method" >> "$GITHUB_OUTPUT"
+          echo "down=$down" >> "$GITHUB_OUTPUT"
+          echo "Runner health check: method=$method down=$down"
+
+      - name: Ensure tracking label exists
+        if: steps.check.outputs.down == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "runner:down" --color "B60205" \
+            --description "Self-hosted runner offline; agent-dispatch/sam-audit/sync-verification blocked" \
+            2>/dev/null || true
 
       - name: Find existing tracking issue
         id: find
@@ -49,7 +102,7 @@ jobs:
           gh issue create \
             --title "[Infra]: self-hosted runner offline — agent-dispatch/sam-audit/sync-verification blocked" \
             --label "runner:down" \
-            --body "No online self-hosted runner detected as of $(date -u +%Y-%m-%dT%H:%M:%SZ). \`/agent\`, \`/merge\`, \`/close\` dispatch and the Sam CI audit check will silently no-op until it's back online. This issue auto-closes on the next hourly check once a runner is online again."
+            --body "No online self-hosted runner detected as of $(date -u +%Y-%m-%dT%H:%M:%SZ) (detection method: \`${{ steps.check.outputs.method }}\`). \`/agent\`, \`/merge\`, \`/close\` dispatch and the Sam CI audit check will silently no-op until it's back online. This issue auto-closes on the next daily check once a runner is online again."
 
       - name: Comment ping on existing tracking issue
         if: steps.check.outputs.down == 'true' && steps.find.outputs.issue_number != ''
