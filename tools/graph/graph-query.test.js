@@ -43,6 +43,12 @@ describe('expandTilde', () => {
     assert.equal(expandTilde(undefined), undefined);
     assert.equal(expandTilde(''), '');
   });
+  it('#155: does not throw on non-string input (e.g. bare boolean flag)', () => {
+    assert.doesNotThrow(() => expandTilde(true));
+    assert.equal(expandTilde(true), true);
+    assert.doesNotThrow(() => expandTilde(42));
+    assert.equal(expandTilde(42), 42);
+  });
 });
 
 describe('computeBM25', () => {

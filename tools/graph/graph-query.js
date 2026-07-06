@@ -6,19 +6,29 @@
 //        [--primed=node1,node2,node3]
 //        [--hot-stub]  — return only nodes with hot:true in frontmatter, then exit
 //
+// Brain roots (--brain-path accepts a directory OR a direct graph.json path — both work):
+//   - project brains:        nexus/<slug>/                                (default, relative to cwd)
+//   - agent/personal brains: ~/agent-memory/nexus/agent-brain/<agent>/    or  ~/agent-memory/nexus/personal-brain/
+// These are two DIFFERENT roots — do not assume a project slug and an agent name resolve
+// under the same parent directory.
+//
 // Fix 1: visit_count is decayed at query time (Ebbinghaus half-life 30 days)
 // Fix 2: --mode adjusts composite weights for task context
 // Fix 3: --spread enables multi-hop spreading activation to surface non-obvious connections
 // Fix 6 (issue #36): --primed=node1,node2 adds priming_bonus to neighbors of active nodes
 
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readFileSync, existsSync, appendFileSync, statSync } from 'node:fs';
+import { join, resolve, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
 
 // Expand a leading ~ to the user's home directory.
 // Handles ~, ~/path, and ~\path. Never mutates paths without a leading tilde.
+// #155: guard non-string input — a bare `--brain-path` flag (no `=value`) parses to
+// boolean `true`, which used to reach here and throw `p.startsWith is not a function`.
+// Any non-string (undefined, true, number, ...) is returned as-is so callers can detect
+// and report a clear "missing value" error instead of crashing on a low-level TypeError.
 export function expandTilde(p) {
-  if (!p) return p;
+  if (typeof p !== 'string' || !p) return p;
   if (p === '~') return homedir();
   if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2));
   return p;
@@ -81,6 +91,17 @@ if (isMain) {
     console.error('Usage: graph-query.js <slug> [keywords...] [--top=N] [--json] [--brain-path=PATH]');
     console.error('       [--mode=debugging|architecture|routine|incident] [--spread]');
     console.error('       [--hot-stub]');
+    console.error('');
+    console.error('--brain-path accepts EITHER a brain directory (containing graph.json + nodes/)');
+    console.error('OR a direct path to a graph.json file — both forms resolve to the same brain.');
+    console.error('There are two different brain roots in this repo, both queryable this way:');
+    console.error('  - project brains:  nexus/<slug>/                      (relative to cwd, default when --brain-path omitted)');
+    console.error('  - agent/personal brains: ~/agent-memory/nexus/agent-brain/<agent>/  or  ~/agent-memory/nexus/personal-brain/');
+    process.exit(1);
+  }
+
+  if ('brain-path' in flags && typeof flags['brain-path'] !== 'string') {
+    console.error('--brain-path requires a value, e.g. --brain-path=~/agent-memory/nexus/personal-brain');
     process.exit(1);
   }
 
@@ -105,9 +126,19 @@ if (isMain) {
     process.exit(1);
   }
 
-  const nexusDir = flags['brain-path']
+  // #155: --brain-path may point at either the brain DIRECTORY (containing graph.json)
+  // or directly at a graph.json FILE — accept both so callers don't need to know which
+  // convention a given brain root uses.
+  let nexusDir = flags['brain-path']
     ? resolve(expandTilde(flags['brain-path']))
     : join(process.cwd(), 'nexus', slug);
+  if (basename(nexusDir) === 'graph.json') {
+    nexusDir = dirname(nexusDir);
+  } else if (existsSync(nexusDir)) {
+    try {
+      if (statSync(nexusDir).isFile()) nexusDir = dirname(nexusDir);
+    } catch { /* fall through — treated as directory below */ }
+  }
 
   const graphPath = join(nexusDir, 'graph.json');
   if (!existsSync(graphPath)) {

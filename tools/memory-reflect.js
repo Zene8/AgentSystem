@@ -35,7 +35,7 @@ export function parseInsights(text) {
     .filter(Boolean);
 }
 
-function selectTopFacts(brainPath, topN) {
+export function selectTopFacts(brainPath, topN) {
   const dir = join(brainPath);
   const graphPath = join(dir, 'graph.json');
   const nodesDir = join(dir, 'nodes');
@@ -47,6 +47,9 @@ function selectTopFacts(brainPath, topN) {
     if (!existsSync(p)) continue;
     const { frontmatter, body } = parseFrontmatter(readFileSync(p, 'utf8'));
     if (frontmatter.type === 'insight') continue; // don't reflect on reflections
+    // #144/#155: skip superseded facts — reflecting on stale/contradicted facts would
+    // generate insights from information the user has since corrected.
+    if (frontmatter.superseded_by) continue;
     const importance = parseFloat(frontmatter.importance ?? 0) || 0;
     facts.push({ text: body.trim().replace(/^[-*]\s*/, '').trim(), importance });
   }

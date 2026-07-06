@@ -379,9 +379,11 @@ gemini --agent threepio --pr-description
 **Symptom:** Agent reports no memory or starts without prior context.
 
 **Steps:**
-1. Verify memory files exist in `.agents/memory/`
+1. Live memory is the graph brain under `~/agent-memory/nexus/` — query via `node tools/graph/graph-query.js`
 2. Run sync: `powershell -File sync_agents_from_repo.ps1`
-3. See full guide: [.agents/guides/CLI-MEMORY-SYNC-VERIFICATION.md](.agents/guides/CLI-MEMORY-SYNC-VERIFICATION.md)
+3. `.agents/memory/*.md` is deprecated (#117) and archived at `docs/archive/agents-memory/` — historical
+   scratch notes only, not read by any current tool. `CLI-MEMORY-SYNC-VERIFICATION.md` (fully stale —
+   described Copilot support that doesn't exist) is archived at `docs/archive/CLI-MEMORY-SYNC-VERIFICATION.md`.
 
 ---
 

@@ -45,8 +45,11 @@ function stampSalience(fact, action) {
     if (raw.includes('\nsalience:')) return;
     const stamped = raw.replace(/^---\n/, `---\nsalience: ${salience}\n`);
     writeFileSync(nodePath, stamped, 'utf8');
-  } catch {
-    // Non-fatal: salience stamping never blocks fact persistence.
+  } catch (e) {
+    // Non-fatal: salience stamping never blocks fact persistence, but a silent swallow
+    // here previously made stamping failures invisible (#144). Surface to stderr so
+    // recurring failures (bad frontmatter, permissions, etc.) are diagnosable.
+    console.error(`brain-remember: stampSalience failed for "${fact}": ${e.message}`);
   }
 }
 
@@ -58,8 +61,10 @@ function syncWikilinks(brainDir) {
     const graph = readGraph(graphPath);
     const map = buildWikilinkMap(graph);
     applyWikilinkMap(map, join(brainDir, 'nodes'));
-  } catch {
-    // Non-fatal.
+  } catch (e) {
+    // Non-fatal: link sync never blocks fact persistence (mirrors stampSalience's
+    // contract), but surface the failure so a broken wikilink pass is discoverable (#144).
+    console.error(`brain-remember: syncWikilinks failed for ${brainDir}: ${e.message}`);
   }
 }
 
@@ -85,8 +90,10 @@ function detectAndMarkContradictions(newFact, graph, nodesDir, newNodeId) {
         return candidate.nodeId; // Return the ID of the superseded node
       }
     }
-  } catch {
-    // Non-fatal: contradiction detection never blocks persistence.
+  } catch (e) {
+    // Non-fatal: contradiction detection never blocks persistence, but a silent
+    // swallow made broken supersession invisible (#144) — surface it to stderr.
+    console.error(`brain-remember: detectAndMarkContradictions failed: ${e.message}`);
   }
   return null;
 }
@@ -104,9 +111,11 @@ function ensureRepoGraph(slug) {
   if (!existsSync(graphPath)) {
     try {
       execFileSync(process.execPath, [GRAPH_INIT_PATH, slug, repo.path], { stdio: 'pipe', timeout: 60000 });
-    } catch {
+    } catch (e) {
       // Non-fatal: even if graph-init fails (e.g. not a git repo), fall through —
       // the caller still gets a writable target for the manual fact via emptyGraph().
+      // Surfaced to stderr (#144) so a persistently-failing auto-init is diagnosable.
+      console.error(`brain-remember: graph-init failed for slug "${slug}": ${e.message}`);
     }
   }
   return { nexusDir, graphPath, nodesDir: join(nexusDir, 'nodes') };
