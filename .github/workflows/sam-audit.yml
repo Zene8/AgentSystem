@@ -180,7 +180,14 @@ jobs:
           # avoids argv-length/quoting limits entirely — switched to piping the task text in via
           # stdin instead.
           $claude = "${{ steps.tools.outputs.claude_path }}"
-          $result = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw | & $claude --agent Sam -p 2>&1
+          $taskText = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw
+          Write-Host "sam-task.txt length: $($taskText.Length)"
+          $result = $taskText | & $claude --agent Sam -p 2>&1
+          $claudeExit = $LASTEXITCODE
+          Write-Host "claude exit=$claudeExit resultCount=$($result.Count)"
+          Write-Host "--- raw result (first 2000 chars) ---"
+          Write-Host (($result | Out-String).Substring(0, [Math]::Min(2000, ($result | Out-String).Length)))
+          Write-Host "--- end raw result ---"
           $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
 
           if ($result -match "^APPROVED:") {
