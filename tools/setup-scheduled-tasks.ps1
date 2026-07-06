@@ -55,10 +55,15 @@ if ($Uninstall) {
 }
 
 # ── Task 1: WeeklyBrainConsolidation ─────────────────────────────────────────
+# NOTE (fixed): Task Scheduler launches $NodePath directly with no shell, so a
+# trailing "$Log 2>&1" was being passed to node.exe as literal argv (node has
+# no redirect syntax) instead of being interpreted as shell redirection —
+# stdout/stderr were silently discarded and the log file was never written.
+# Fixed by routing through cmd.exe /c, which does understand >>/2>&1.
 $t = $tasks[0]
 $action = New-ScheduledTaskAction `
-    -Execute $NodePath `
-    -Argument "$($t.Script) $($t.Args) >> `"$($t.Log)`" 2>&1" `
+    -Execute 'cmd.exe' `
+    -Argument "/c `"`"$NodePath`" `"$($t.Script)`" $($t.Args) >> `"$($t.Log)`" 2>&1`"" `
     -WorkingDirectory $ToolsRoot
 
 $settings = New-ScheduledTaskSettingsSet `
