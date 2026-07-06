@@ -22,4 +22,4 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node C:\Users\natha\AgentSystem\tools\integrations\sentry-bridge.js --payload='${{ runner.temp }}\sentry-payload.json'
+          node ${{ github.workspace }}\tools\integrations\sentry-bridge.js --payload='${{ runner.temp }}\sentry-payload.json'

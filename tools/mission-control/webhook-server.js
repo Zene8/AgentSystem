@@ -54,6 +54,67 @@ const rateLimitWindowMs = 60 * 1000;
 const rateLimitMaxRequests = 100;
 const ipRequestCounts = new Map();
 
+// ── IP allowlist (optional) ───────────────────────────────────────────────────
+// ~/.claude/webhook-allowlist.json: { "allow": ["127.0.0.1", "192.168.1.0/24"] }
+// Absent/empty file = no IP filtering (auth + rate limit still apply).
+const ALLOWLIST_FILE = `${HOME}/.claude/webhook-allowlist.json`;
+function loadAllowlist() {
+  try {
+    const j = JSON.parse(readFileSync(ALLOWLIST_FILE, 'utf8'));
+    return Array.isArray(j.allow) ? j.allow : [];
+  } catch { return []; }
+}
+const ALLOWLIST = loadAllowlist();
+
+function ipToInt(ip) {
+  const p = ip.split('.').map(Number);
+  if (p.length !== 4 || p.some(n => Number.isNaN(n) || n < 0 || n > 255)) return null;
+  return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0;
+}
+function ipAllowed(rawIp) {
+  if (!ALLOWLIST.length) return true;
+  const ip = String(rawIp || '').replace(/^::ffff:/, '');
+  if (ip === '::1' || ip === '127.0.0.1') return true; // loopback always allowed
+  const ipInt = ipToInt(ip);
+  for (const entry of ALLOWLIST) {
+    if (entry === ip) return true;
+    const m = entry.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
+    if (m && ipInt !== null) {
+      const base = ipToInt(m[1]); const bits = parseInt(m[2], 10);
+      if (base !== null && bits >= 0 && bits <= 32) {
+        const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+        if ((ipInt & mask) === (base & mask)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ── Failed-auth lockout ───────────────────────────────────────────────────────
+// >=10 failed auths within 60s from one IP → locked out for 15 min (exponential
+// doubling on repeat lockouts, capped at 24h).
+const failedAuth = new Map(); // ip -> { fails: number[], lockedUntil: number, lockCount: number }
+const AUTH_FAIL_MAX = 10, AUTH_FAIL_WINDOW = 60_000, LOCKOUT_BASE = 15 * 60_000, LOCKOUT_CAP = 24 * 3600_000;
+
+function authLocked(ip) {
+  const e = failedAuth.get(ip);
+  return !!(e && e.lockedUntil > Date.now());
+}
+function recordAuthFail(ip) {
+  const now = Date.now();
+  const e = failedAuth.get(ip) || { fails: [], lockedUntil: 0, lockCount: 0 };
+  e.fails = e.fails.filter(t => now - t < AUTH_FAIL_WINDOW);
+  e.fails.push(now);
+  if (e.fails.length >= AUTH_FAIL_MAX) {
+    e.lockCount += 1;
+    e.lockedUntil = now + Math.min(LOCKOUT_BASE * 2 ** (e.lockCount - 1), LOCKOUT_CAP);
+    e.fails = [];
+    console.warn(`[auth] lockout: ${ip} until ${new Date(e.lockedUntil).toISOString()} (lockout #${e.lockCount})`);
+  }
+  failedAuth.set(ip, e);
+}
+function clearAuthFails(ip) { failedAuth.delete(ip); }
+
 function rateLimiter(req) {
   const ip = req.socket.remoteAddress || req.headers['x-forwarded-for'] || 'unknown';
   const now = Date.now();
@@ -425,6 +486,18 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Hub-Signature-256');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  const clientIp = String(req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+
+  // IP allowlist (if configured)
+  if (!ipAllowed(clientIp)) {
+    return json(res, 403, { error: 'Forbidden' });
+  }
+
+  // Failed-auth lockout
+  if (authLocked(clientIp)) {
+    return json(res, 429, { error: 'Locked out after repeated auth failures. Try later.' });
+  }
+
   // Rate Limiting check
   if (!rateLimiter(req)) {
     return json(res, 429, { error: 'Too many requests. Rate limit exceeded.' });
@@ -454,7 +527,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   // All other routes need Bearer auth
-  if (!checkAuth(req)) return json(res, 401, { error: 'Unauthorized — use Authorization: Bearer <key>' });
+  if (!checkAuth(req)) {
+    recordAuthFail(clientIp);
+    return json(res, 401, { error: 'Unauthorized — use Authorization: Bearer <key>' });
+  }
+  clearAuthFails(clientIp);
 
   // GET / — status
   if (req.method === 'GET' && path === '/') {
