@@ -1,7 +1,13 @@
+// compute-trust-scores.js — aggregate agent-dispatch run logs into a trust-score report.
+// Usage: node tools/compute-trust-scores.js [--dry-run] [--help]
+
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'node:url';
+import { parseFlagsOrExit } from './cli-args.js';
 
+const USAGE = 'Usage: node tools/compute-trust-scores.js [--dry-run] [--help]';
 const RUN_LOG_DIR = path.join(os.homedir(), 'agent-memory', 'nexus', 'run-log');
 const OUTPUT_FILE = path.join(os.homedir(), 'agent-memory', 'nexus', 'trust-scores.md');
 
@@ -13,13 +19,14 @@ function classifyResult(result) {
   return 'unknown';
 }
 
-function main() {
+function main(dryRun = false) {
   console.log('[trust-scores] Reading run-log from:', RUN_LOG_DIR);
 
   // Fail-soft: missing dir
   if (!fs.existsSync(RUN_LOG_DIR)) {
     console.log('[trust-scores] Run-log directory does not exist — writing empty report');
-    writeEmpty();
+    if (dryRun) console.log('[dry-run] would write empty report to', OUTPUT_FILE);
+    else writeEmpty();
     return;
   }
 
@@ -27,7 +34,8 @@ function main() {
 
   if (files.length === 0) {
     console.log('[trust-scores] No run log files found — writing empty report');
-    writeEmpty();
+    if (dryRun) console.log('[dry-run] would write empty report to', OUTPUT_FILE);
+    else writeEmpty();
     return;
   }
 
@@ -75,6 +83,11 @@ _Last updated: ${now}_
 |-------|-----------|-----------|---------|---------|-------------|
 ${rows}`;
 
+  if (dryRun) {
+    console.log(`[dry-run] would write to ${OUTPUT_FILE} — agents tracked: ${sortedAgents.length}, total runs: ${files.length}`);
+    return;
+  }
+
   // Ensure output dir exists
   const outDir = path.dirname(OUTPUT_FILE);
   if (!fs.existsSync(outDir)) {
@@ -101,4 +114,10 @@ No run data yet. Run logs are written to \`~/agent-memory/nexus/run-log/\` by ag
   console.log('[trust-scores] Empty report written to:', OUTPUT_FILE);
 }
 
-main();
+const isMain = process.argv[1] &&
+  process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
+
+if (isMain) {
+  const flags = parseFlagsOrExit(process.argv.slice(2), { usage: USAGE, allowed: ['dry-run'] });
+  main(!!flags['dry-run']);
+}

@@ -32,7 +32,32 @@ if (!existsSync(LOG)) {
 }
 
 const lines = readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean);
-const sessions = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+const rawSessions = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+// #155: defense against double-logged rows. Root cause investigated: sona-writeback-hook.js
+// is intentionally registered on BOTH the Stop and SubagentStop events (see sync_hooks_from_repo.ps1),
+// which is by design (main-session AND subagent episodic capture) — but session-end.sh (the writer
+// of THIS log) is registered once, on Stop only. If a future hook wiring regression ever fires the
+// same Stop event twice for one turn (e.g. duplicate registration, or a retried hook after timeout),
+// the appended row would be byte-identical (same session, same transcript-derived cost/tokens, same
+// second-resolution timestamp). Collapse exact duplicates here as a cheap, safe aggregation-time
+// backstop — two genuinely distinct turns essentially never share session+ts+cost+in_tok+out_tok.
+function dedupeSessions(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const key = `${r.session}|${r.ts}|${r.cost_usd}|${r.in_tok}|${r.out_tok}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+const sessions = dedupeSessions(rawSessions);
+if (sessions.length !== rawSessions.length && mode !== '--top') {
+  console.log(`(deduped ${rawSessions.length - sessions.length} duplicate log row(s))`);
+}
 
 const now = new Date();
 const cutoff = {

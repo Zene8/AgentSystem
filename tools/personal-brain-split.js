@@ -7,6 +7,9 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentMemoryRoot, readGraph, writeGraph, addNode, addEdge, emptyGraph, parseFrontmatter } from './graph/graph-lib.js';
+import { parseFlagsOrExit } from './cli-args.js';
+
+const USAGE = 'Usage: node tools/personal-brain-split.js [--dry-run] [--help]';
 
 // Extract fields from existing node file that downstream steps own (salience, connections).
 // Returns {} if file does not exist or has no frontmatter.
@@ -97,6 +100,7 @@ export function splitPersonalBrain({ dryRun = false } = {}) {
   let graph = existsSync(graphPath) ? readGraph(graphPath) : emptyGraph('agent', 'personal-brain');
   const edgesBefore = graph.edges.length;
   let nodesCreated = 0;
+  let nodesExisting = 0;
   const nodeIds = [];
   const nodeKeywords = new Map();
   const sectionLastNode = new Map();
@@ -128,11 +132,12 @@ hot: true${salienceLine}${connectionsLine}
 ${text}
 `;
 
+    const alreadyExisted = existsSync(nodeFile);
     if (!dryRun) {
       mkdirSync(nodesDir, { recursive: true });
       writeFileSync(nodeFile, nodeContent, 'utf8');
-      nodesCreated++;
     }
+    if (alreadyExisted) nodesExisting++; else nodesCreated++;
 
     if (!graph.nodes.includes(id)) graph = addNode(graph, id);
 
@@ -157,16 +162,17 @@ ${text}
 
   const edgesAdded = graph.edges.length - edgesBefore;
   if (!dryRun) writeGraph(graphPath, graph);
-  return { ok: true, nodesCreated, edgesAdded, candidateCount: candidates.length };
+  return { ok: true, nodesCreated, nodesExisting, edgesAdded, candidateCount: candidates.length };
 }
 
 const isMain = process.argv[1] &&
   process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
 
 if (isMain) {
-  const dryRun = process.argv.includes('--dry-run');
+  const flags = parseFlagsOrExit(process.argv.slice(2), { usage: USAGE, allowed: ['dry-run'] });
+  const dryRun = !!flags['dry-run'];
   const r = splitPersonalBrain({ dryRun });
   if (!r.ok) { console.log(`personal-brain-split: ${r.message}`); process.exit(0); }
-  if (dryRun) console.log(`[dry-run] would split user-brain.md → ${r.candidateCount} nodes, ~${r.edgesAdded} edges`);
-  else console.log(`split user-brain.md → ${r.nodesCreated} nodes created, ${r.edgesAdded} edges added`);
+  if (dryRun) console.log(`[dry-run] would split user-brain.md → ${r.candidateCount} nodes (${r.nodesCreated} new, ${r.nodesExisting} existing), ~${r.edgesAdded} edges`);
+  else console.log(`split user-brain.md → ${r.nodesCreated} nodes created, ${r.nodesExisting} already existed (updated), ${r.edgesAdded} edges added`);
 }

@@ -159,12 +159,16 @@ function extractEpisodicFacts(transcriptPath) {
       }
     }
 
-    return {
-      task,
-      files: [...touchedFiles].slice(0, 10).join(', ') || 'none',
-      outcome,
-      agent,
-    };
+    const files = [...touchedFiles].slice(0, 10).join(', ') || 'none';
+
+    // #155: guard against writing degenerate "all fields unknown" episodic entries.
+    // If we found no DONE/BLOCKED status line, no touched files, and no agent identity,
+    // there is no real signal worth persisting — the transcript tail likely had no
+    // completed turn yet (e.g. hook fired mid-stream) or wasn't a subagent-style run.
+    const hasSignal = outcome !== 'unknown' || files !== 'none' || agent !== 'unknown';
+    if (!hasSignal) return null;
+
+    return { task, files, outcome, agent };
   } catch {
     return null;
   }

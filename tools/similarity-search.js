@@ -5,7 +5,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseFrontmatter } from './graph/graph-lib.js';
+import { parseFrontmatter, toYaml } from './graph/graph-lib.js';
 
 // Tokenize for similarity — strip punctuation, lowercase, minimal normalization.
 function tokenize(text) {
@@ -124,17 +124,8 @@ export function markSuperseded(content, newNodeId, date = new Date().toISOString
     superseded_by: newNodeId,
     superseded_date: date,
   };
-  const toYaml = (obj) => {
-    return Object.entries(obj).map(([k, v]) => {
-      if (Array.isArray(v)) {
-        if (v.length === 0) return `${k}: []`;
-        if (k === 'connections') {
-          return `${k}:\n${v.map(s => `  - "${s}"`).join('\n')}`;
-        }
-        return `${k}: [${v.map(s => String(s)).join(', ')}]`;
-      }
-      return `${k}: ${v}`;
-    }).join('\n') + '\n';
-  };
+  // #144/#155: use the shared, quote/escape-hardened toYaml from graph-lib.js instead
+  // of a local unescaped copy (a fact value containing a `"` or `:` used to corrupt
+  // the frontmatter block written by markSuperseded).
   return `---\n${toYaml(updated)}---\n\n${body.trimStart()}`;
 }

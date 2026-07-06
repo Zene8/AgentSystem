@@ -4,6 +4,15 @@
 // also decides which memory tier (personal/repo/agent) each fact belongs to, given the
 // known repo slugs and agent roster as context. Conservative by design: unknown/invalid
 // tier or target always falls back to personal — never guesses a repo/agent that doesn't exist.
+//
+// Library only — no CLI side effects. The guard below exists so `node tools/memory-classify.js`
+// (e.g. an unknown flag typo) never silently no-ops; it always prints usage and exits.
+// Usage: node tools/memory-classify.js [--help]  (this module exports helpers; it has no CLI action)
+
+import { fileURLToPath } from 'node:url';
+import { parseFlagsOrExit } from './cli-args.js';
+
+const USAGE = 'Usage: node tools/memory-classify.js [--help]\n(library module — import { classifyAndExtract, parseClassifiedFacts } instead of running directly)';
 
 const MAX_FACTS = 8;
 const VALID_TIERS = new Set(['personal', 'repo', 'agent']);
@@ -96,4 +105,12 @@ export function parseClassifiedFacts(raw, { repos = [], agents = [] } = {}) {
     if (out.length >= MAX_FACTS) break;
   }
   return out;
+}
+
+const isMain = process.argv[1] &&
+  process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
+
+if (isMain) {
+  parseFlagsOrExit(process.argv.slice(2), { usage: USAGE, allowed: [] });
+  console.log(USAGE);
 }

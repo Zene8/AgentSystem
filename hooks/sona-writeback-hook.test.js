@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { promptHash } = require('./memory-router.js');
-const { extractFirstUserPromptText, logRoutingActual } = require('./sona-writeback-hook.js');
+const { extractFirstUserPromptText, logRoutingActual, extractEpisodicFacts } = require('./sona-writeback-hook.js');
 
 function writeTranscript(lines) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sona-writeback-test-'));
@@ -85,4 +85,34 @@ test('logRoutingActual: never throws when transcript has no user turn', () => {
 
 test('logRoutingActual: never throws on nonexistent transcript path', () => {
   assert.doesNotThrow(() => logRoutingActual({ agent: 'Friday' }, '/nonexistent/path.jsonl'));
+});
+
+// #155: no-signal transcripts must not produce a degenerate all-"unknown" episodic entry.
+test('extractEpisodicFacts: returns null when there is no DONE/BLOCKED, no files, no agent', () => {
+  const p = writeTranscript([
+    { message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } },
+    { message: { role: 'assistant', content: [{ type: 'text', text: 'thinking about it...' }] } },
+  ]);
+  assert.equal(extractEpisodicFacts(p), null);
+});
+
+test('extractEpisodicFacts: returns facts when a DONE status line is present', () => {
+  const p = writeTranscript([
+    { message: { role: 'user', content: [{ type: 'text', text: 'fix the bug' }] } },
+    { message: { role: 'assistant', content: [{ type: 'text', text: 'DONE: fixed the bug' }] } },
+  ]);
+  const facts = extractEpisodicFacts(p);
+  assert.ok(facts);
+  assert.equal(facts.outcome, 'done');
+  assert.equal(facts.task, 'fixed the bug');
+});
+
+test('extractEpisodicFacts: returns facts when files were touched even without a status line', () => {
+  const p = writeTranscript([
+    { message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/repo/src/foo.js' } }] } },
+  ]);
+  const facts = extractEpisodicFacts(p);
+  assert.ok(facts);
+  assert.equal(facts.outcome, 'unknown');
+  assert.notEqual(facts.files, 'none');
 });

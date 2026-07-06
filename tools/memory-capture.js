@@ -19,7 +19,9 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { extractAndRemember, readTranscriptText } from './memory-onboard.js';
+import { parseFlagsOrExit } from './cli-args.js';
 
+const USAGE = 'Usage: node tools/memory-capture.js <transcript-path> [--dry-run] [--help]';
 const MAX_FACTS = 5;
 
 // Pure (legacy): build a personal-only extraction prompt. Retained for backward-compat
@@ -87,10 +89,21 @@ const isMain = process.argv[1] &&
   process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
 
 if (isMain) {
-  const transcriptPath = process.argv[2];
+  const argv = process.argv.slice(2);
+  const positional = argv.filter(a => !a.startsWith('-'));
+  const flags = parseFlagsOrExit(argv.filter(a => a.startsWith('-')), { usage: USAGE, allowed: ['dry-run'] });
+  const transcriptPath = positional[0];
   if (!transcriptPath) {
-    console.error('Usage: memory-capture.js <transcript-path>');
+    console.error(USAGE);
+    process.exit(2);
+  }
+  if (!existsSync(transcriptPath)) {
+    console.error(`memory-capture: transcript not found: ${transcriptPath}`);
     process.exit(1);
+  }
+  if (flags['dry-run']) {
+    console.log(`[dry-run] would extract + write facts from ${transcriptPath} (no writes performed)`);
+    process.exit(0);
   }
   const r = captureFromTranscript(transcriptPath);
   if (!r.ok) { console.error(`memory-capture: ${r.message}`); process.exit(1); }

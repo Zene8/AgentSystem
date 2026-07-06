@@ -391,15 +391,31 @@ function parseYaml(text) {
   return result;
 }
 
-function toYaml(obj) {
+// #144/#155: escape embedded double quotes and backslashes before quoting a scalar,
+// and force-quote any string scalar containing YAML-significant characters (colon,
+// hash, newline, leading/trailing whitespace) that would otherwise silently corrupt
+// the frontmatter block or get parsed as the wrong type.
+function yamlEscape(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+function needsQuoting(s) {
+  return typeof s === 'string' && /[:#\n"]|^\s|\s$|^$/.test(s);
+}
+export function toYamlScalar(v) {
+  if (typeof v === 'boolean' || typeof v === 'number') return String(v);
+  if (needsQuoting(v)) return `"${yamlEscape(v)}"`;
+  return String(v);
+}
+
+export function toYaml(obj) {
   return Object.entries(obj).map(([k, v]) => {
     if (Array.isArray(v)) {
       if (v.length === 0) return `${k}: []`;
       if (k === 'connections') {
-        return `${k}:\n${v.map(s => `  - "${s}"`).join('\n')}`;
+        return `${k}:\n${v.map(s => `  - "${yamlEscape(s)}"`).join('\n')}`;
       }
-      return `${k}: [${v.map(s => String(s)).join(', ')}]`;
+      return `${k}: [${v.map(s => toYamlScalar(s)).join(', ')}]`;
     }
-    return `${k}: ${v}`;
+    return `${k}: ${toYamlScalar(v)}`;
   }).join('\n') + '\n';
 }

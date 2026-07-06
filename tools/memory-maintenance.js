@@ -3,13 +3,16 @@
 // Wired two ways: (1) SessionStart hook with --if-stale (run-on-use), (2) scheduled cron.
 // Steps: split → reconsolidate → decay → stale-prune → consolidate → agent-brain-seed.
 // Reflection (LLM, slow) only with --reflect. Each step is non-fatal; failures are logged.
-// Usage: node tools/memory-maintenance.js [--if-stale=DAYS] [--reflect] [--quiet]
+// Usage: node tools/memory-maintenance.js [--if-stale=DAYS] [--reflect] [--dry-run] [--quiet] [--help]
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { agentMemoryRoot } from './graph/graph-lib.js';
+import { parseFlagsOrExit } from './cli-args.js';
+
+const USAGE = 'Usage: node tools/memory-maintenance.js [--if-stale=DAYS] [--reflect] [--dry-run] [--quiet] [--help]';
 
 // Pure: should maintenance run? True if never run, or last run older than `days`.
 export function isStale(lastRunIso, days, now = Date.now()) {
@@ -61,18 +64,23 @@ const isMain = process.argv[1] &&
   process.argv[1].replace(/\\/g, '/') === fileURLToPath(import.meta.url).replace(/\\/g, '/');
 
 if (isMain) {
-  const flags = {};
-  for (const a of process.argv.slice(2)) {
-    const m = a.match(/^--([\w-]+)(?:=(.*))?$/);
-    if (m) flags[m[1]] = m[2] ?? true;
-  }
+  const flags = parseFlagsOrExit(process.argv.slice(2), {
+    usage: USAGE,
+    allowed: ['if-stale', 'reflect', 'dry-run', 'quiet'],
+  });
   const quiet = !!flags.quiet;
+  const dryRun = !!flags['dry-run'];
   const stampPath = join(nexus, '.last-maintenance');
   const lastRun = existsSync(stampPath) ? readFileSync(stampPath, 'utf8').trim() : null;
   const days = flags['if-stale'] ? parseFloat(flags['if-stale']) : 0;
 
   if (days && !isStale(lastRun, days)) {
     if (!quiet) console.log(`memory-maintenance: skipped (last run ${lastRun}, < ${days}d ago)`);
+    process.exit(0);
+  }
+
+  if (dryRun) {
+    console.log('[dry-run] would run steps: split, reconsolidate, decay, stale-prune, memory-tune, consolidate, wikilink-sync, agent-brain-seed' + (flags.reflect ? ', reflect' : ''));
     process.exit(0);
   }
 
