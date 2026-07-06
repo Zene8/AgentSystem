@@ -454,7 +454,9 @@ test('bug3 regression: worktree cwd resolves the CORRECT transcript, not a decoy
 
   const sessionId = 'wtwt1111-0000-0000-0000-000000000001';
   const cwd = 'C:/Users/natha/dev/AgentSystem/.claude/worktrees/foo';
-  const correctProjectDir = join(tmp, '.claude', 'projects', 'C--Users-natha-dev-AgentSystem--claude-worktrees-foo');
+  // Derive project dir the same way session-namer does — resolve() is platform-dependent,
+  // so a hardcoded Windows-shaped dir breaks on Linux CI.
+  const correctProjectDir = join(tmp, '.claude', 'projects', cwdToProjectDir(cwd));
   const decoyProjectDir   = join(tmp, '.claude', 'projects', '0decoy-sorts-first');
 
   makeTranscript(correctProjectDir, sessionId, 'implement the correct worktree feature');
