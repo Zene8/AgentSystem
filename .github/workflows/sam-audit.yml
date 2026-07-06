@@ -49,7 +49,14 @@ jobs:
           foreach ($dir in $candidates) {
             if ($dir -and (Test-Path $dir)) {
               Write-Host "Adding to PATH: $dir"
-              Add-Content -Path $env:GITHUB_PATH -Value $dir
+              # Add-Content's default encoding in Windows PowerShell 5.1 is UTF-16LE, and
+              # `-Encoding utf8` in 5.1 writes a UTF-8 BOM. $GITHUB_PATH is a plain UTF-8 (no BOM)
+              # file the runner appends to across all steps in the job — either variant can
+              # corrupt/break parsing of the file's existing lines, which is why `gh` was "found"
+              # via its absolute path in THIS step's own diagnostic but still unresolvable by name
+              # in the very next step (the PATH update silently failed to apply). Use
+              # System.IO.File::AppendAllLines with a plain UTF8Encoding($false) to avoid any BOM.
+              [System.IO.File]::AppendAllLines($env:GITHUB_PATH, [string[]]@($dir), (New-Object System.Text.UTF8Encoding($false)))
             }
           }
           Write-Host "gh found at: $((Get-Command gh -ErrorAction SilentlyContinue).Source)"
