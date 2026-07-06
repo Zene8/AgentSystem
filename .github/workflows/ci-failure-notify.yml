@@ -1,0 +1,75 @@
+name: CI Failure Notifier
+
+on:
+  workflow_run:
+    workflows: [test.yml]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  notify-failure:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'
+    name: Post CI failure notification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get associated PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # workflow_run triggered by a PR has pull_requests array in the event payload
+          run_id="${{ github.event.workflow_run.id }}"
+          repo="${{ github.repository }}"
+
+          # Get the PR number from the workflow run
+          pr_number=$(gh api repos/$repo/actions/runs/$run_id --jq '.pull_requests[0].number // empty')
+
+          if [ -z "$pr_number" ]; then
+            echo "No associated PR found"
+            echo "pr_number=" >> $GITHUB_OUTPUT
+          else
+            echo "Found PR #$pr_number"
+            echo "pr_number=$pr_number" >> $GITHUB_OUTPUT
+          fi
+
+      - name: List failed jobs and post comment
+        if: steps.pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Get list of failed jobs
+          failed_jobs=$(gh run view "$RUN_ID" --repo "$REPO" --json jobs --jq '.jobs[] | select(.conclusion=="failure") | .name' 2>/dev/null || echo "")
+
+          if [ -z "$failed_jobs" ]; then
+            echo "No failed jobs found (may have resolved)"
+            exit 0
+          fi
+
+          # Build the comment body
+          comment_body=$(cat <<EOF
+          ❌ **CI checks failed**
+
+          Failed jobs:
+          $(echo "$failed_jobs" | sed 's/^/- /')
+
+          [View full run](https://github.com/$REPO/actions/runs/$RUN_ID)
+          EOF
+          )
+
+          # Post the comment
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$comment_body"
+
+      - name: Add label to PR
+        if: steps.pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label ci:failing || true

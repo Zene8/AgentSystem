@@ -4,7 +4,7 @@
 **Owner:** Threepio (Docs)  
 **Linked from:** HANDOFF.md, README.md
 
-Command syntax, latency expectations, invocation patterns, and troubleshooting for each agent across Claude Code, Gemini, and Copilot CLIs.
+Command syntax, latency expectations, invocation patterns, and troubleshooting for each agent across Claude Code and Gemini CLIs.
 
 ---
 
@@ -16,19 +16,19 @@ For **remote spawning** of new sessions (vs. attaching to running sessions), see
 
 ## Quick Reference
 
-| Agent | Model | Role | Claude Code | Gemini | Copilot |
-|---|---|---|---|---|---|
-| Jarvis | claude-opus-4-8 | CEO / Default | `claude --agent jarvis` | `gemini --agent jarvis` | `@jarvis` in chat |
-| Friday | claude-sonnet-4-6 | CTO | `claude --agent friday` | `gemini --agent friday` | `@friday` |
-| Sam | claude-sonnet-4-6 | CSO / Security | `claude --agent sam` | `gemini --agent sam` | `@sam` |
-| Nat | claude-sonnet-4-6 | CBO | `claude --agent nat` | `gemini --agent nat` | `@nat` |
-| Ultron | claude-haiku-4-5 | Backend | `claude --agent ultron` | `gemini --agent ultron` | `@ultron` |
-| Astra | claude-haiku-4-5 | Frontend | `claude --agent astra` | `gemini --agent astra` | `@astra` |
-| Pym | claude-haiku-4-5 | Database | `claude --agent pym` | `gemini --agent pym` | `@pym` |
-| Leo | claude-haiku-4-5 | DevOps | `claude --agent leo` | `gemini --agent leo` | `@leo` |
-| Wanda | claude-sonnet-4-6 | Design | `claude --agent wanda` | `gemini --agent wanda` | `@wanda` |
-| Threepio | claude-sonnet-4-6 | Docs | `claude --agent threepio` | `gemini --agent threepio` | `@threepio` |
-| r2d2 | claude-haiku-4-5 | Fallback | `claude --agent r2d2` | `gemini --agent r2d2` | `@r2d2` |
+| Agent | Model | Role | Claude Code | Gemini |
+|---|---|---|---|---|
+| Jarvis | claude-opus-4-8 | CEO / Default | `claude --agent jarvis` | `gemini --agent jarvis` |
+| Friday | claude-sonnet-4-6 | CTO | `claude --agent friday` | `gemini --agent friday` |
+| Sam | claude-sonnet-4-6 | CSO / Security | `claude --agent sam` | `gemini --agent sam` |
+| Nat | claude-sonnet-4-6 | CBO | `claude --agent nat` | `gemini --agent nat` |
+| Ultron | claude-haiku-4-5 | Backend | `claude --agent ultron` | `gemini --agent ultron` |
+| Astra | claude-haiku-4-5 | Frontend | `claude --agent astra` | `gemini --agent astra` |
+| Pym | claude-haiku-4-5 | Database | `claude --agent pym` | `gemini --agent pym` |
+| Leo | claude-haiku-4-5 | DevOps | `claude --agent leo` | `gemini --agent leo` |
+| Wanda | claude-sonnet-4-6 | Design | `claude --agent wanda` | `gemini --agent wanda` |
+| Threepio | claude-sonnet-4-6 | Docs | `claude --agent threepio` | `gemini --agent threepio` |
+| r2d2 | claude-haiku-4-5 | Fallback | `claude --agent r2d2` | `gemini --agent r2d2` |
 
 ---
 
@@ -69,10 +69,6 @@ claude --agent jarvis --weekly-review     # Trigger weekly review ritual
 gemini --agent jarvis
 ```
 
-**Copilot:**
-```
-@jarvis [task description]
-```
 
 **Best-case invocation:**
 ```
@@ -109,11 +105,6 @@ claude --agent friday --arch-review=repo-name       # Architecture review
 gemini --agent friday
 ```
 
-**Copilot:**
-```
-@friday review this architecture decision
-@friday --arch-review
-```
 
 **Best-case invocation:**
 ```
@@ -146,10 +137,6 @@ claude --agent sam --vendor-review=vendor-name    # Vendor security review
 gemini --agent sam --pre-merge-audit
 ```
 
-**Copilot:**
-```
-@sam pre-merge audit for PR #[number]
-```
 
 **Best-case invocation:**
 ```
@@ -178,10 +165,6 @@ claude --agent nat --customer-health
 gemini --agent nat --customer-health
 ```
 
-**Copilot:**
-```
-@nat customer health analysis
-```
 
 ---
 
@@ -202,10 +185,6 @@ claude --agent ultron --service-audit
 gemini --agent ultron --api-review
 ```
 
-**Copilot:**
-```
-@ultron review this API design
-```
 
 **Escalation:** Conflicts → `@friday`
 
@@ -228,10 +207,6 @@ claude --agent astra --perf-audit
 gemini --agent astra --component-review
 ```
 
-**Copilot:**
-```
-@astra review this component
-```
 
 **Escalation:** Design questions → `@wanda`. Conflicts → `@friday`
 
@@ -254,10 +229,6 @@ claude --agent pym --perf-check
 gemini --agent pym --schema-review
 ```
 
-**Copilot:**
-```
-@pym review this migration
-```
 
 **Escalation:** Conflicts → `@friday`
 
@@ -280,10 +251,6 @@ claude --agent leo --deploy-test
 gemini --agent leo --ci-review
 ```
 
-**Copilot:**
-```
-@leo CI pipeline review
-```
 
 **Escalation:** Conflicts → `@friday`
 
@@ -306,10 +273,6 @@ claude --agent wanda --ux-feedback
 gemini --agent wanda --design-review=Button
 ```
 
-**Copilot:**
-```
-@wanda design review for [component]
-```
 
 **Escalation:** Technical issues → `@friday`
 
@@ -333,10 +296,6 @@ claude --agent threepio --release-notes
 gemini --agent threepio --pr-description
 ```
 
-**Copilot:**
-```
-@threepio write PR description for this change
-```
 
 ---
 
@@ -368,10 +327,6 @@ gemini --agent threepio --pr-description
 2. Re-authenticate: `gemini auth login`
 3. Confirm agent file exists: `%USERPROFILE%\.gemini\antigravity-cli\agent\[name].json`
 
-**Copilot:**
-1. Confirm GitHub Copilot extension is active in your IDE.
-2. Re-authenticate via IDE settings → Copilot → Sign in.
-
 ---
 
 ### Memory Not Found
@@ -382,8 +337,7 @@ gemini --agent threepio --pr-description
 1. Live memory is the graph brain under `~/agent-memory/nexus/` — query via `node tools/graph/graph-query.js`
 2. Run sync: `powershell -File sync_agents_from_repo.ps1`
 3. `.agents/memory/*.md` is deprecated (#117) and archived at `docs/archive/agents-memory/` — historical
-   scratch notes only, not read by any current tool. `CLI-MEMORY-SYNC-VERIFICATION.md` (fully stale —
-   described Copilot support that doesn't exist) is archived at `docs/archive/CLI-MEMORY-SYNC-VERIFICATION.md`.
+   scratch notes only, not read by any current tool.
 
 ---
 

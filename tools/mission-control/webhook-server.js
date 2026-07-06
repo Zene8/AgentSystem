@@ -365,6 +365,18 @@ function spawnAgent(agent, prompt, cwd = HOME) {
   });
 }
 
+/**
+ * Dispatch a claude background agent via Mission Control format
+ * Wraps spawnAgent() with required return interface for registry update
+ * @param {string} agent - Agent name
+ * @param {string} prompt - Task prompt
+ * @param {string} repoPath - Working directory
+ * @returns {Promise<{sessionId, logPath, logFile, pid}>}
+ */
+async function dispatchClaude(agent, prompt, repoPath) {
+  return spawnAgent(agent, prompt, repoPath);
+}
+
 function getActiveSessions() {
   return new Promise((resolve) => {
     const child = spawn(CLAUDE, ['agents', '--json'], { env: { ...process.env, HOME } });

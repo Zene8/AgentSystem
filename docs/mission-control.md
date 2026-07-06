@@ -200,7 +200,7 @@ Currently recommend **Option A** for MVP (tmux-wrapped, signal handling for clea
 
 #### Repo Allowlist
 
-**Source:** `~/agent-memory/nexus/known-repos.json` (shared across Claude, Antigravity, Copilot).
+**Source:** `~/agent-memory/nexus/known-repos.json` (shared across Claude Code and Gemini/Antigravity).
 
 **Validation:**
 - Webhook validates every repo against this list before dispatch.

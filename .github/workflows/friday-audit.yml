@@ -1,0 +1,163 @@
+name: Friday Engineering Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    branches: [main, dev]
+
+# New push to branch cancels in-flight audit — re-runs fresh
+concurrency:
+  group: friday-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  friday-audit:
+    name: Engineering Audit (Friday CTO)
+    runs-on: self-hosted
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve gh/claude absolute paths for runner service context
+        id: tools
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $ghCandidates = @(
+            "$env:ProgramFiles\GitHub CLI\gh.exe",
+            "${env:ProgramFiles(x86)}\GitHub CLI\gh.exe",
+            "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
+          )
+          $claudeCandidates = @(
+            "$env:USERPROFILE\.local\bin\claude.exe",
+            "$env:LOCALAPPDATA\Programs\claude\claude.exe",
+            "$env:APPDATA\npm\claude.cmd"
+          )
+          $gh = ($ghCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+          $claude = ($claudeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+          if (-not $gh) { $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source }
+          if (-not $claude) { $claude = (Get-Command claude -ErrorAction SilentlyContinue).Source }
+          Write-Host "Resolved gh: $gh"
+          Write-Host "Resolved claude: $claude"
+          "gh_path=$gh" >> $env:GITHUB_OUTPUT
+          "claude_path=$claude" >> $env:GITHUB_OUTPUT
+
+      - name: Get PR diff
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $gh = "${{ steps.tools.outputs.gh_path }}"
+          Write-Host "Using gh: $gh"
+          Write-Host "Exists: $(Test-Path $gh)"
+          try {
+            $verOut = & $gh --version 2>&1
+            Write-Host "gh --version exit=$LASTEXITCODE output=$verOut"
+          } catch {
+            Write-Host "gh --version threw: $($_.Exception.Message)"
+          }
+          try {
+            $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
+            $ghExit = $LASTEXITCODE
+            Write-Host "gh pr diff exit=$ghExit"
+            $diffOut | Select-Object -First 400 | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+          } catch {
+            Write-Host "gh pr diff threw: $($_.Exception.Message)"
+            $ghExit = 1
+          }
+          if ($ghExit -ne 0) {
+            Write-Error "gh pr diff failed with exit code $ghExit"
+            exit $ghExit
+          }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Friday engineering audit
+        id: audit
+        shell: powershell
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
+          $lines = @(
+            'You are Friday (CTO). Run your engineering-quality audit on this pull request.'
+            ''
+            "PR #$env:PR_NUMBER`: $env:PR_TITLE"
+            "Base branch: $env:BASE_REF"
+            "Head branch: $env:HEAD_REF"
+            ''
+            '## Your 8-item Engineering Audit Checklist'
+            '1. Code correctness — no obvious bugs or logic errors'
+            '2. Test coverage — critical paths have tests'
+            '3. Standards compliance — follows repo style (CLAUDE.md path-scoped rules)'
+            '4. No dead code — all changes serve the two purposes (#162)'
+            '5. Architecture fit — aligns with system design'
+            '6. Performance — no degradation in hot paths'
+            '7. Refactoring candidates — any duplication or complexity to simplify'
+            '8. Documentation — changes are documented where needed'
+            ''
+            '## Diff'
+            $diff
+            ''
+            '## Required Output Format'
+            'Your FIRST LINE must be exactly one of:'
+            '  REVIEWED: <one-line summary of what was audited>'
+            '  CONCERNS: <one-line statement of what needs discussion before merge>'
+            ''
+            'Then list each checklist item result: PASS / NOTE / SKIP with a brief comment.'
+            'If CONCERNS, describe each specific concern (architectural, correctness, or standards).'
+            'This is informational — never blocks merge (Sam is the merge gate).'
+          )
+          $task = $lines -join "`n"
+
+          $task | Out-File "$env:RUNNER_TEMP\friday-task.txt" -Encoding utf8
+          $claude = "${{ steps.tools.outputs.claude_path }}"
+          $taskText = Get-Content "$env:RUNNER_TEMP\friday-task.txt" -Raw
+          Write-Host "friday-task.txt length: $($taskText.Length)"
+          $result = $taskText | & $claude --agent Friday -p 2>&1
+          Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
+          $result | Out-File "$env:RUNNER_TEMP\friday-result.txt" -Encoding utf8
+
+          if ($result -match "^REVIEWED:") {
+            "status=reviewed" >> $env:GITHUB_OUTPUT
+          } else {
+            "status=concerns" >> $env:GITHUB_OUTPUT
+          }
+        continue-on-error: true
+
+      - name: Post Friday review to PR
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const status = '${{ steps.audit.outputs.status }}';
+            let result = '';
+            try {
+              result = fs.readFileSync(process.env.RUNNER_TEMP + '/friday-result.txt', 'utf8');
+            } catch (e) {
+              result = 'Error reading Friday audit output: ' + e.message;
+            }
+            if (result.length > 60000) result = result.slice(0, 60000) + '\n\n...(truncated)';
+
+            const emoji = status === 'reviewed' ? '✅' : '⚠️';
+            // Use COMMENT for both reviewed and concerns cases — this is informational, never blocks
+            const event = 'COMMENT';
+
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: ${{ github.event.pull_request.number }},
+              body: `${emoji} **Friday (CTO) — Engineering Audit**\n\n${result}`,
+              event: event,
+            });

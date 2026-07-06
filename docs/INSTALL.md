@@ -1,7 +1,7 @@
 # AgentSystem -- Installation Guide
 
 Complete step-by-step setup for every supported CLI and platform.
-All three CLIs share the same agents and memory -- install once, use everywhere.
+Claude Code and Gemini share the same agents and memory -- install once, use everywhere.
 
 ---
 
@@ -54,7 +54,7 @@ chmod +x install.sh
 What both scripts do:
 - Check prerequisites (node, git, gh, CLIs)
 - Initialize personal brain at `~/agent-memory/nexus/personal-brain/user-brain.md`
-- Sync all 11 agents to `~/.claude/agents/`, `~/.copilot/agents/`, `~/.gemini/agents/`
+- Sync all 11 agents to `~/.claude/agents/` and `~/.gemini/agents/`
 - Create GitHub labels (`agent:friday`, `priority:high`, etc.)
 
 ---
@@ -137,26 +137,6 @@ gemini @nat        # business
 gemini @friday
 # Should load Friday agent with model: gemini-3-flash-preview
 ```
-
----
-
-### GitHub Copilot
-
-**Install:**
-- VS Code: install "GitHub Copilot" + "GitHub Copilot Chat" extensions
-- CLI: `gh extension install github/gh-copilot`
-
-**Use agents in VS Code Copilot Chat:**
-```
-@friday implement the auth endpoint
-@jarvis what should we prioritize this week
-@sam audit this PR
-```
-
-Agents are synced to `~/.copilot/agents/` automatically by install scripts.
-
-**Verify:**
-In VS Code -> Copilot Chat -> type `@friday` -> should autocomplete.
 
 ---
 

@@ -325,7 +325,6 @@ sync_agents_from_repo.ps1 syncs agent definitions to user CLI configs. Doesn't h
 1. Verify sync script correctly:
    - Reads .agents/agents/*.md (agent definitions)
    - Generates ~/.claude/agents/*.md for Claude CLI
-   - Generates ~/.copilot/agents/*.json for Copilot CLI
    - Generates ~/.gemini/agents/*.yaml for Gemini CLI
 
 2. Update script to:
