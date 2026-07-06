@@ -1,0 +1,89 @@
+name: PR & Issue Automation
+
+# Deterministic bookkeeping only -- zero model/claude CLI calls (issue #158).
+# Runs on the hosted runner (not self-hosted) so it never depends on the
+# self-hosted runner's availability (see #115 single-point-of-failure note
+# in CLAUDE.md). Pure gh CLI + github-script string/JSON operations.
+
+on:
+  pull_request:
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  pr-opened:
+    if: github.event_name == 'pull_request'
+    name: Autolink + assign PR
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Assign PR to Zene8
+        run: gh pr edit "${PR_NUMBER}" --repo "${REPO}" --add-assignee Zene8
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+      - name: Extract linked issue number from head branch
+        id: linked
+        run: |
+          BRANCH="${HEAD_REF}"
+          if [[ "$BRANCH" =~ issue-([0-9]+) ]]; then
+            echo "issue_number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "issue_number=" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+
+      - name: Append "Closes #N" to PR body if absent
+        if: steps.linked.outputs.issue_number != ''
+        run: |
+          ISSUE_NUM="${{ steps.linked.outputs.issue_number }}"
+          BODY=$(gh pr view "${PR_NUMBER}" --repo "${REPO}" --json body --jq '.body // ""')
+          if echo "$BODY" | grep -qiE "(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)[[:space:]]+#${ISSUE_NUM}\b"; then
+            echo "Body already references #${ISSUE_NUM} — no change"
+          else
+            NEW_BODY=$(printf '%s\n\nCloses #%s\n' "$BODY" "$ISSUE_NUM")
+            gh pr edit "${PR_NUMBER}" --repo "${REPO}" --body "$NEW_BODY"
+          fi
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+      - name: Copy labels + milestone from linked issue
+        if: steps.linked.outputs.issue_number != ''
+        run: |
+          ISSUE_NUM="${{ steps.linked.outputs.issue_number }}"
+
+          LABELS=$(gh issue view "${ISSUE_NUM}" --repo "${REPO}" --json labels --jq '[.labels[].name] | join(",")')
+          if [ -n "$LABELS" ]; then
+            gh pr edit "${PR_NUMBER}" --repo "${REPO}" --add-label "$LABELS"
+          fi
+
+          MILESTONE=$(gh issue view "${ISSUE_NUM}" --repo "${REPO}" --json milestone --jq '.milestone.title // ""')
+          if [ -n "$MILESTONE" ]; then
+            gh pr edit "${PR_NUMBER}" --repo "${REPO}" --milestone "$MILESTONE"
+          fi
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+  issue-opened:
+    if: github.event_name == 'issues'
+    name: Assign issue to Zene8
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Assign issue to Zene8
+        run: gh issue edit "${ISSUE_NUMBER}" --repo "${REPO}" --add-assignee Zene8
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
