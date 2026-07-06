@@ -24,7 +24,13 @@ jobs:
           fetch-depth: 0
 
       - name: Get PR diff
-        shell: pwsh
+        # #131/#154 follow-up: self-hosted runner (nathan-desktop) has Windows PowerShell 5.1
+        # (powershell.exe) but not PowerShell Core (pwsh.exe) on PATH — `shell: pwsh` failed with
+        # "pwsh: command not found" once the file finally parsed and the job actually started.
+        # Confirmed via `gh run view <id> --log-failed` on run 28776426326. Switched to
+        # `shell: powershell` (built into every Windows box) which is syntax-compatible with the
+        # script bodies used here (no PS7-only features used).
+        shell: powershell
         run: |
           # Cap at 400 lines — enough for full context, stays inside prompt window
           gh pr diff ${{ github.event.pull_request.number }} `
@@ -35,7 +41,8 @@ jobs:
 
       - name: Run Sam security audit
         id: audit
-        shell: pwsh
+        # See "Get PR diff" step comment above — pwsh not present on this self-hosted runner.
+        shell: powershell
         # #131/#154: this step used to build $task with a PowerShell here-string (@" ... "@)
         # whose body lines started at column 0. A YAML literal block scalar (`run: |`) requires
         # every content line to be indented at least as much as its first content line — a
