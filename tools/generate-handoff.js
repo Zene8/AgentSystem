@@ -14,6 +14,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { cwdToProjectDir } from './session-namer.js';
 
 const args = process.argv.slice(2);
 const flags = {};
@@ -116,6 +117,62 @@ function getPRInfo(cwd) {
 }
 
 /**
+ * Get diff stat vs main (issue #166 enrichment). Best-effort: tries "main"
+ * then "master"; returns '' if neither exists or the diff fails/is empty.
+ */
+function getDiffStatVsMain(cwd) {
+  for (const base of ['main', 'master']) {
+    try {
+      const out = execFileSync('git', ['diff', '--stat', `${base}...HEAD`], {
+        cwd, timeout: 3000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+      }).toString().trim();
+      if (out) return out;
+    } catch { /* try next base, or give up below */ }
+  }
+  return '';
+}
+
+/**
+ * List open PRs and issues assigned to the current gh user (best-effort,
+ * short timeout so a slow/offline `gh` never blocks handoff generation).
+ */
+function getAssignedGhItems(cwd) {
+  const result = { prs: [], issues: [] };
+  try {
+    const out = execFileSync('gh', ['pr', 'list', '--assignee', '@me', '--state', 'open',
+      '--json', 'number,title,url', '--limit', '10'], {
+      cwd, timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    result.prs = JSON.parse(out.toString());
+  } catch { /* gh unavailable, not authenticated, or no remote — skip silently */ }
+  try {
+    const out = execFileSync('gh', ['issue', 'list', '--assignee', '@me', '--state', 'open',
+      '--json', 'number,title,url', '--limit', '10'], {
+      cwd, timeout: 4000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    result.issues = JSON.parse(out.toString());
+  } catch { /* skip silently */ }
+  return result;
+}
+
+/**
+ * Best-effort resume command for the current session, mirroring
+ * session-namer.js's --resume output. Returns null if the transcript can't
+ * be located (e.g. no session registered yet for this cwd).
+ */
+function getResumeCommand(sessionInfo) {
+  if (!sessionInfo || !sessionInfo.session || !sessionInfo.cwd) return null;
+  try {
+    const projectDirName = cwdToProjectDir(sessionInfo.cwd);
+    const transcript = join(homedir(), '.claude', 'projects', projectDirName, `${sessionInfo.session}.jsonl`);
+    if (!existsSync(transcript)) return null;
+    return `claude --continue "${transcript}"`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get repo name from path (basename).
  */
 function getRepoName(path) {
@@ -181,6 +238,9 @@ function generateContent(gitRoot, cwd, existingNextSteps) {
   const recentCommits = getRecentCommits(gitRoot || cwd);
   const prInfo = getPRInfo(gitRoot || cwd);
   const sessionInfo = getCurrentSessionInfo(cwd);
+  const diffStat = getDiffStatVsMain(gitRoot || cwd);
+  const assigned = getAssignedGhItems(gitRoot || cwd);
+  const resumeCmd = getResumeCommand(sessionInfo);
 
   const date = new Date().toISOString().slice(0, 10);
   const time = new Date().toISOString().slice(11, 16);
@@ -205,6 +265,7 @@ function generateContent(gitRoot, cwd, existingNextSteps) {
   // Repo status
   if (gitStatus) {
     content += `## Working Tree Status\n\n`;
+    content += `⚠️  **Uncommitted work present** — commit or stash before ending the session.\n\n`;
     content += `\`\`\`\n${gitStatus}\n\`\`\`\n\n`;
   } else {
     content += `## Working Tree Status\n\n`;
@@ -217,12 +278,32 @@ function generateContent(gitRoot, cwd, existingNextSteps) {
     content += `\`\`\`\n${recentCommits}\n\`\`\`\n\n`;
   }
 
+  // Diff stat vs main (issue #166)
+  if (diffStat) {
+    content += `## Diff vs main\n\n`;
+    content += `\`\`\`\n${diffStat}\n\`\`\`\n\n`;
+  }
+
   // PR info
   if (prInfo) {
     content += `## Pull Request\n\n`;
     content += `**PR #${prInfo.number}:** ${prInfo.title}\n`;
     content += `**State:** ${prInfo.state}\n`;
     content += `**URL:** ${prInfo.url}\n\n`;
+  }
+
+  // Assigned PRs/issues (issue #166, best-effort via gh)
+  if (assigned.prs.length || assigned.issues.length) {
+    content += `## Assigned to You (open)\n\n`;
+    for (const pr of assigned.prs) content += `- PR #${pr.number}: ${pr.title} — ${pr.url}\n`;
+    for (const iss of assigned.issues) content += `- Issue #${iss.number}: ${iss.title} — ${iss.url}\n`;
+    content += `\n`;
+  }
+
+  // Resume command (issue #166)
+  if (resumeCmd) {
+    content += `## Resume\n\n`;
+    content += `\`\`\`\n${resumeCmd}\n\`\`\`\n\n`;
   }
 
   // Next steps — preserve whatever a prior session left here; only fall
