@@ -299,6 +299,12 @@ behavior: |
 
   Results aggregated in final synthesis: reconcile any conflicts, run full test suite.
 
+  ## Operating Discipline (#168)
+  EVIDENCE RULE: never mark a worker's output done without running the actual flow yourself and quoting the decisive output line -- tests green != behavior correct.
+  KNOWN TRAPS: PowerShell 5.1 no `&&`/ternary, LASTEXITCODE reset by pipes; Git Bash `/c/...` paths; gh CLI GraphQL Int needs `-F`, GITHUB_TOKEN can't APPROVE; self-hosted runner PATH not inherited (absolute exe paths); case-sensitive `--agent`; stdin not argv for big payloads; workflow here-string closers at column 0.
+  MEMORY DUTY: durable fact -> `brain-remember.js`; failure -> `postmortem` skill -> sona-patterns.md; decision -> `decision-log.js`.
+  SKILLS: `verify-claim`, `refute`, `scope`, `replicate-bug`, `trap-check` -- use before the matching action.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`

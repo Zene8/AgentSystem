@@ -10,6 +10,22 @@ const fs = require('node:fs');
 const TOOLS = process.env.AGENT_TOOLS_ROOT ||
   path.resolve(__dirname, '..', 'tools');
 
+// #168: auto-capture.log was stale since Jul 3 — root cause: this hook spawned the
+// capture child with stdio:'ignore', so its stdout/stderr (the "extracted N, wrote M
+// facts" summary) went nowhere. The file's prior content was a one-off manual debug
+// redirect, not a live log — nothing in this codebase ever wrote to it automatically.
+// Fix: open a real append fd so every SessionEnd capture leaves a durable trail.
+function captureLogFd() {
+  try {
+    const nexusDir = process.env.AGENT_MEMORY_ROOT ||
+      path.join(require('node:os').homedir(), 'agent-memory', 'nexus');
+    fs.mkdirSync(nexusDir, { recursive: true });
+    return fs.openSync(path.join(nexusDir, 'auto-capture.log'), 'a');
+  } catch {
+    return 'ignore';
+  }
+}
+
 if (require.main === module) {
   let transcriptPath = null;
 
@@ -29,9 +45,10 @@ if (require.main === module) {
   }
 
   try {
+    const logFd = captureLogFd();
     const child = spawn(process.execPath, [path.join(TOOLS, 'memory-capture.js'), transcriptPath], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', logFd, logFd],
     });
     child.unref();
   } catch {

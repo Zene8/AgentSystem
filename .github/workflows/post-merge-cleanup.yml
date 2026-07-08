@@ -1,0 +1,88 @@
+# #168: fallback cleanup for PRs merged to main whose issue-close / branch-delete step got
+# skipped (e.g. agent forgot, or the self-hosted dispatch runner was down — see #115). Pure
+# gh CLI on ubuntu-latest (no local-machine state needed, unlike scheduled-tasks.yml).
+#
+# Security: PR title/body/branch name are untrusted (attacker-controllable on a PR). Every
+# such value is passed through `env:` only — never inlined into a `run:` script — so it can
+# never be interpreted as shell syntax.
+name: Post-Merge Fallback Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      # Guard against forks: a fork's head repo differs from the base repo. Fallback cleanup
+      # only ever needs to run for branches/issues that live in this repo.
+      - name: Skip if head is a fork
+        if: github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+        run: |
+          echo "Head repo differs from base repo (fork) — skipping fallback cleanup."
+          exit 0
+
+      - name: Determine issue number and close if still open
+        if: github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Prefer the issue number embedded in the branch name (issue-N-*).
+          ISSUE_NUM=""
+          if [[ "$BRANCH_NAME" =~ ^issue-([0-9]+)- ]]; then
+            ISSUE_NUM="${BASH_REMATCH[1]}"
+          fi
+
+          # Fallback: look for "Closes #N" (or Fixes/Resolves, case-insensitive) in the PR body.
+          if [ -z "$ISSUE_NUM" ]; then
+            ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -ioE '(closes|fixes|resolves) #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+          fi
+
+          if [ -z "$ISSUE_NUM" ]; then
+            echo "No issue number found in branch name or PR body — nothing to close."
+            exit 0
+          fi
+
+          echo "Resolved issue number: $ISSUE_NUM"
+
+          STATE="$(gh issue view "$ISSUE_NUM" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "MISSING")"
+
+          if [ "$STATE" = "OPEN" ]; then
+            gh issue close "$ISSUE_NUM" --repo "$REPO" \
+              --comment "Resolved in PR #${PR_NUMBER} (fallback cleanup)"
+            echo "Closed issue #$ISSUE_NUM."
+          else
+            echo "Issue #$ISSUE_NUM is not open (state: $STATE) — nothing to close."
+          fi
+
+      - name: Delete head branch if it still exists
+        if: github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$BRANCH_NAME" = "main" ]; then
+            echo "Refusing to delete main."
+            exit 0
+          fi
+          if gh api "repos/${REPO}/git/refs/heads/${BRANCH_NAME}" >/dev/null 2>&1; then
+            gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH_NAME}"
+            echo "Deleted branch: $BRANCH_NAME"
+          else
+            echo "Branch already gone: $BRANCH_NAME"
+          fi

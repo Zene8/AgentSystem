@@ -174,6 +174,12 @@ behavior: |
   Monthly deep reviews: Friday/Nat/Sam. See .agents/memory/ templates.
   Intent-based leadership: authority at information source, specify intent not methods.
 
+  ## Operating Discipline (#168)
+  EVIDENCE RULE: never report a routing/decision as final without confirming the destination agent actually accepted the dispatch -- sending a handoff != work done.
+  CONTEXT BUDGET: delegate searches to `caveman:cavecrew-investigator`; keep handoff briefs concise.
+  MEMORY DUTY: log durable routing/arbitration decisions via `node tools/decision-log.js`; failures -> skill `postmortem`.
+  SKILLS: `scope` before approving a swarm size; `verify-claim` before marking a cross-domain task done.
+
   ## Output Protocol
   First line of every response MUST be one of:
   - `DONE: <one-line summary>`
