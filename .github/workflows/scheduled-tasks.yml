@@ -50,6 +50,15 @@ jobs:
       - name: Compute trust scores
         shell: pwsh
         run: node ${{ github.workspace }}\tools\compute-trust-scores.js
+      # #168: feed real routing-accuracy data into trust-scores.md weekly so the router
+      # (memory-router.js) reads live numbers instead of a stale/empty stub.
+      - name: Append routing accuracy to trust-scores.md
+        shell: pwsh
+        run: |
+          $report = node ${{ github.workspace }}\tools\routing-report.js
+          $target = Join-Path $HOME "agent-memory\nexus\trust-scores.md"
+          $header = "`n## Routing Accuracy (auto-updated $(Get-Date -Format yyyy-MM-dd))`n"
+          Add-Content -Path $target -Value ($header + $report)
 
   # Operates on ~/.claude and ~/agent-memory directly (rotate-logs, claude-json-hygiene,
   # caveman-cache-fix, deploy-hooks --check) — none of these paths exist on a hosted runner.
@@ -61,6 +70,12 @@ jobs:
       - name: Rotate jsonl logs (session-log etc.)
         shell: pwsh
         run: node ${{ github.workspace }}\tools\rotate-logs.js --threshold-mb=5 --keep=3
+      # #168: session-log.jsonl archive-with-30-day-retention + auto-capture.log truncation.
+      # Separate tool from rotate-logs.js above: different semantics (dated archive +
+      # retention window vs. generation-suffix rotation; also handles non-.jsonl .log files).
+      - name: Archive session-log.jsonl + truncate auto-capture.log
+        shell: pwsh
+        run: node ${{ github.workspace }}\tools\log-rotate.js --jsonl-threshold-kb=500 --log-threshold-kb=100 --keep-days=30
       - name: Prune ~/.claude tmp orphans + backup churn
         shell: pwsh
         run: node ${{ github.workspace }}\tools\claude-json-hygiene.js --keep=5 --tmp-age-hours=24
