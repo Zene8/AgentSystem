@@ -44,7 +44,26 @@ function logRoutingEvent(record) {
 // personal-brain + the detected repo brain, injecting top relevant nodes and recording access
 // via --record-access so relevance feeds importance (graph-query.js already does the write).
 const MIN_WORDS = 10;
-const RETRIEVAL_TOP = 4;
+// #170: top-4 -> top-2 (memory injection diet) plus a hard score floor below.
+const RETRIEVAL_TOP = 2;
+// #170: BM25 composite score floor. Score scale is ~0-1 (edgeScore*0.4 + keywordScore*0.6,
+// each already normalized to [0,1] in graph-query.js), with an importance boost that can push
+// it up to 1.5x for high-importance nodes. 0.15 is chosen as "clearly more than noise" on that
+// scale — it's well above what a single incidental keyword match produces, while still letting
+// genuinely relevant low-importance nodes through. Anything below this isn't worth the tokens.
+const SCORE_FLOOR = 0.15;
+
+// #170: trivial-prompt bail. Acks/continuations carry no task signal worth spending retrieval
+// tokens on — skip memory injection entirely for these without even extracting keywords.
+const ACK_REGEX = /^(ok|yes|no|sure|continue|merge it|go|do it|thanks?)\b/i;
+const MIN_PROMPT_LEN = 15;
+
+function isTrivialPrompt(promptRaw) {
+  const p = (promptRaw || '').trim();
+  if (p.length < MIN_PROMPT_LEN) return true;
+  if (ACK_REGEX.test(p)) return true;
+  return false;
+}
 
 // Extract keywords: drop stopwords-ish short tokens, keep the rest. Cheap, no NLP dependency.
 function extractKeywords(promptRaw) {
@@ -91,7 +110,8 @@ function detectRepoSlug(cwd) {
 }
 
 // Run graph-query.js as a subprocess (reuses its existing BM25 scoring + --record-access
-// write-back verbatim — no duplicated retrieval logic) against one brain, returns top node ids.
+// write-back verbatim — no duplicated retrieval logic) against one brain, returns
+// { nodeId, score } pairs (score omitted -> 0 for legacy string-only output).
 function queryBrain(slug, brainPathFlag, keywords, cwd) {
   if (!fs.existsSync(GRAPH_QUERY_PATH) || keywords.length === 0) return [];
   try {
@@ -100,26 +120,62 @@ function queryBrain(slug, brainPathFlag, keywords, cwd) {
     const out = execFileSync(process.execPath, args, { timeout: 1200, encoding: 'utf8', cwd: cwd || process.cwd() });
     const parsed = JSON.parse(out);
     const direct = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.direct) ? parsed.direct : []);
-    return direct.map(r => (typeof r === 'string' ? r : r.nodeId)).filter(Boolean);
+    return direct
+      .map(r => (typeof r === 'string' ? { nodeId: r, score: 0 } : { nodeId: r.nodeId, score: r.score || 0 }))
+      .filter(r => r.nodeId);
   } catch {
     return [];
   }
 }
 
+// #170: per-session dedup of injected node ids, so the same pattern is never injected twice in
+// one session. Lives in os.tmpdir(), keyed the same way as markerPath (transcript_path first,
+// falling back to session_id) — mirrors the existing marker-file pattern in this file.
+function dedupPath(payload) {
+  const key = (payload && (payload.transcript_path || payload.session_id)) || 'unknown-session';
+  const safe = key.replace(/[^a-zA-Z0-9]/g, '_').slice(-120);
+  return path.join(os.tmpdir(), `memory-router-dedup-${safe}.json`);
+}
+
+function loadInjectedIds(dedupFile) {
+  try {
+    const raw = fs.readFileSync(dedupFile, 'utf8');
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveInjectedIds(dedupFile, idsSet) {
+  try { fs.writeFileSync(dedupFile, JSON.stringify([...idsSet])); } catch { /* non-fatal */ }
+}
+
 // Retrieve task-relevant nodes across personal-brain + the detected repo brain. Never throws;
 // returns '' (no injection) on any failure, including timeout — this must stay well under the
 // hook's timeout budget (<1.5s target per #121 DoD).
-function retrieveTaskContext(promptRaw, cwd) {
+// #170: applies a score floor, excludes ids already injected this session, and reports the
+// final set of injected ids back to the caller (via the returned `injected` array on result)
+// so the caller can persist them to the session dedup file.
+function retrieveTaskContext(promptRaw, cwd, excludeIds) {
+  const exclude = excludeIds || new Set();
   const keywords = extractKeywords(promptRaw);
-  if (keywords.length === 0) return '';
+  if (keywords.length === 0) return { text: '', injected: [] };
 
   const personal = queryBrain('personal-brain', PB, keywords, cwd);
   const slug = detectRepoSlug(cwd);
   const repoNodes = slug ? queryBrain(slug, null, keywords, cwd) : [];
 
-  const ids = [...personal, ...repoNodes].slice(0, RETRIEVAL_TOP + 1);
-  if (ids.length === 0) return '';
-  return `RELEVANT MEMORY (task-aware retrieval): ${ids.join(', ')} — query full content with graph-query.js if needed.`;
+  const candidates = [...personal, ...repoNodes]
+    .filter(r => r.score >= SCORE_FLOOR)
+    .filter(r => !exclude.has(r.nodeId))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, RETRIEVAL_TOP);
+
+  if (candidates.length === 0) return { text: '', injected: [] };
+  const ids = candidates.map(r => r.nodeId);
+  const text = `RELEVANT MEMORY (task-aware retrieval): ${ids.join(', ')} — query full content with graph-query.js if needed.`;
+  return { text, injected: ids };
 }
 
 // #124: domain rules now live in config/routing.yml (single source of truth, loaded via
@@ -185,6 +241,8 @@ module.exports = {
   classify, matchDomain, DOMAIN_RULES,
   extractKeywords, markerPath, alreadyInjected, detectRepoSlug, retrieveTaskContext,
   promptHash, logRoutingEvent, ROUTING_LOG_PATH,
+  isTrivialPrompt, dedupPath, loadInjectedIds, saveInjectedIds,
+  SCORE_FLOOR, RETRIEVAL_TOP, MIN_PROMPT_LEN, ACK_REGEX,
 };
 
 if (require.main === module) {
@@ -214,18 +272,23 @@ if (require.main === module) {
       });
     }
 
-    // #121: fire task-aware retrieval once per session, only on substantive prompts.
+    // #121/#170: fire task-aware retrieval on substantive, non-trivial prompts, deduped per
+    // session against previously-injected node ids (rather than a hard once-per-session gate —
+    // a later prompt on a different topic can still surface new, not-yet-injected nodes).
     // Wrapped defensively — a throw here must never take down the pre-existing routing-hint
-    // output below (queryBrain/detectRepoSlug/alreadyInjected already degrade gracefully on
-    // their own, but this guards the orchestration glue itself too).
+    // output below (queryBrain/detectRepoSlug already degrade gracefully on their own, but this
+    // guards the orchestration glue itself too).
     let taskContext = '';
     try {
       const wordCount = prompt.split(/\s+/).filter(Boolean).length;
-      if (wordCount >= MIN_WORDS) {
-        const marker = markerPath(payload);
-        if (!alreadyInjected(marker)) {
-          taskContext = retrieveTaskContext(prompt, payload.cwd || process.cwd());
-          markInjected(marker);
+      if (wordCount >= MIN_WORDS && !isTrivialPrompt(prompt)) {
+        const dedupFile = dedupPath(payload);
+        const alreadyInjectedIds = loadInjectedIds(dedupFile);
+        const result = retrieveTaskContext(prompt, payload.cwd || process.cwd(), alreadyInjectedIds);
+        if (result.text) {
+          taskContext = result.text;
+          for (const id of result.injected) alreadyInjectedIds.add(id);
+          saveInjectedIds(dedupFile, alreadyInjectedIds);
         }
       }
     } catch { /* never let task-aware retrieval break the base routing hint */ }
