@@ -575,8 +575,10 @@ test('--print-title: fresh/pending session prints repo/branch derived from cwd, 
   ]);
 
   const output = runNamer(['--print-title', `--session=${sessionId}`, `--cwd=${repoDir}`], { HOME: tmp });
-  assert.equal(output, 'test-git-repo/testbranch');
+  // issue #166: fallback start title is "<repo> · <branch-slug> · <YYMMDD-HHmm> · started"
+  assert.match(output, /^test-git-repo · testbranch · \d{6}-\d{4} · started$/);
   assert.notEqual(output, 'myrepo pending 2026-07-02');
+  assert.notEqual(output, 'test-git-repo/testbranch');
 
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -836,6 +838,86 @@ test('--finalize-close: sets status=done and computes statusName alongside the l
   assert.equal(entries[0].status, 'done');
   assert.equal(entries[0].statusName, 'myrepo - ship-it - 260706-1405 - done');
   assert.ok(entries[0].name.endsWith(' + (done)'), 'legacy done marker still applied');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── Issue #166: 7-word titles + "[#N]" issue suffix on finalize ─────────────
+
+test('titleFromText: extracts up to 7 significant words (raised from 5)', async () => {
+  // titleFromText is not exported; exercise it indirectly via --finalize.
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+
+  const sessionId = 'title7wd-0000-0000-0000-000000000001';
+  const cwd = '/home/test/myrepo';
+  const cwdSlug = cwd.replace(/\//g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  makeTranscript(projectDir, sessionId, 'refactor the authentication middleware to support multiple login providers cleanly');
+
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'pending',
+      name: 'myrepo pending 2026-07-07', timestamp: '2026-07-07T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize', `--session=${sessionId}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  // stop words ("the", "to") stripped; 7 significant words kept
+  assert.equal(entries[0].title, 'refactor authentication middleware support multiple login providers');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('issueNumberFromBranch: extracts N from "issue-N-*", null otherwise', async () => {
+  const { issueNumberFromBranch } = await import('../tools/session-namer.js');
+  assert.equal(issueNumberFromBranch('issue-166-fable5-skills'), '166');
+  assert.equal(issueNumberFromBranch('issue-7-fix'), '7');
+  assert.equal(issueNumberFromBranch('main'), null);
+  assert.equal(issueNumberFromBranch(null), null);
+});
+
+test('--finalize: appends " [#N]" to the name when the session cwd is on branch "issue-N-*"', async () => {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const registryPath = join(nexusDir, 'session-registry.jsonl');
+
+  // Real git repo checked out on an issue-N branch
+  const repoDir = join(tmp, 'issue-repo');
+  mkdirSync(repoDir, { recursive: true });
+  execFileSync('git', ['init'], { cwd: repoDir });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repoDir });
+  writeFileSync(join(repoDir, 'README.md'), '# repo\n', 'utf8');
+  execFileSync('git', ['add', 'README.md'], { cwd: repoDir });
+  execFileSync('git', ['commit', '-m', 'initial'], { cwd: repoDir });
+  execFileSync('git', ['checkout', '-b', 'issue-166-fable5-skills'], { cwd: repoDir });
+
+  const sessionId = 'issuenum-0000-0000-0000-000000000001';
+  const cwdSlug = repoDir.replace(/[\\/:]/g, '-');
+  const projectDir = join(tmp, '.claude', 'projects', cwdSlug);
+  mkdirSync(projectDir, { recursive: true });
+  const filePath = join(projectDir, `${sessionId}.jsonl`);
+  writeFileSync(filePath, JSON.stringify({
+    type: 'user', origin: { kind: 'human' }, promptSource: 'typed',
+    timestamp: new Date().toISOString(), cwd: repoDir,
+    message: { content: 'ship the skills pack' },
+  }) + '\n', 'utf8');
+
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'agentsystem', cwd: repoDir, title: 'pending',
+      name: 'agentsystem pending 2026-07-07', timestamp: '2026-07-07T00:00:00.000Z', finalized: false }
+  ]);
+
+  runNamer(['--finalize', `--session=${sessionId}`, `--cwd=${repoDir}`], { HOME: tmp });
+
+  const entries = readRegistry(registryPath);
+  assert.match(entries[0].name, /\[#166\]/, `expected issue suffix in name, got: "${entries[0].name}"`);
+  assert.equal(entries[0].issue, '166');
+  assert.ok(!entries[0].title.includes('[#166]'), 'title field must stay clean, suffix only in name');
 
   rmSync(tmp, { recursive: true, force: true });
 });

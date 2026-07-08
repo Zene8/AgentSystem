@@ -95,7 +95,7 @@ export function cwdToProjectDir(cwd) {
   return resolved.replace(/[^A-Za-z0-9]/g, '-');
 }
 
-/** Extract 5 significant words from free text */
+/** Extract 7 significant words from free text (issue #166: raised from 5 to 7). */
 function titleFromText(text) {
   if (!text || typeof text !== 'string') return 'untitled session';
   const words = text
@@ -104,13 +104,32 @@ function titleFromText(text) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(w => w.length > 1 && !STOP_WORDS.has(w));
-  return words.slice(0, 5).join(' ') || 'untitled session';
+  return words.slice(0, 7).join(' ') || 'untitled session';
 }
 
 function dateStr(ts) { return (ts || new Date().toISOString()).slice(0, 10); }
 function dateTimeStr(ts) { return (ts || new Date().toISOString()).slice(0, 16).replace('T', ' '); }
 function today()     { return new Date().toISOString().slice(0, 10); }
-function buildName(repo, title, ts) { return `${repo} - ${title} - ${dateTimeStr(ts)}`; }
+
+/**
+ * issueNumberFromBranch — extract N from a branch named "issue-N-*". Pure
+ * string match, no AI. Returns null when the branch doesn't match.
+ */
+export function issueNumberFromBranch(branch) {
+  if (!branch || typeof branch !== 'string') return null;
+  const m = branch.match(/^issue-(\d+)-/);
+  return m ? m[1] : null;
+}
+
+/**
+ * buildName — end-of-session display name. Appends " [#N]" after the title
+ * when the session's branch matches "issue-N-*" (issue #166).
+ * Format: `<repo> - <title>[ [#N]] - <YYYY-MM-DD HH:mm>`
+ */
+function buildName(repo, title, ts, issueNum) {
+  const suffix = issueNum ? ` [#${issueNum}]` : '';
+  return `${repo} - ${title}${suffix} - ${dateTimeStr(ts)}`;
+}
 
 // ── Deterministic status-lifecycle naming (issue #158) ──────────────────────
 // Fully precalculable: pure string/date ops, zero model/claude CLI calls.
@@ -313,12 +332,15 @@ async function cmdFinalize({ session }) {
     return;
   }
 
-  const title = titleFromText(msg.text);
-  const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = buildName(repo, title, msg.ts || existing.timestamp);
+  const title    = titleFromText(msg.text);
+  const repo     = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
+  const branch   = getGitBranch(msg.cwd || existing.cwd);
+  const issueNum = issueNumberFromBranch(branch);
+  const name     = buildName(repo, title, msg.ts || existing.timestamp, issueNum);
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
-                    finalized: true, first_prompt: msg.text.slice(0, 120) };
+                    finalized: true, first_prompt: msg.text.slice(0, 120),
+                    ...(issueNum ? { issue: issueNum } : {}) };
   saveEntry(updated);
   console.log(`[session-namer] ${session.slice(0, 8)}… → "${name}"`);
 }
@@ -344,12 +366,15 @@ async function cmdFinalizeEarly({ session }) {
   const msg = await readFirstUserMessage(session, existing.cwd);
   if (!msg) return; // transcript not readable yet — Stop hook will handle it
 
-  const title = titleFromText(msg.text);
-  const repo  = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
-  const name  = buildName(repo, title, msg.ts || existing.timestamp);
+  const title    = titleFromText(msg.text);
+  const repo     = existing.repo !== 'unknown' ? existing.repo : repoFromCwd(msg.cwd);
+  const branch   = getGitBranch(msg.cwd || existing.cwd);
+  const issueNum = issueNumberFromBranch(branch);
+  const name     = buildName(repo, title, msg.ts || existing.timestamp, issueNum);
   const updated = { ...existing, repo, cwd: msg.cwd || existing.cwd, title, name,
                     timestamp: msg.ts || existing.timestamp,
-                    finalized: true, first_prompt: msg.text.slice(0, 120) };
+                    finalized: true, first_prompt: msg.text.slice(0, 120),
+                    ...(issueNum ? { issue: issueNum } : {}) };
   saveEntry(updated);
   console.log(`[session-namer] early-finalize ${session.slice(0, 8)}… → "${name}"`);
 }
@@ -427,12 +452,15 @@ async function cmdSweep() {
     const msg = await readFirstUserMessage(entry.session, entry.cwd);
     if (!msg) { skipped++; continue; }
 
-    const title = titleFromText(msg.text);
-    const repo  = (entry.repo && entry.repo !== 'unknown') ? entry.repo : repoFromCwd(msg.cwd);
-    const name  = buildName(repo, title, msg.ts || entry.timestamp);
+    const title    = titleFromText(msg.text);
+    const repo     = (entry.repo && entry.repo !== 'unknown') ? entry.repo : repoFromCwd(msg.cwd);
+    const branch   = getGitBranch(msg.cwd || entry.cwd);
+    const issueNum = issueNumberFromBranch(branch);
+    const name     = buildName(repo, title, msg.ts || entry.timestamp, issueNum);
     const updated = { ...entry, repo, cwd: msg.cwd || entry.cwd, title, name,
                       timestamp: msg.ts || entry.timestamp,
-                      finalized: true, first_prompt: msg.text.slice(0, 120) };
+                      finalized: true, first_prompt: msg.text.slice(0, 120),
+                      ...(issueNum ? { issue: issueNum } : {}) };
     saveEntry(updated);
     console.log(`[session-namer] sweep fixed ${entry.session.slice(0, 8)}… → "${name}"`);
     fixed++;
@@ -489,7 +517,13 @@ async function cmdPrintTitle({ session, cwd }) {
   const effectiveCwd = cwd || existing?.cwd || '';
   const repo   = repoFromCwd(effectiveCwd);
   const branch = getGitBranch(effectiveCwd || process.cwd());
-  const title  = branch ? `${repo}/${branch}` : `${repo} ${today()}`;
+  // issue #166: reuse buildStatusName pieces for a richer start title —
+  // "<repo> · <branch-slug> · <YYMMDD-HHmm> · started" — instead of the bare
+  // "<repo>/<branch>". Falls back to the old "<repo> <date>" form when there
+  // is no branch to slug (e.g. cwd isn't a git repo).
+  const title  = branch
+    ? `${repo} · ${slugFromBranch(branch)} · ${formatStamp()} · started`
+    : `${repo} ${today()}`;
   process.stdout.write(title);
 }
 
