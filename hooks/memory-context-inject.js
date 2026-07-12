@@ -6,12 +6,15 @@
 const { execFileSync, spawn } = require('node:child_process');
 const path = require('node:path');
 
-// Derive tools path relative to this hook file so the repo is relocatable.
-// In the repo: hooks/ sits one level above tools/.
-// After sync to ~/.claude/hooks/ the deployed copy still points at the repo's tools/.
-// AGENT_TOOLS_ROOT overrides for custom installs.
-const TOOLS = process.env.AGENT_TOOLS_ROOT ||
-  path.resolve(__dirname, '..', 'tools');
+// Deployed copies live in ~/.claude/hooks where "../tools" does not exist — every
+// candidate is existence-checked so the hook works from both the repo and the
+// deployed location (root cause of the silent SessionStart injection outage, 2026-07-12).
+const fs = require('node:fs');
+const TOOLS = [
+  process.env.AGENT_TOOLS_ROOT,
+  path.resolve(__dirname, '..', 'tools'),
+  path.join(require('node:os').homedir(), 'dev', 'AgentSystem', 'tools'),
+].find((p) => { try { return p && fs.existsSync(path.join(p, 'memory-context.js')); } catch { return false; } });
 
 if (require.main === module) {
   let out = '';

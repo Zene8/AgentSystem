@@ -276,7 +276,7 @@ Generates agent configs for:
 ## References
 
 - **CLAUDE.md** — CLI configuration and default agent setup
-- **docs/HANDOFF.md** — Current blockers, what shipped, watch-outs
+- **HANDOFF.md (repo root)** — Current blockers, what shipped, watch-outs
 - **agents-memory/jarvis.md** — CEO decision log, critical risks, escalations
 - **agents-memory/{agent}.md** — Per-agent session logs, decisions, learnings
 - **.agents/agents/{agent}.md** — Agent definitions (master source of truth)

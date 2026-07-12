@@ -84,7 +84,10 @@ describe('sync_hooks_from_repo.ps1 registers routine-dispatch.js on the Bash Pos
     const blocks = script.split(/(?=\[PSCustomObject\]@\{)/).filter(b =>
       /event\s*=\s*'PostToolUse'/.test(b) && /routine-dispatch\.js/.test(b)
     );
-    assert.ok(blocks.length >= 2, 'expected routine-dispatch.js registered on at least 2 PostToolUse matchers (Write|Edit|NotebookEdit and Bash)');
+    // 2026-07-12 audit: the Write|Edit|NotebookEdit registration was removed — routine-dispatch's
+    // only PostToolUse job is detecting `gh pr create` in Bash output, so exactly one Bash
+    // matcher is the correct wiring now.
+    assert.ok(blocks.length >= 1, 'expected routine-dispatch.js registered on the Bash PostToolUse matcher');
     const matchers = blocks.map(b => (b.match(/matcher\s*=\s*'([^']+)'/) || [])[1]);
     assert.ok(matchers.includes('Bash'), `expected a Bash matcher among ${JSON.stringify(matchers)}`);
   });

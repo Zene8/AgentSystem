@@ -15,8 +15,14 @@ const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const TOOLS = process.env.AGENT_TOOLS_ROOT ||
-  path.resolve(__dirname, '..', 'tools');
+// Deployed copies live in ~/.claude/hooks where "../tools" does not exist — every
+// candidate is existence-checked so the hook works from both the repo and the
+// deployed location (root cause of the silent memory-injection outage, 2026-07-12).
+const TOOLS = [
+  process.env.AGENT_TOOLS_ROOT,
+  path.resolve(__dirname, '..', 'tools'),
+  path.join(require('node:os').homedir(), 'dev', 'AgentSystem', 'tools'),
+].find((p) => { try { return p && fs.existsSync(path.join(p, 'memory-context.js')); } catch { return false; } });
 
 // Claude Code's SubagentStart payload field naming isn't guaranteed across versions — probe
 // the common candidates defensively rather than assuming one exact key.

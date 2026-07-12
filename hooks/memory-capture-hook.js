@@ -7,8 +7,14 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const TOOLS = process.env.AGENT_TOOLS_ROOT ||
-  path.resolve(__dirname, '..', 'tools');
+// Deployed copies live in ~/.claude/hooks where "../tools" does not exist — every
+// candidate is existence-checked so the hook works from both the repo and the
+// deployed location (root cause of the silent SessionEnd capture outage, 2026-07-12).
+const TOOLS = [
+  process.env.AGENT_TOOLS_ROOT,
+  path.resolve(__dirname, '..', 'tools'),
+  path.join(require('node:os').homedir(), 'dev', 'AgentSystem', 'tools'),
+].find((p) => { try { return p && fs.existsSync(path.join(p, 'memory-capture.js')); } catch { return false; } });
 
 // #168: auto-capture.log was stale since Jul 3 — root cause: this hook spawned the
 // capture child with stdio:'ignore', so its stdout/stderr (the "extracted N, wrote M

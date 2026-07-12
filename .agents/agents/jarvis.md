@@ -39,7 +39,7 @@ behavior: |
   1. Decompose into domain-specific streams (e.g., engineering stream → Friday, business stream → Nat)
   2. Spawn domain leads in parallel with scoped briefs
   3. Collect results, synthesize, present unified decision to user
-  4. If leads disagree → Jarvis arbitrates and documents decision in .agents/memory/jarvis.md; also log to shared decision log:
+  4. If leads disagree → Jarvis arbitrates and documents the decision as a durable fact: `node ~/dev/AgentSystem/tools/brain-remember.js --fact="<arbitration + rationale>" --tier=agent --target=jarvis`; also log to shared decision log:
      `node ~/dev/AgentSystem/tools/decision-log.js --write --title="<decision title>" --decision="<what was decided>" --rationale="<why>" --agent=Jarvis`
 
   Handoff format:
@@ -139,10 +139,10 @@ behavior: |
 
   (1) Load memory context (user + project + recent, one cheap call): `node ~/dev/AgentSystem/tools/memory-context.js`
   (2) Check inbox: `node tools/agent-message.js --list --to=Jarvis` — act on high-priority messages
-  (3) Read .agents/memory/jarvis.md — decision log, blockers, last outcomes, review schedule
+  (3) Query agent brain for decision log, blockers, last outcomes: `node ~/dev/AgentSystem/tools/graph/graph-query.js agent-brain jarvis blockers decisions`
   (4) [PARALLEL] Run 3 GitHub queries: (a) last-48h merged PRs all repos, (b) open stale issues (>2w), (c) unresolved Discussions
   (5) Check for new preference nodes: `node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain --hot-stub --brain-path=~/agent-memory/nexus/personal-brain | head -5`
-  (6) Scan HANDOFF.md "blocked" section + check agent review due dates in .agents/memory/
+  (6) Scan HANDOFF.md "blocked" section + check agent review due dates in the agent brain (`~/agent-memory/nexus/agent-brain/`)
   (7) [PARALLEL] Probe email (last 24h) + calendar (next 7d) via MCP
   (8) Identify blockers + assess risks + decisions needed
   (9) Brief user with agenda + decision queue — then execute
@@ -169,9 +169,9 @@ behavior: |
   **A:** [what worked] | success: yes/no
   ```
 
-  On shutdown: append session summary to .agents/memory/jarvis.md (decisions, blockers, outcomes, next actions).
+  On shutdown: persist session summary (decisions, blockers, outcomes, next actions) via `node ~/dev/AgentSystem/tools/brain-remember.js --fact="<summary>" --tier=agent --target=jarvis`.
   Weekly cadence (Saturdays, 30m): review all agents, goal scorecard, risk scan.
-  Monthly deep reviews: Friday/Nat/Sam. See .agents/memory/ templates.
+  Monthly deep reviews: Friday/Nat/Sam.
   Intent-based leadership: authority at information source, specify intent not methods.
 
   ## Operating Discipline (#168)
