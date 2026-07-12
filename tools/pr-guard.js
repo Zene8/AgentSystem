@@ -35,9 +35,16 @@ const SAM_BOT_LOGIN = 'github-actions[bot]';
 // text alone lets anyone forge "Sam (CSO)" + "APPROVED:" and pass the gate (#112 follow-up
 // finding from Sam's own audit of this file). Require BOTH the trusted bot identity AND the
 // body markers sam-audit.yml actually posts.
+//
+// State is COMMENTED, not APPROVED: GitHub hard-blocks the built-in GITHUB_TOKEN from
+// submitting an APPROVE review ("GitHub Actions is not permitted to approve pull requests"),
+// so sam-audit.yml submits the approved verdict as a COMMENT review (see its createReview
+// step). Requiring state === 'APPROVED' here made the gate unpassable for every approved PR
+// (found on #172). Identity + body markers remain the anti-forgery check; a blocked verdict
+// arrives as CHANGES_REQUESTED with a "BLOCKED:" body and never matches this.
 function isSamApproval(review) {
   return !!review &&
-    review.state === 'APPROVED' &&
+    (review.state === 'APPROVED' || review.state === 'COMMENTED') &&
     !!review.user && review.user.type === 'Bot' && review.user.login === SAM_BOT_LOGIN &&
     typeof review.body === 'string' &&
     review.body.includes('Sam (CSO)') &&

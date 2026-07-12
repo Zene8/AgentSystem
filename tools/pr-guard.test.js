@@ -40,9 +40,21 @@ test('isSamApproval rejects bot-authored review missing the required markers', (
   assert.strictEqual(isSamApproval(review), false);
 });
 
-test('isSamApproval rejects non-APPROVED review even from the trusted bot identity', () => {
+// GitHub hard-blocks GITHUB_TOKEN from submitting APPROVE reviews, so sam-audit.yml posts
+// approved verdicts as COMMENTED reviews (see its createReview step). Found on #172:
+// requiring state === 'APPROVED' made the gate unpassable for every approved PR.
+test('isSamApproval accepts COMMENTED review from the trusted bot with approval markers', () => {
   const review = {
     state: 'COMMENTED',
+    user: { login: 'github-actions[bot]', type: 'Bot' },
+    body: '✅ **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: looks fine',
+  };
+  assert.strictEqual(isSamApproval(review), true);
+});
+
+test('isSamApproval rejects CHANGES_REQUESTED review even from the trusted bot identity', () => {
+  const review = {
+    state: 'CHANGES_REQUESTED',
     user: { login: 'github-actions[bot]', type: 'Bot' },
     body: '🚫 **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: looks fine',
   };
