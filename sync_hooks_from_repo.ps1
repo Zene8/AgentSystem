@@ -57,7 +57,7 @@ if (-not (Test-Path $claudeHooks)) {
     New-Item -ItemType Directory -Path $claudeHooks -Force | Out-Null
 }
 
-$jsHookFiles = @("memory-context-inject.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js", "tool-output-compress.js")
+$jsHookFiles = @("memory-context-inject.js", "memory-context-inject-subagent.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js", "tool-output-compress.js", "routing-config.js")
 $shHookFiles = @("session-start.sh", "session-end.sh", "user-prompt-submit.sh", "guard-git.sh", "wip-checkpoint.sh", "session-close.sh", "context-handoff.sh")
 $copyFailed = $false
 
@@ -184,13 +184,8 @@ $injectEntries = @(
         timeout       = 5
         statusMessage = 'Routing...'
     },
-    [PSCustomObject]@{
-        event         = 'UserPromptSubmit'
-        type          = 'command'
-        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
-        timeout       = 5
-        statusMessage = 'Checking routines...'
-    },
+    # 2026-07-12 audit: routine-dispatch.js dropped from UserPromptSubmit — its only prompt-stage
+    # behavior (identity-query hint) duplicated memory-router.js. It stays on PostToolUse.
     [PSCustomObject]@{
         event         = 'UserPromptSubmit'
         type          = 'command'
@@ -212,14 +207,9 @@ $injectEntries = @(
         timeout       = 10
         statusMessage = 'Finalizing session...'
     },
-    [PSCustomObject]@{
-        event         = 'PostToolUse'
-        type          = 'command'
-        command       = "node `"$claudeHooksNorm/routine-dispatch.js`""
-        timeout       = 5
-        statusMessage = 'Checking routines...'
-        matcher       = 'Write|Edit|NotebookEdit'
-    },
+    # 2026-07-12 audit: routine-dispatch.js dropped from the Write|Edit|NotebookEdit matcher —
+    # its PostToolUse logic only inspects Bash payloads (gh pr create detection), so the
+    # Write|Edit registration was a pure no-op process spawn on every file edit.
     [PSCustomObject]@{
         event         = 'PostToolUse'
         type          = 'command'
@@ -243,11 +233,15 @@ $injectEntries = @(
         matcher       = 'Bash'
     },
     [PSCustomObject]@{
+        # 2026-07-12 audit: this hook only fires on outputs >5000 chars, which in practice
+        # come from Bash — the old Write|Edit registration meant it never triggered on
+        # anything meaningful. Scope it to Bash explicitly.
         event         = 'PostToolUse'
         type          = 'command'
         command       = "node `"$claudeHooksNorm/tool-output-compress.js`""
         timeout       = 5
         statusMessage = 'Compressing output...'
+        matcher       = 'Bash'
     },
     [PSCustomObject]@{
         event         = 'PreToolUse'
@@ -270,6 +264,15 @@ $injectEntries = @(
         command       = "bash `"$claudeHooksNorm/session-end.sh`""
         timeout       = 5
         statusMessage = 'Ending session...'
+    },
+    [PSCustomObject]@{
+        # 2026-07-12 audit: was registered in live settings.json but missing from this sync
+        # script's manifest, so repo updates to the subagent memory hook never deployed.
+        event         = 'SubagentStart'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/memory-context-inject-subagent.js`""
+        timeout       = 3
+        statusMessage = 'Injecting subagent memory...'
     },
     [PSCustomObject]@{
         event         = 'SubagentStop'

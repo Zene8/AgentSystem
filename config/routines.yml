@@ -86,20 +86,46 @@
   enabled: true
   action: "Before closing any GitHub issue, verify the fix actually landed: use `node ~/dev/AgentSystem/tools/issue-close.js <n> --commit <sha>` which checks the commit is reachable from origin/main (git merge-base --is-ancestor) before closing with a reference comment. Never `gh issue close` directly for fix-type issues; closed-without-landed-commit caused a full re-audit round (#151)."
 
+# NOTE on cron-mechanism routines (2026-07-12 audit): `mechanism: cron` entries are NOT
+# auto-registered by routines.js — they document Windows Task Scheduler jobs created by
+# tools/setup-scheduled-tasks.ps1. Re-run that script after changing any cron entry here.
+
 - id: weekly-agent-review
   description: Saturday agent fleet review (goal scorecard, risk scan, agent performance)
   trigger: schedule
   mechanism: cron
   schedule: "0 9 * * 6"
+  task_name: AgentSystem-WeeklyAgentReview
   enforce: hard
   enabled: true
-  action: "Weekly agent review: review routing-log.jsonl misroutes, session costs (node ~/dev/AgentSystem/tools/session-cost.js --week), open blockers, and goal scorecard. Log outcome via decision-log.js."
+  action: "Weekly agent review (headless Jarvis via `claude --bg`): review routing-log.jsonl misroutes, session costs (node ~/dev/AgentSystem/tools/session-cost.js --week), open blockers, and goal scorecard. Log outcome via decision-log.js."
 
 - id: weekly-brain-review
-  description: Monday brain consolidation and stale-fact cleanup
+  description: Monday brain consolidation (full memory sleep cycle + reflection)
   trigger: schedule
   mechanism: cron
   schedule: "0 8 * * 1"
+  task_name: AgentSystem-WeeklyBrainConsolidation
   enforce: hard
   enabled: true
-  action: "Weekly brain review: run node ~/dev/AgentSystem/tools/personal-brain-split.js then node ~/dev/AgentSystem/tools/memory-stale.js --brain=personal-brain --fix to consolidate new preference nodes and clear stale/contradictory facts."
+  action: "Weekly brain review: run node ~/dev/AgentSystem/tools/memory-maintenance.js --reflect — full sleep cycle (split/reconsolidate/decay/stale-prune/consolidate/seed + reflection). Supersedes the old personal-brain-split.js + memory-stale.js two-step, which memory-maintenance.js now wraps."
+
+- id: weekly-memory-decay
+  description: Sunday visit_count decay across personal-brain and agentsystem graphs
+  trigger: schedule
+  mechanism: cron
+  schedule: "0 0 * * 0"
+  task_name: AgentSystem-WeeklyMemoryDecay
+  enforce: hard
+  enabled: true
+  action: "Weekly memory decay: node ~/dev/AgentSystem/tools/memory-decay.js --brain=agentsystem then --brain=personal-brain. Keeps BM25 retrieval weights fresh by decaying stale visit counts."
+
+- id: weekly-trust-scores
+  description: Saturday trust-score aggregation from agent-dispatch run logs
+  trigger: schedule
+  mechanism: cron
+  schedule: "0 8 * * 6"
+  task_name: AgentSystem-WeeklyTrustScores
+  enforce: hard
+  enabled: true
+  action: "Weekly trust scores: node ~/dev/AgentSystem/tools/compute-trust-scores.js — aggregates ~/agent-memory/nexus/run-log/*.json into trust-scores.md (read by leads before delegation)."

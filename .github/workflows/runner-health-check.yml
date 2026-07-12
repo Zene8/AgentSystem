@@ -1,6 +1,6 @@
 name: Self-Hosted Runner Health Check
 
-# agent-dispatch.yml, sam-audit.yml, and sync-verification.yml all require `runs-on: self-hosted`.
+# agent-dispatch.yml and sam-audit.yml require `runs-on: self-hosted`.
 # If the self-hosted runner is offline, jobs targeting it never start — no failure notification,
 # no PR comment, nothing queues or retries. This is a documented single point of failure (#115).
 # This workflow runs on GitHub-hosted infra (ubuntu-latest) specifically so it can detect and
@@ -32,8 +32,8 @@ jobs:
       # "Administration: Read-only") isn't configured, or the API call fails for any reason
       # (bad/expired token, insufficient scope, etc.), degrade gracefully to an indirect method
       # instead of failing the whole job: look for jobs stuck `queued` for a while on the
-      # self-hosted-targeting workflows (agent-dispatch.yml, sam-audit.yml,
-      # sync-verification.yml) — a queued job with no runner to pick it up is itself evidence
+      # self-hosted-targeting workflows (agent-dispatch.yml, sam-audit.yml)
+      # — a queued job with no runner to pick it up is itself evidence
       # the runner is down.
       - name: Check self-hosted runner status
         id: check
@@ -62,7 +62,7 @@ jobs:
             # for more than 10 minutes strongly implies no runner picked it up.
             method="indirect"
             stuck=0
-            for wf in agent-dispatch.yml sam-audit.yml sync-verification.yml; do
+            for wf in agent-dispatch.yml sam-audit.yml; do
               runs_json=$(gh api "repos/${{ github.repository }}/actions/workflows/$wf/runs?status=queued&per_page=10" 2>/dev/null)
               [ -z "$runs_json" ] && continue
               count=$(echo "$runs_json" | jq --arg cutoff "$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)" \
@@ -82,7 +82,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh label create "runner:down" --color "B60205" \
-            --description "Self-hosted runner offline; agent-dispatch/sam-audit/sync-verification blocked" \
+            --description "Self-hosted runner offline; agent-dispatch/sam-audit blocked" \
             2>/dev/null || true
 
       - name: Find existing tracking issue
@@ -100,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh issue create \
-            --title "[Infra]: self-hosted runner offline — agent-dispatch/sam-audit/sync-verification blocked" \
+            --title "[Infra]: self-hosted runner offline — agent-dispatch/sam-audit blocked" \
             --label "runner:down" \
             --body "No online self-hosted runner detected as of $(date -u +%Y-%m-%dT%H:%M:%SZ) (detection method: \`${{ steps.check.outputs.method }}\`). \`/agent\`, \`/merge\`, \`/close\` dispatch and the Sam CI audit check will silently no-op until it's back online. This issue auto-closes on the next daily check once a runner is online again."
 

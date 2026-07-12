@@ -83,6 +83,37 @@ function stripToolsLine(content) {
 
 function ensureDir(p) { mkdirSync(p, { recursive: true }); }
 
+// Shared-block expansion: .agents/rules/shared-blocks.md holds the canonical text of
+// sections duplicated across many agent files (Operating Discipline, swarm-sizing, ...).
+// Agent .md sources carry empty marker pairs `<!-- SHARED:name --> <!-- /SHARED:name -->`;
+// at sync time we inject the canonical text between the markers (re-indented to match the
+// marker line) before writing to any platform dir. Unknown block names fail loudly and the
+// marker pair is left as-is (skip injection, do not abort the sync).
+const SHARED_BLOCKS_FILE = join(REPO_ROOT, '.agents', 'rules', 'shared-blocks.md');
+function loadSharedBlocks() {
+  if (!existsSync(SHARED_BLOCKS_FILE)) return {};
+  const txt = readFileSync(SHARED_BLOCKS_FILE, 'utf8');
+  const blocks = {};
+  const re = /<!-- SHARED:([\w-]+) -->\r?\n([\s\S]*?)<!-- \/SHARED:\1 -->/g;
+  for (let m; (m = re.exec(txt)); ) blocks[m[1]] = m[2].replace(/\r?\n$/, '');
+  return blocks;
+}
+const SHARED_BLOCKS = loadSharedBlocks();
+function expandSharedBlocks(content, file) {
+  return content.replace(
+    /([ \t]*)<!-- SHARED:([\w-]+) -->[\s\S]*?<!-- \/SHARED:\2 -->/g,
+    (full, indent, name) => {
+      if (!(name in SHARED_BLOCKS)) {
+        console.error(`[ERROR] ${file}: unknown shared block "${name}" -- injection skipped`);
+        logLine('ERROR', `${file}: unknown shared block "${name}" -- injection skipped`);
+        return full;
+      }
+      const body = SHARED_BLOCKS[name].split(/\r?\n/).map(l => (l ? indent + l : l)).join('\n');
+      return `${indent}<!-- SHARED:${name} -->\n${body}\n${indent}<!-- /SHARED:${name} -->`;
+    }
+  );
+}
+
 // Antigravity CLI (agy) ships agents as a plugin: a plugin.json manifest plus an
 // agents/<name>.md dir (frontmatter name+description, body = system prompt).
 // Installed via `agy plugin install <dir>`. See sync verification notes.
@@ -134,7 +165,8 @@ function installAntigravityPlugin() {
 function syncAgent(file) {
   const agentName = file.replace(/\.md$/, '').toLowerCase();
   const srcPath   = join(AGENTS_DIR, file);
-  const content   = readFileSync(srcPath, 'utf8');
+  // Expand SHARED marker pairs before any platform write (see expandSharedBlocks above).
+  const content   = expandSharedBlocks(readFileSync(srcPath, 'utf8'), file);
   const meta      = parseFrontmatter(content);
   const name      = meta.name || agentName;
   const desc      = meta.description || '';

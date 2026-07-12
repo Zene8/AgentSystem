@@ -8,13 +8,15 @@ name: Sam Security Audit
 # - `labeled` (gated to `ready-to-merge` in the job `if:` below): lets a human re-request the
 #   audit at merge time on a PR that's already open (e.g. after addressing feedback).
 # `synchronize` is intentionally NOT a trigger — that was the old per-push behavior this replaces.
+# #147: NO paths-ignore here. This job is a required status check on main — a workflow-level
+# paths-ignore means docs-only PRs never produce the check at all, which makes them permanently
+# unmergeable once branch protection requires it. Docs-only and spec PRs instead early-exit
+# APPROVED inside the job (see the "Docs-only / spec precheck" step), so the required check
+# still reports success without spending an audit run.
 on:
   pull_request:
     types: [opened, ready_for_review, labeled]
     branches: [main, dev]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
 
 # New push to branch cancels in-flight audit — re-runs fresh
 concurrency:
@@ -28,22 +30,53 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
-    # De-dupe: exactly one audit per PR at merge-prep time (see trigger comment above). Also
-    # skip PRs labeled `spec` (design/spec discussion, not mergeable code).
+    # De-dupe: exactly one audit per PR at merge-prep time (see trigger comment above).
+    # `spec`-labeled PRs are NOT skipped at the job level anymore (#147) — a job-level skip
+    # produces no check run, which blocks merge once this check is required. They early-exit
+    # APPROVED in the precheck step below instead.
     if: >-
-      !contains(github.event.pull_request.labels.*.name, 'spec') &&
-      (
-        (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
-        github.event.action == 'ready_for_review' ||
-        (github.event.action == 'labeled' && github.event.label.name == 'ready-to-merge')
-      )
+      (github.event.action == 'opened' && github.event.pull_request.draft == false) ||
+      github.event.action == 'ready_for_review' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'ready-to-merge')
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # #147: replaces workflow-level paths-ignore and job-level spec skip. Docs-only and
+      # spec-labeled PRs get an APPROVED check without running the (expensive) Claude audit,
+      # keeping the required status check green for them.
+      - name: Docs-only / spec precheck
+        id: precheck
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            if (labels.includes('spec')) {
+              core.setOutput('skip', 'true');
+              core.setOutput('skip_reason', 'spec-labeled PR (design/spec discussion, not mergeable code audit)');
+              return;
+            }
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const docsOnly = files.length > 0 && files.every(f =>
+              f.filename.startsWith('docs/') || f.filename.endsWith('.md'));
+            core.setOutput('skip', docsOnly ? 'true' : 'false');
+            if (docsOnly) core.setOutput('skip_reason', 'docs-only change (docs/** and *.md files only)');
+
+      - name: Pass check without audit (docs-only / spec)
+        if: steps.precheck.outputs.skip == 'true'
+        run: |
+          echo "APPROVED without Claude audit: ${{ steps.precheck.outputs.skip_reason }}"
+
       - name: Resolve gh/claude absolute paths for runner service context
+        if: steps.precheck.outputs.skip != 'true'
         id: tools
         # #131/#154 follow-up: the self-hosted runner (nathan-desktop) runs as a Windows service
         # under a logon task, which does NOT reliably inherit the interactive user's PATH — same
@@ -77,6 +110,7 @@ jobs:
           "claude_path=$claude" >> $env:GITHUB_OUTPUT
 
       - name: Get PR diff
+        if: steps.precheck.outputs.skip != 'true'
         # #131/#154 follow-up: self-hosted runner (nathan-desktop) has Windows PowerShell 5.1
         # (powershell.exe) but not PowerShell Core (pwsh.exe) on PATH — `shell: pwsh` failed with
         # "pwsh: command not found" once the file finally parsed and the job actually started.
@@ -122,6 +156,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Sam security audit
+        if: steps.precheck.outputs.skip != 'true'
         id: audit
         # See "Get PR diff" step comment above — pwsh not present on this self-hosted runner.
         shell: powershell
@@ -223,6 +258,7 @@ jobs:
         continue-on-error: true
 
       - name: Post Sam review to PR
+        if: steps.precheck.outputs.skip != 'true'
         uses: actions/github-script@v7
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

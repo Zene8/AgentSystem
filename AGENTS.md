@@ -1,8 +1,8 @@
 # Agent System Reference
 
-Comprehensive reference for the agent system. Canonical definitions live in `.agents/agents/`, per-agent memory in `.agents/memory/`, and session notes in `agents-memory/`.
+Comprehensive reference for the agent system. Canonical definitions live in `.agents/agents/`. Agent memory lives in the shared graph brains under `~/agent-memory/nexus/` (see "Memory Structure" below).
 
-For Claude-specific setup, see `CLAUDE.md`. For in-flight blockers, see `docs/HANDOFF.md`.
+For Claude-specific setup, see `CLAUDE.md`. For in-flight blockers, see `HANDOFF.md` (repo root).
 
 ---
 
@@ -20,7 +20,7 @@ For Claude-specific setup, see `CLAUDE.md`. For in-flight blockers, see `docs/HA
 | **Astra** | Frontend — components, UX, performance | Haiku | Domain |
 | **Pym** | Database — schema, migrations, queries | Haiku | Domain |
 | **Leo** | DevOps — CI/CD, infrastructure, observability | Haiku | Domain |
-| **General Coding** | Fallback — coding tasks that don't fit a specialist | Haiku | Domain |
+| **r2d2** | Fallback — coding tasks that don't fit a specialist | Haiku | Domain |
 
 **Default entry agent:** Jarvis. Override with `--agent=<name>` or see "Bypassing Jarvis" below.
 
@@ -66,20 +66,20 @@ When a request matches a pattern, dispatch to the listed agent. Match the most s
 | GitHub Discussions (Decisions) | Jarvis | All | Jarvis owns decision record |
 | README / Docs / Handoffs | Threepio | All | Threepio owns documentation quality |
 
-**Cross-domain rule:** If a task spans multiple domains (e.g., backend API + frontend), coordinate via Jarvis. Note outcomes in both agent memories and `docs/HANDOFF.md`.
+**Cross-domain rule:** If a task spans multiple domains (e.g., backend API + frontend), coordinate via Jarvis. Note outcomes in both agents' brain memory and `HANDOFF.md`.
 
 ---
 
 ## Coordination Rules
 
 1. **Each agent owns their domain.** Don't write to another agent's memory or folders without flagging it.
-2. **Cross-domain work is coordinated via Jarvis.** Note in both agent memories and `docs/HANDOFF.md`.
+2. **Cross-domain work is coordinated via Jarvis.** Note in both agents' brain memory and `HANDOFF.md`.
 3. **GitHub Issues are the task model.** All work tracked as Issues. Agent memories link to Issues, not vice-versa.
-4. **Memory stays in agent file.** Session logs, decisions, and learnings belong in `.agents/memory/{agent}.md`.
-5. **HANDOFF.md is for blockers.** If Agent A is blocked waiting on Agent B, note it in `docs/HANDOFF.md`. Jarvis monitors this on startup.
+4. **Memory goes to the graph brains.** Durable facts, decisions, and learnings are written via `node tools/brain-remember.js --fact="..." [--tier=agent --target=<name>]` and recalled via `node tools/graph/graph-query.js <brain> <keywords>`.
+5. **HANDOFF.md is for blockers.** If Agent A is blocked waiting on Agent B, note it in `HANDOFF.md`. Jarvis monitors this on startup.
 6. **Escalation is transparent.** When escalating to Jarvis, state why in GitHub Discussion or agent memory.
 7. **Bypass is documented.** Users can invoke agents directly to skip Jarvis. The agent respects the direct request.
-8. **Sync script is authoritative.** Run `sync_agents_from_repo.ps1` after any agent definition change.
+8. **Sync script is authoritative.** Run `node tools/sync-agents.js` after any agent definition change.
 
 **Exception:** Ephemeral thinking within a single session doesn't need coordination. Only decisions and blockers that outlive the session require documentation.
 
@@ -156,32 +156,35 @@ If you have a specific, well-scoped task and want to skip Jarvis orchestration, 
 
 ## Memory Structure
 
-All agent memory follows the template at `.agents/memory/TEMPLATE.md`.
+Agent memory lives in the shared graph brains under `~/agent-memory/nexus/` (shared across Claude and Antigravity):
 
-Sections:
-- **Session Log** — one line per session, append only, date-stamped
-- **Operational Patterns** — decision heuristics and domain rules
-- **Key Decisions** — table of date / decision / context / impact
-- **Cadence** — review schedule and checklist
-- **Learnings** — surprises and future-behavior changes
+- **Personal brain** (`personal-brain/`) — user preferences and user-level facts
+- **Agent brain** (`agent-brain/`) — per-agent decisions, blockers, learnings
+- **Repo brains** (per-repo `nexus/` dirs) — code and architecture facts
 
-Memory files live at `.agents/memory/{agent}.md`. Jarvis enforces memory updates on shutdown (step 8 of startup checklist).
+Commands:
+- Write a durable fact: `node ~/dev/AgentSystem/tools/brain-remember.js --fact="..." [--tier=agent --target=<name>]`
+- Query: `node ~/dev/AgentSystem/tools/graph/graph-query.js <brain> <keywords>`
+- Episodic patterns (SONA): append to `~/agent-memory/nexus/sona-patterns.md`
+
+Relevant memory is auto-injected into sessions via SessionStart/SubagentStart hooks. Jarvis persists a session summary on shutdown (step 9 of the startup checklist). The old `.agents/memory/*.md` files are deprecated (#117) and archived at `docs/archive/agents-memory/`.
 
 ---
 
 ## Startup Procedure
 
-Jarvis runs an 8-step startup on every session. See `.agents/agents/jarvis.md` for the full definition.
+Jarvis runs a 9-step startup on every session (skipped for trivial/lookup queries). See `.agents/agents/jarvis.md` for the full definition.
 
 Summary:
-1. Read `agents-memory/jarvis.md` — decisions, blockers, review schedule
-2. [PARALLEL] GitHub: last-48h PRs, stale issues, unresolved Discussions
-3. Scan `HANDOFF.md` blocked section + review due dates
-4. [PARALLEL] Email (last 24h) + calendar (next 7d)
-5. Scan `.agents/memory/` for stale agents (no entry >3 days)
-6. Identify blockers, risks, decisions needed
-7. Synthesize and brief user with agenda + decision queue
-8. Execute + append outcomes to `agents-memory/jarvis.md`
+1. Load memory context (`node tools/memory-context.js`)
+2. Check inbox (`node tools/agent-message.js --list --to=Jarvis`)
+3. Query agent brain — decisions, blockers, last outcomes
+4. [PARALLEL] GitHub: last-48h PRs, stale issues, unresolved Discussions
+5. Check for new preference nodes in the personal brain
+6. Scan `HANDOFF.md` blocked section + agent review due dates
+7. [PARALLEL] Email (last 24h) + calendar (next 7d)
+8. Identify blockers, risks, decisions needed
+9. Brief user with agenda + decision queue — then execute
 
 ---
 
@@ -213,13 +216,12 @@ User
 | File | Purpose |
 |------|---------|
 | `.agents/agents/<agent>.md` | Master agent definition |
-| `.agents/memory/<agent>.md` | Agent decision log and session notes |
-| `.agents/memory/TEMPLATE.md` | Memory structure template |
-| `agents-memory/<agent>.md` | Runtime session persistence (CLI) |
-| `tools/sync-agents.js` | Generates user-level Claude + Antigravity copies (Linux/Mac/Windows) |
-| `sync_agents_from_repo.ps1` | Windows-only equivalent of the sync (Claude + Antigravity) |
+| `.agents/rules/shared-blocks.md` | Canonical text injected into `<!-- SHARED:... -->` markers at sync time |
+| `~/agent-memory/nexus/` | Shared graph-brain memory (personal, agent, repo brains) |
+| `tools/sync-agents.js` | Canonical sync — generates user-level Claude + Antigravity copies (all platforms) |
+| `sync_agents_from_repo.ps1` | Legacy thin shim; delegates to `tools/sync-agents.js` |
 | `CLAUDE.md` | Claude-specific usage, default agent, bypass pattern |
-| `docs/HANDOFF.md` | Current-state log for in-flight and blocked work |
+| `HANDOFF.md` | Current-state log for in-flight and blocked work (repo root, written by `tools/generate-handoff.js`) |
 | `README.md` | Repo overview and quick start |
 
 ---
@@ -229,9 +231,9 @@ User
 | Agent | Claude | Antigravity (Gemini model id) |
 |-------|--------|-------------------------------|
 | Jarvis | claude-opus-4-8 | gemini-3.1-pro-preview |
-| Sam | claude-sonnet-4-6 | gemini-3.1-pro-preview |
-| Friday / Nat | claude-sonnet-4-6 | gemini-3-flash-preview |
-| Ultron / Pym / Leo / Astra / Wanda / Threepio / R2D2 | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview |
+| Sam | claude-sonnet-5 | gemini-3.1-pro-preview |
+| Friday / Nat | claude-sonnet-5 | gemini-3-flash-preview |
+| Ultron / Pym / Leo / Astra / Wanda / Threepio / r2d2 | claude-haiku-4-5-20251001 | gemini-3.1-flash-lite-preview |
 
 Antigravity is a Gemini-family runtime, so it loads `gemini-*` model ids (the `gemini` column in `config/models.yml`).
-Source of truth: `config/models.yml`. If a mapping changes, update that file and the `MODELS` map in `tools/sync-agents.js` (and `sync_agents_from_repo.ps1` for Windows), then re-run the sync.
+Source of truth: `config/models.yml`. If a mapping changes, update that file and the `MODELS` map in `tools/sync-agents.js`, then re-run the sync.

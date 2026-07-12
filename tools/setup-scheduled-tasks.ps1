@@ -2,12 +2,14 @@
 # Replaces dead self-hosted GitHub Actions cron (scheduled-tasks.yml jobs that use `runs-on: self-hosted`).
 #
 # Tasks registered:
-#   AgentSystem-WeeklyBrainConsolidation  — Monday 08:00, runs memory-maintenance.js --reflect
-#   AgentSystem-WeeklyMemoryDecay         — Sunday  00:00, runs memory-decay.js for both brains
+#   AgentSystem-WeeklyBrainConsolidation  — Monday   08:00, runs memory-maintenance.js --reflect
+#   AgentSystem-WeeklyMemoryDecay         — Sunday   00:00, runs memory-decay.js for both brains
+#   AgentSystem-WeeklyTrustScores         — Saturday 08:00, runs compute-trust-scores.js
+#   AgentSystem-WeeklyAgentReview         — Saturday 09:00, spawns headless Jarvis review via `claude --bg`
 #
-# Note: daily-standup and weekly-trust-scores are skipped:
-#   - daily-standup: agent invocation via claude CLI requires an active session; cannot run headlessly.
-#   - weekly-trust-scores: compute-trust-scores.js has a pre-existing ESM/CJS bug (uses require in ESM scope).
+# Note: daily-standup is skipped: interactive agent invocation requires an active session.
+# (weekly-trust-scores was previously skipped citing an ESM/CJS bug in compute-trust-scores.js —
+# that bug no longer exists as of 2026-07-12; the script is pure ESM and runs clean.)
 #
 # Usage: Run once as the same user that runs AgentSystem (no admin required for CURRENT_USER tasks).
 #   pwsh -File tools/setup-scheduled-tasks.ps1
@@ -16,8 +18,9 @@
 param([switch]$Uninstall)
 
 $NodePath  = (Get-Command node -ErrorAction Stop).Source
-$ToolsRoot = "C:\Users\natha\dev\AgentSystem\tools"
-$LogDir    = "C:\Users\natha\dev\AgentSystem\logs"
+# Derive from this script's location instead of hardcoding a user profile path (2026-07-12 audit).
+$ToolsRoot = $PSScriptRoot
+$LogDir    = Join-Path (Split-Path $PSScriptRoot -Parent) 'logs'
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force $LogDir | Out-Null }
 
@@ -116,6 +119,64 @@ Register-ScheduledTask `
     -Principal $principal | Out-Null
 Write-Host "Registered: $($t.Name) (Sunday 00:00)"
 
+# ── Task 3: WeeklyTrustScores — Saturday 08:00 ───────────────────────────────
+# Registered as of 2026-07-12: the "ESM/CJS bug" that previously blocked this task is gone.
+$trustName = 'AgentSystem-WeeklyTrustScores'
+$trustLog  = "$LogDir\trust-scores.log"
+$action3 = New-ScheduledTaskAction `
+    -Execute 'cmd.exe' `
+    -Argument "/c `"`"$NodePath`" `"$ToolsRoot\compute-trust-scores.js`" >> `"$trustLog`" 2>&1`"" `
+    -WorkingDirectory $ToolsRoot
+$trigger3 = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At '08:00'
+$settings3 = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
+    -StartWhenAvailable `
+    -RunOnlyIfNetworkAvailable:$false
+if (Get-ScheduledTask -TaskName $trustName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $trustName -Confirm:$false
+}
+Register-ScheduledTask `
+    -TaskName $trustName `
+    -Description 'Aggregate agent-dispatch run logs into trust-scores.md' `
+    -Action $action3 `
+    -Trigger $trigger3 `
+    -Settings $settings3 `
+    -Principal $principal | Out-Null
+Write-Host "Registered: $trustName (Saturday 08:00)"
+
+# ── Task 4: WeeklyAgentReview — Saturday 09:00, headless via `claude --bg` ───
+# routines.yml declares this cron routine but nothing registered it before 2026-07-12.
+# `claude --bg` is daemon-managed and does not need an interactive terminal, so the
+# fleet review CAN run headlessly (unlike daily-standup, which expects a live session).
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if ($claudeCmd) {
+    $reviewName = 'AgentSystem-WeeklyAgentReview'
+    $reviewLog  = "$LogDir\agent-review.log"
+    $reviewPrompt = 'Weekly agent fleet review: review routing-log.jsonl misroutes, session costs (node ~/dev/AgentSystem/tools/session-cost.js --week), open blockers, and goal scorecard. Log outcome via decision-log.js.'
+    $action4 = New-ScheduledTaskAction `
+        -Execute 'cmd.exe' `
+        -Argument "/c `"`"$($claudeCmd.Source)`" --bg --agent jarvis -p `"$reviewPrompt`" >> `"$reviewLog`" 2>&1`"" `
+        -WorkingDirectory (Split-Path $ToolsRoot -Parent)
+    $trigger4 = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday -At '09:00'
+    $settings4 = New-ScheduledTaskSettingsSet `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
+        -StartWhenAvailable `
+        -RunOnlyIfNetworkAvailable:$false
+    if (Get-ScheduledTask -TaskName $reviewName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $reviewName -Confirm:$false
+    }
+    Register-ScheduledTask `
+        -TaskName $reviewName `
+        -Description 'Saturday agent fleet review (routing misroutes, costs, blockers) via headless Jarvis' `
+        -Action $action4 `
+        -Trigger $trigger4 `
+        -Settings $settings4 `
+        -Principal $principal | Out-Null
+    Write-Host "Registered: $reviewName (Saturday 09:00)"
+} else {
+    Write-Host "Skipped: AgentSystem-WeeklyAgentReview (claude CLI not on PATH)"
+}
+
 Write-Host ""
 Write-Host "Done. Tasks registered for current user ($env:USERNAME)."
 Write-Host "Verify in Task Scheduler: taskschd.msc"
@@ -123,4 +184,3 @@ Write-Host "Log output: $LogDir\"
 Write-Host ""
 Write-Host "Skipped (requires manual fix):"
 Write-Host "  - daily-standup: needs active claude session (cannot run headlessly)"
-Write-Host "  - weekly-trust-scores: compute-trust-scores.js has ESM/CJS bug (uses require in ESM scope)"

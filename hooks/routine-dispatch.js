@@ -13,8 +13,13 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
-const TOOLS = process.env.AGENT_TOOLS_ROOT ||
-  path.resolve(__dirname, '..', 'tools');
+// Deployed copies live in ~/.claude/hooks where "../tools" does not exist — every
+// candidate is existence-checked so the hook works from both locations (2026-07-12 audit).
+const TOOLS = [
+  process.env.AGENT_TOOLS_ROOT,
+  path.resolve(__dirname, '..', 'tools'),
+  path.join(os.homedir(), 'dev', 'AgentSystem', 'tools'),
+].find((p) => { try { return p && fs.existsSync(path.join(p, 'auto-resolve-pr-comments.js')); } catch { return false; } });
 
 const ROUTINES_SCRIPT = path.join(TOOLS, 'routines.js');
 
@@ -32,19 +37,9 @@ if (require.main === module) {
     // Determine what context to build
     let hints = [];
 
-    // UserPromptSubmit: inject advisory context for relevant routines
-    if (event === 'UserPromptSubmit') {
-      const prompt = (payload.prompt || '').toLowerCase();
-
-      // identity_lookup trigger
-      if (/\b(who am i|what.?s my name|what do you know about me|my (preferences|profile)|remind me who i am)\b/.test(prompt)) {
-        hints.push(
-          'ROUTINE [identity-query-inline]: Answer this identity query INLINE — do NOT spawn a heavyweight agent. ' +
-          'Run: node ~/dev/AgentSystem/tools/graph/graph-query.js personal-brain <keywords> ' +
-          '--brain-path=~/agent-memory/nexus/personal-brain --record-access'
-        );
-      }
-    }
+    // UserPromptSubmit: identity-query hint intentionally NOT emitted here — memory-router.js
+    // (also on UserPromptSubmit) owns that routine; emitting from both produced duplicate
+    // hints on every identity prompt (2026-07-12 audit).
 
     // PostToolUse: detect gh pr create and schedule auto-resolve job
     if (event === 'PostToolUse' && toolName === 'Bash') {
@@ -81,10 +76,11 @@ function scheduleAutoResolve(prNumber) {
     const child = spawn('schtasks', [
       '/create', '/f',
       '/tn', taskName,
-      '/tr', `node "${scriptPath}" --pr=${prNumber}`,
+      // Absolute node path: the task runs under an account whose PATH may not include
+      // the user's nvm4w node install — bare `node` silently fails there (2026-07-12 audit).
+      '/tr', `"${process.execPath}" "${scriptPath}" --pr=${prNumber}`,
       '/sc', 'once',
       '/st', `${hh}:${mm}`,
-      '/ru', 'SYSTEM',
     ], {
       detached: true,
       stdio: 'ignore',

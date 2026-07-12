@@ -1,6 +1,6 @@
 # Nathan's AI Agent Team
 
-Full-stack team: product, engineering, security, finance, business. Each agent reads `CLAUDE.md` (or `GEMINI.md`), `docs/HANDOFF.md`, and `.claude/agent-memory/MEMORY.md` at startup. Documentation and handoff written per GitHub Issue.
+Full-stack team: product, engineering, security, finance, business. Each agent reads `CLAUDE.md` (or `GEMINI.md`), `HANDOFF.md (repo root)`, and `.claude/agent-memory/MEMORY.md` at startup. Documentation and handoff written per GitHub Issue.
 
 ## Agent Hierarchy
 
@@ -26,21 +26,21 @@ Full-stack team: product, engineering, security, finance, business. Each agent r
 ```
 Issue filed → Jarvis (routes) → Owner agent (reads CLAUDE.md, HANDOFF.md)
 → Work (per GitHub Issue) → Sam (security gate) → Merge
-→ Update docs/HANDOFF.md + Session Log (per CLAUDE.md location)
+→ Update HANDOFF.md (repo root) + Session Log (per CLAUDE.md location)
 ```
 
 ## Startup Protocol
 
 Every agent, every session:
 1. Read `CLAUDE.md` or `GEMINI.md` — repo context, tech stack, boards, health checks
-2. Read `docs/HANDOFF.md` — current state, in-flight work, blockers
+2. Read `HANDOFF.md (repo root)` — current state, in-flight work, blockers
 3. Read `.claude/agent-memory/MEMORY.md` or equivalent — patterns, quirks, learnings
 4. Read `docs/ENGINEERING-STANDARDS.md` (engineering agents only) — shared 10-point discipline
 
 ## Shutdown Protocol
 
 1. GitHub current: Issues closed, PRs merged, Discussions updated
-2. Update `docs/HANDOFF.md` — what shipped, next priorities, watch-outs
+2. Update `HANDOFF.md (repo root)` — what shipped, next priorities, watch-outs
 3. Update Session Log (per CLAUDE.md) — 2-3 sentences per shipped item
 4. Cross-agent flags → GitHub mentions (@Sam for security, etc.)
 

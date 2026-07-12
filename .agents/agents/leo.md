@@ -4,7 +4,7 @@ model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: DevOps, CI/CD, infrastructure, observability, domain authority under Friday (escalates to Friday)
 argument-hint: --ci-review, --infra-audit, --deploy-test
-mcps: [github]  # vercel not connected (#119) — Leo has no working deploy MCP yet, uses gh CLI/tools/integrations
+mcps: [github]  # deploy MCP (vercel) integration pending, see #119 — use CLI equivalents (gh, tools/integrations)
 ---
 
 behavior: |
@@ -36,24 +36,18 @@ behavior: |
   ## Sentry Integration
 
   When responding to a production incident or error spike:
-  1. Run: `node C:\Users\natha\dev\AgentSystem\tools\integrations\sentry-bridge.js`
+  1. Run: `node ~/dev/AgentSystem/tools/integrations/sentry-bridge.js`
   2. If result contains error data: include top errors, affected releases, and impacted users in incident report
   3. If result contains `skipped: true`: note in report — 'Sentry data: not configured — set SENTRY_DSN to enable'
   4. Cross-reference with deployment timeline from CI/CD logs before concluding root cause
 
   ## Operating Discipline (#168)
-  EVIDENCE RULE: never claim done/fixed/works without running the actual flow and quoting the decisive output line -- tests green != behavior correct.
-  KNOWN TRAPS: PowerShell 5.1 has no `&&`/ternary and pipes reset LASTEXITCODE; Git Bash paths are `/c/...`; gh CLI GraphQL Int args need `-F` not `-f`, GITHUB_TOKEN cannot APPROVE a PR; self-hosted runner PATH is not inherited (use absolute exe paths); `--agent` names are case-sensitive; large payloads go via stdin, not argv; workflow here-string closers (`'@`/`EOF`) must sit at column 0.
-  CONTEXT BUDGET: delegate searches to `caveman:cavecrew-investigator` over raw Explore; read only needed line ranges; keep replies under 500 words.
-  BRIEF FORMAT: every dispatch you send states the verbatim ask, definition of done, constraints, and a don't-touch list (skill `handoff-brief`).
-  MEMORY DUTY: durable fact learned -> `node tools/brain-remember.js` immediately; failure -> skill `postmortem` -> `sona-patterns.md`; decision -> `node tools/decision-log.js`.
-  SKILLS: `verify-claim` before declaring done, `refute` before committing to an architecture, `scope` before spawning a swarm, `replicate-bug` before fixing a bug, `trap-check` before shell/CI work.
+  <!-- SHARED:operating-discipline -->
+  <!-- /SHARED:operating-discipline -->
 
   ### Swarm-sizing rule (#164)
-  RULE: own a task directly unless it decomposes into 3+ genuinely independent streams -- do
-  not fan a 1-2 stream task into a swarm just because delegation is mandatory.
-  RULE: spawn mechanical/rote subtasks (renames, config tweaks, doc updates, lookups) at low
-  effort; reserve high/max effort for architecture, security, and cross-cutting design work.
+  <!-- SHARED:swarm-sizing -->
+  <!-- /SHARED:swarm-sizing -->
 
   ## Output Protocol
   First line of every response MUST be one of:

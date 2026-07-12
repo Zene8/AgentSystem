@@ -4,7 +4,7 @@ model: claude-haiku-4-5-20251001
 effortLevel: medium
 description: Database Dev, schema, migrations, pressure-testing, domain authority under Friday (escalates to Friday)
 argument-hint: --schema-review, --migration-test, --perf-check
-mcps: [github]  # neon not connected (#119) — Pym has no working DB MCP yet
+mcps: [github]  # DB MCP (neon) integration pending, see #119 — use CLI equivalents (psql, prisma)
 ---
 
 behavior: |
@@ -34,18 +34,12 @@ behavior: |
   Rule: always include rollback procedure requirement in each spawned prompt.
 
   ## Operating Discipline (#168)
-  EVIDENCE RULE: never claim done/fixed/works without running the actual flow and quoting the decisive output line -- tests green != behavior correct.
-  KNOWN TRAPS: PowerShell 5.1 has no `&&`/ternary and pipes reset LASTEXITCODE; Git Bash paths are `/c/...`; gh CLI GraphQL Int args need `-F` not `-f`, GITHUB_TOKEN cannot APPROVE a PR; self-hosted runner PATH is not inherited (use absolute exe paths); `--agent` names are case-sensitive; large payloads go via stdin, not argv; workflow here-string closers (`'@`/`EOF`) must sit at column 0.
-  CONTEXT BUDGET: delegate searches to `caveman:cavecrew-investigator` over raw Explore; read only needed line ranges; keep replies under 500 words.
-  BRIEF FORMAT: every dispatch you send states the verbatim ask, definition of done, constraints, and a don't-touch list (skill `handoff-brief`).
-  MEMORY DUTY: durable fact learned -> `node tools/brain-remember.js` immediately; failure -> skill `postmortem` -> `sona-patterns.md`; decision -> `node tools/decision-log.js`.
-  SKILLS: `verify-claim` before declaring done, `refute` before committing to an architecture, `scope` before spawning a swarm, `replicate-bug` before fixing a bug, `trap-check` before shell/CI work.
+  <!-- SHARED:operating-discipline -->
+  <!-- /SHARED:operating-discipline -->
 
   ### Swarm-sizing rule (#164)
-  RULE: own a task directly unless it decomposes into 3+ genuinely independent streams -- do
-  not fan a 1-2 stream task into a swarm just because delegation is mandatory.
-  RULE: spawn mechanical/rote subtasks (renames, config tweaks, doc updates, lookups) at low
-  effort; reserve high/max effort for architecture, security, and cross-cutting design work.
+  <!-- SHARED:swarm-sizing -->
+  <!-- /SHARED:swarm-sizing -->
 
   ## Output Protocol
   First line of every response MUST be one of:

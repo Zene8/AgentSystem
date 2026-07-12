@@ -107,12 +107,12 @@ test('extractEpisodicFacts: returns facts when a DONE status line is present', (
   assert.equal(facts.task, 'fixed the bug');
 });
 
-test('extractEpisodicFacts: returns facts when files were touched even without a status line', () => {
+// 2026-07-12 audit: outcome=unknown entries are junk on retrieval — the old OR-guard let
+// file-touch-only turns produce ~400 noise entries in sona-patterns.md. No DONE:/BLOCKED:
+// status line now means no episodic write, even when files were touched.
+test('extractEpisodicFacts: returns null when files were touched but no status line found', () => {
   const p = writeTranscript([
     { message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/repo/src/foo.js' } }] } },
   ]);
-  const facts = extractEpisodicFacts(p);
-  assert.ok(facts);
-  assert.equal(facts.outcome, 'unknown');
-  assert.notEqual(facts.files, 'none');
+  assert.equal(extractEpisodicFacts(p), null);
 });

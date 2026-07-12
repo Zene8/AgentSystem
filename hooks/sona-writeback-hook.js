@@ -16,8 +16,13 @@ const crypto = require('node:crypto');
 // wrote for the same prompt.
 const { promptHash, logRoutingEvent } = require('./memory-router');
 
-const TOOLS = process.env.AGENT_TOOLS_ROOT ||
-  'C:/Users/natha/dev/AgentSystem/tools';
+// Deployed copies live in ~/.claude/hooks where "../tools" does not exist — every
+// candidate is existence-checked so the hook works from both locations (2026-07-12 audit).
+const TOOLS = [
+  process.env.AGENT_TOOLS_ROOT,
+  path.resolve(__dirname, '..', 'tools'),
+  path.join(os.homedir(), 'dev', 'AgentSystem', 'tools'),
+].find((p) => { try { return p && fs.existsSync(path.join(p, 'sona-episodic-write.js')); } catch { return false; } });
 
 // Offset-tracking state file: this hook fires on every Stop/SubagentStop event, and a
 // long session can accumulate a large transcript. Re-reading the whole file from byte 0
@@ -161,12 +166,12 @@ function extractEpisodicFacts(transcriptPath) {
 
     const files = [...touchedFiles].slice(0, 10).join(', ') || 'none';
 
-    // #155: guard against writing degenerate "all fields unknown" episodic entries.
-    // If we found no DONE/BLOCKED status line, no touched files, and no agent identity,
-    // there is no real signal worth persisting — the transcript tail likely had no
-    // completed turn yet (e.g. hook fired mid-stream) or wasn't a subagent-style run.
-    const hasSignal = outcome !== 'unknown' || files !== 'none' || agent !== 'unknown';
-    if (!hasSignal) return null;
+    // #155 / 2026-07-12 audit: only persist entries with an explicit DONE:/BLOCKED:
+    // status line. The old OR-guard (any of outcome/files/agent known) let
+    // outcome=unknown, task="subagent task" rows through whenever a file was touched —
+    // that produced ~400 junk entries dominating sona-patterns.md. Outcome is the field
+    // that makes an episodic pattern actionable on retrieval; without it, skip.
+    if (outcome === 'unknown') return null;
 
     return { task, files, outcome, agent };
   } catch {
