@@ -1,11 +1,13 @@
 ---
 description: Rename the current Claude Code session (or a specified one)
 allowed-tools: Bash(node ~/dev/AgentSystem/tools/session-namer.js *)
-argument-hint: [new name]
+argument-hint: [optional custom name — leave blank for an auto-generated one]
+model: claude-haiku-4-5-20251001
 ---
 
 Rename a Claude Code session. **Defaults to the CURRENT session** — the
-common case is `/rename-session <new name>` with no session ID at all.
+common case is `/rename-session` with no args, which auto-generates a good
+name from this conversation.
 
 ## Context
 
@@ -23,9 +25,25 @@ ask which session to rename unless the user's args clearly reference a
 different one (e.g. they typed an 8+ char id that matches an entry in the
 Recent sessions list above, followed by a name).
 
-1. Common case — `$ARGUMENTS` is just a name (no session id in it): rename
-   the current session, even if its auto-name is still "pending" — that is
-   expected and fine, renaming works regardless. Run:
+0. **No args at all — the common case.** Auto-generate the name yourself
+   (you already have full context of this conversation — no separate model
+   call needed):
+   - Write EXACTLY 4 words summarizing what this session is actually doing —
+     concrete and specific (e.g. "fix session namer auto-naming", not vague
+     filler like "help with task"). Drop stop-words/filler.
+   - Pick a status: `started` (work in progress), `pr` (a PR was opened this
+     session), or `done` (task is complete / wrapping up). Infer from the
+     conversation; default to `started` if unclear.
+   - Run:
+     ```
+     node ~/dev/AgentSystem/tools/session-namer.js --auto-rename ${CLAUDE_SESSION_ID} "<4 word summary>" --status=<status>
+     ```
+   - This builds `<repo> - <date> - <4 word summary> - <status>` (repo/date
+     come from the registry automatically — only pass the summary + status).
+
+1. User gave a custom name (`$ARGUMENTS` is not empty, and doesn't match an
+   explicit-other-session pattern below): use it verbatim instead of
+   auto-generating. Run:
 
    ```
    node ~/dev/AgentSystem/tools/session-namer.js --rename ${CLAUDE_SESSION_ID} "$ARGUMENTS"
@@ -39,23 +57,17 @@ Recent sessions list above, followed by a name).
    node ~/dev/AgentSystem/tools/session-namer.js --rename <session-id> "<new name>"
    ```
 
-3. No args at all — do NOT interrogate the user with multiple questions or
-   make them pick from a list. Just ask one short question: "New name for
-   this session?" Once they answer, rename the CURRENT session (case 1).
+   (Use `--auto-rename <session-id> "<4 word summary>" --status=<status>`
+   instead if the user asked you to auto-name that other session too.)
 
-After renaming, tell the user both of the following, honestly — don't imply
-the tab title changes itself, and don't imply nothing changed either:
+After renaming, reply with exactly this, filled in — no extra commentary:
 
-- "Registry updated -> '<new name>'." This is what session search/list/resume
-  show, and it's also what the SessionStart hook will display in the Claude
-  Code UI the next time this session is resumed (even if it's currently
-  "pending" — the rename overrides that).
-- "To update the title shown in the UI right now, in this session, also run
-  the built-in `/rename <new name>`." Claude Code only lets the SessionStart
-  hook set the UI title programmatically (on startup/resume) — a custom
-  command like this one has no way to push it live mid-session, so both
-  commands are needed for an immediate visible change plus a durable one
-  that survives resume.
+Registry updated -> "<new name>". Persists across resume.
+To update live tab title now: `/rename <new name>`
+
+Two commands stay required — no tool here can invoke the built-in `/rename`
+programmatically (checked, none exists). Second line above is copy-paste
+ready so it's effectively one command, one paste.
 
 Use the name text exactly as given — don't add or strip quotes.
 
