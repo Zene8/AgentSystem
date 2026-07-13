@@ -57,7 +57,7 @@ if (-not (Test-Path $claudeHooks)) {
     New-Item -ItemType Directory -Path $claudeHooks -Force | Out-Null
 }
 
-$jsHookFiles = @("memory-context-inject.js", "memory-context-inject-subagent.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "routine-dispatch.js", "routines-context-inject.js", "tool-output-compress.js", "routing-config.js")
+$jsHookFiles = @("memory-context-inject.js", "memory-context-inject-subagent.js", "memory-router.js", "memory-capture-hook.js", "sona-writeback-hook.js", "injection-feedback-hook.js", "routine-dispatch.js", "routines-context-inject.js", "tool-output-compress.js", "routing-config.js")
 $shHookFiles = @("session-start.sh", "session-end.sh", "user-prompt-submit.sh", "guard-git.sh", "wip-checkpoint.sh", "session-close.sh", "context-handoff.sh")
 $copyFailed = $false
 
@@ -257,6 +257,15 @@ $injectEntries = @(
         command       = "node `"$claudeHooksNorm/sona-writeback-hook.js`""
         timeout       = 5
         statusMessage = 'Writing episodic memory...'
+    },
+    [PSCustomObject]@{
+        # Memory feedback loop: scores injected memory nodes against the finished transcript and
+        # reinforces the ones actually used (hooks/injection-feedback-hook.js).
+        event         = 'Stop'
+        type          = 'command'
+        command       = "node `"$claudeHooksNorm/injection-feedback-hook.js`""
+        timeout       = 5
+        statusMessage = 'Scoring memory usefulness...'
     },
     [PSCustomObject]@{
         event         = 'Stop'

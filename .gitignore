@@ -11,3 +11,4 @@ nexus/
 # Untracked runtime files
 HANDOFF.md
 .claudedaemon
+.worktrees/

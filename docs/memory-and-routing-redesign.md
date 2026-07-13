@@ -333,3 +333,19 @@ Both agents are haiku-tier, parallelizable, and open to any agent in the system:
 - **threepio** — general-purpose NON-TECHNICAL worker: docs, comms, PR descriptions, release notes, email drafts, Notion syncs.
 
 Any agent (jarvis, nat, friday, sam, specialists) may spawn N instances of either in parallel for independent subtasks. Include full context in each spawn — subprocesses share no session memory.
+
+## 11. Memory feedback loop (2026-07-12)
+
+Closes retrieval -> usefulness loop; three legs:
+
+1. **Injection log** — `hooks/memory-router.js` appends every task-aware injection to
+   `~/agent-memory/nexus/injection-log.jsonl` (`{ts, sessionKey, promptHash, nodes:[{id, brain, brainDir}]}`).
+2. **Stop-hook scorer** — `hooks/injection-feedback-hook.js` (registered as a Stop hook) joins the
+   session's injection records to the finished transcript. A node counts as *used* only if its id
+   appears in assistant text or tool inputs (user turns excluded — the injected hint echo doesn't
+   count). Outcomes append to `~/agent-memory/nexus/injection-feedback.jsonl`; used nodes are
+   reinforced by appending to the brain's `visits.log` — the same channel `graph-query --record-access`
+   writes, folded by `memory-reconsolidate.js` — so useful memories rise and unused injections decay.
+3. **Retrieval eval harness** — `tools/memory-eval.js` builds a fixture brain and asserts recall@1/@3
+   on canned queries; pinned in CI via `tools/memory-eval.test.js`. `node tools/memory-eval.js --report`
+   summarizes the usefulness rate from injection-feedback.jsonl per brain.
