@@ -28,7 +28,8 @@ if (require.main === module) {
 
   try {
     const child = spawn(process.execPath, [path.join(TOOLS, 'memory-maintenance.js'), '--if-stale=3', '--quiet'], {
-      detached: true, stdio: 'ignore',
+      detached: true, stdio: 'ignore', windowsHide: true,
+      windowsHide: true,
     });
     child.unref();
   } catch { /* non-fatal */ }

@@ -243,6 +243,7 @@ function writeEpisodicNode(facts, transcriptPath) {
     const child = spawn(process.execPath, args, {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.unref();
   } catch {
@@ -258,6 +259,13 @@ function writeEpisodicNode(facts, transcriptPath) {
 // write-back, then exit the foreground process with 'OK' right away — mirroring the existing
 // fire-and-forget pattern already used by hooks/memory-capture-hook.js.
 if (require.main === module) {
+  // Recursion guard: headless `claude -p` sessions spawned by the memory pipeline set
+  // this env var — their Stop hooks must not trigger another episodic write-back.
+  if (process.env.AGENT_MEMORY_CAPTURE === '1' && !process.argv.includes('--worker')) {
+    process.stdout.write('OK');
+    process.exit(0);
+  }
+
   const workerFlagIdx = process.argv.indexOf('--worker');
 
   if (workerFlagIdx !== -1) {
@@ -297,6 +305,7 @@ if (require.main === module) {
     const child = spawn(process.execPath, [__filename, '--worker', transcriptPath], {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.unref();
   } catch {
