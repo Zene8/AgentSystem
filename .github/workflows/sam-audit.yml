@@ -143,7 +143,14 @@ jobs:
             $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
             $ghExit = $LASTEXITCODE
             Write-Host "gh pr diff exit=$ghExit"
-            $diffOut | Select-Object -First 400 | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+            # 400-line cap silently dropped later files from multi-file PRs, making Sam block
+            # on "file not in diff" for files that WERE in the PR (#175). Cap generously and
+            # mark truncation explicitly so the auditor knows the diff is partial, not the PR.
+            $lines = @($diffOut)
+            if ($lines.Count -gt 4000) {
+              $lines = $lines[0..3999] + "", "[DIFF TRUNCATED at 4000 of $($lines.Count) lines — do NOT treat missing files as absent from the PR]"
+            }
+            $lines | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
           } catch {
             Write-Host "gh pr diff threw: $($_.Exception.Message)"
             $ghExit = 1
