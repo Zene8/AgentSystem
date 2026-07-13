@@ -56,11 +56,28 @@ function appendJsonl(file, obj) {
   fs.appendFileSync(file, JSON.stringify(obj) + '\n');
 }
 
-// Publish an event. Only `type` is required; payload is handler-specific.
+// Validation at the publish boundary (CLI + programmatic callers, including the
+// webhook-server producer): type must be a known handler id, payload must be a
+// plain object under a size cap. Keeps attacker-shaped input out of the queue.
+export const KNOWN_TYPES = ['run-tool', 'spawn-agent', 'noop'];
+export const MAX_PAYLOAD_BYTES = 64 * 1024;
+
+// Publish an event. `type` must be in KNOWN_TYPES; payload is handler-specific.
 // Returns the full stored event. Filename is <ts-ms>-<id>.json so directory
 // order equals FIFO order.
 export function publish(evt, root) {
   if (!evt || !evt.type) throw new Error('event requires a type');
+  if (!KNOWN_TYPES.includes(evt.type)) {
+    throw new Error(`unknown event type "${evt.type}" — allowed: ${KNOWN_TYPES.join(', ')}`);
+  }
+  if (evt.payload !== undefined &&
+      (typeof evt.payload !== 'object' || evt.payload === null || Array.isArray(evt.payload))) {
+    throw new Error('event payload must be a plain object');
+  }
+  const payloadBytes = Buffer.byteLength(JSON.stringify(evt.payload || {}));
+  if (payloadBytes > MAX_PAYLOAD_BYTES) {
+    throw new Error(`event payload too large: ${payloadBytes} bytes (max ${MAX_PAYLOAD_BYTES})`);
+  }
   const d = ensureDirs(root);
   const now = Date.now();
   const event = {

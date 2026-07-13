@@ -24,11 +24,15 @@ const TOOLS_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export function runToolHandler(payload) {
   if (!payload || !payload.script) throw new Error('run-tool requires payload.script');
   // Confine to tools/ — events are data; never let one execute an arbitrary path.
+  // realpathSync resolves ../ and symlinks before the prefix check, so a symlink
+  // planted inside tools/ pointing elsewhere still gets rejected.
   const resolved = path.resolve(TOOLS_ROOT, payload.script);
-  if (!resolved.startsWith(TOOLS_ROOT + path.sep) && path.dirname(resolved) !== TOOLS_ROOT) {
+  if (!fs.existsSync(resolved)) throw new Error(`run-tool script not found: ${resolved}`);
+  const real = fs.realpathSync(resolved);
+  const realRoot = fs.realpathSync(TOOLS_ROOT);
+  if (!real.startsWith(realRoot + path.sep) && path.dirname(real) !== realRoot) {
     throw new Error(`run-tool script escapes tools/: ${payload.script}`);
   }
-  if (!fs.existsSync(resolved)) throw new Error(`run-tool script not found: ${resolved}`);
   const args = Array.isArray(payload.args) ? payload.args.map(String) : [];
   const out = execFileSync(process.execPath, [resolved, ...args], {
     encoding: 'utf8', timeout: 5 * 60 * 1000,
@@ -36,14 +40,28 @@ export function runToolHandler(payload) {
   return out.slice(-2000);
 }
 
+// cmd.exe quoting for one argument: wrap in double quotes, double any embedded
+// quotes (msvcrt argv rules), and flatten newlines — a raw newline would end the
+// `cmd /c` command line and let payload content run as a second command.
+export function cmdQuote(arg) {
+  return '"' + String(arg).replace(/"/g, '""').replace(/[\r\n]+/g, ' ') + '"';
+}
+
 export function spawnAgentHandler(payload) {
   if (!payload || !payload.agent || !payload.prompt) {
     throw new Error('spawn-agent requires payload.agent and payload.prompt');
   }
-  const res = spawnSync('claude', ['--bg', '--agent', String(payload.agent), '-p', String(payload.prompt)], {
-    encoding: 'utf8', timeout: 60 * 1000, shell: process.platform === 'win32',
-    cwd: payload.cwd && fs.existsSync(payload.cwd) ? payload.cwd : undefined,
-  });
+  // Agent names are our own roster ids — strict allowlist shape, never free text.
+  const agent = String(payload.agent);
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(agent)) throw new Error(`spawn-agent invalid agent name: ${agent}`);
+  const cwd = payload.cwd && fs.existsSync(payload.cwd) ? payload.cwd : undefined;
+  const opts = { encoding: 'utf8', timeout: 60 * 1000, cwd };
+  const res = process.platform === 'win32'
+    // claude is a .cmd shim on Windows — needs a shell. Build the command string
+    // ourselves with explicit quoting so payload.prompt can never break out;
+    // spawnSync's args-array + shell:true does NOT escape.
+    ? spawnSync(`claude --bg --agent ${agent} -p ${cmdQuote(payload.prompt)}`, { ...opts, shell: true })
+    : spawnSync('claude', ['--bg', '--agent', agent, '-p', String(payload.prompt)], opts);
   const out = `${res.stdout || ''}${res.stderr || ''}`;
   if (res.error) throw res.error;
   if (res.status !== 0) throw new Error(`claude --bg exit ${res.status}: ${out.slice(-300)}`);

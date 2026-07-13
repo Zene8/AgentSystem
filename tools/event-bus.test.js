@@ -129,3 +129,10 @@ test('stats: counts every state', () => {
   assert.equal(s.done, 1);
   assert.equal(s.pending + s.processing + s.dead, 2);
 });
+
+test('publish: rejects unknown types, non-object payloads, and oversized payloads', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'event-bus-'));
+  assert.throws(() => bus.publish({ type: 'mystery' }, root), /unknown event type/);
+  assert.throws(() => bus.publish({ type: 'noop', payload: 'a string' }, root), /plain object/);
+  assert.throws(() => bus.publish({ type: 'noop', payload: { big: 'x'.repeat(70000) } }, root), /too large/);
+});

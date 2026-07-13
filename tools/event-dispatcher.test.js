@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as bus from './event-bus.js';
-import { drain, runToolHandler } from './event-dispatcher.js';
+import { drain, runToolHandler, spawnAgentHandler, cmdQuote } from './event-dispatcher.js';
 
 function tmpRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'event-disp-')); }
 
@@ -24,17 +24,17 @@ test('drain: completes noop events and reports summary', () => {
 
 test('drain: failing handler requeues with backoff (not retried in same pass)', () => {
   const root = tmpRoot();
-  bus.publish({ type: 'flaky' }, root);
-  const s = drain({ root, handlers: { flaky: () => { throw new Error('nope'); } } });
+  bus.publish({ type: 'run-tool' }, root);
+  const s = drain({ root, handlers: { 'run-tool': () => { throw new Error('nope'); } } });
   assert.equal(s.requeued, 1);
   const [p] = bus.listPending(root);
   assert.equal(p.event.attempts, 1);
 });
 
-test('drain: unknown event type dead-letters after maxAttempts with alert', () => {
+test('drain: event type without a handler dead-letters after maxAttempts with alert', () => {
   const root = tmpRoot();
-  bus.publish({ type: 'mystery', maxAttempts: 1 }, root);
-  const s = drain({ root });
+  bus.publish({ type: 'spawn-agent', maxAttempts: 1 }, root);
+  const s = drain({ root, handlers: { 'spawn-agent': undefined } });
   assert.equal(s.dead, 1);
   const dead = fs.readFileSync(bus.dirs(root).dead, 'utf8').trim().split('\n').map(JSON.parse);
   assert.match(dead[0].lastError, /no handler/);
@@ -68,4 +68,15 @@ test('runToolHandler: rejects scripts outside tools/', () => {
 test('runToolHandler: runs a real tools script and returns tail of output', () => {
   const out = runToolHandler({ script: 'routines.js', args: ['list'] });
   assert.equal(typeof out, 'string');
+});
+
+test('spawnAgentHandler: rejects agent names outside the roster shape', () => {
+  assert.throws(() => spawnAgentHandler({ agent: 'friday; rm -rf /', prompt: 'x' }), /invalid agent name/);
+  assert.throws(() => spawnAgentHandler({ agent: 'friday && whoami', prompt: 'x' }), /invalid agent name/);
+});
+
+test('cmdQuote: neutralizes quotes and newlines so payload cannot break out of cmd', () => {
+  assert.equal(cmdQuote('plain prompt'), '"plain prompt"');
+  assert.equal(cmdQuote('say "hi" & del *'), '"say ""hi"" & del *"');
+  assert.equal(cmdQuote('line1\r\nline2'), '"line1 line2"');
 });
