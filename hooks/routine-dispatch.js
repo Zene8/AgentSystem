@@ -61,32 +61,21 @@ if (require.main === module) {
   });
 }
 
-// Schedule a one-shot Windows Task Scheduler job to respond to PR comments ~2min later.
-// Non-fatal: if Task Scheduler is unavailable (non-Windows), logs and continues.
+// Spawn a hidden, detached node process that waits ~2min then responds to PR comments.
+// Replaces the old schtasks approach: `schtasks` + the scheduled node.exe each opened a
+// visible foreground console window per PR, and the one-shot tasks were never deleted —
+// stale AgentSystem-AutoResolvePR-* tasks accumulated in Task Scheduler.
 function scheduleAutoResolve(prNumber) {
   if (!/^\d+$/.test(prNumber)) return;
   try {
-    const triggerTime = new Date(Date.now() + 2 * 60 * 1000);
-    const hh = String(triggerTime.getHours()).padStart(2, '0');
-    const mm = String(triggerTime.getMinutes()).padStart(2, '0');
-    const taskName = `AgentSystem-AutoResolvePR-${prNumber}`;
     const scriptPath = path.join(TOOLS, 'auto-resolve-pr-comments.js');
-
-    // Spawn schtasks in detached mode — non-blocking
-    const child = spawn('schtasks', [
-      '/create', '/f',
-      '/tn', taskName,
-      // Absolute node path: the task runs under an account whose PATH may not include
-      // the user's nvm4w node install — bare `node` silently fails there (2026-07-12 audit).
-      '/tr', `"${process.execPath}" "${scriptPath}" --pr=${prNumber}`,
-      '/sc', 'once',
-      '/st', `${hh}:${mm}`,
-    ], {
+    const child = spawn(process.execPath, [scriptPath, `--pr=${prNumber}`, '--delay=120000'], {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.unref();
   } catch {
-    // Non-fatal: Task Scheduler unavailable or spawn failed.
+    // Non-fatal: spawn failed.
   }
 }

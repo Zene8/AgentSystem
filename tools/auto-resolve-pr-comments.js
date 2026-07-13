@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // auto-resolve-pr-comments.js — responds to open review comments on a PR.
-// Called by routine-dispatch.js via Windows Task Scheduler ~2min after PR creation.
+// Spawned hidden/detached by routine-dispatch.js with --delay=120000 after PR creation.
 //
 // Scope: responds to comments (posts acknowledgment), but does NOT auto-dismiss
 // human review requests — that would undermine the Sam security gate.
@@ -29,11 +29,14 @@ function parseArgs() {
 }
 
 async function main() {
-  const { pr: prNumber } = parseArgs();
+  const { pr: prNumber, delay } = parseArgs();
   if (!prNumber) {
-    console.error('Usage: auto-resolve-pr-comments.js --pr=<number>');
+    console.error('Usage: auto-resolve-pr-comments.js --pr=<number> [--delay=<ms>]');
     process.exit(2);
   }
+
+  const delayMs = Number(delay) || 0;
+  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
   // Get PR info to find repo
   let prInfo;
