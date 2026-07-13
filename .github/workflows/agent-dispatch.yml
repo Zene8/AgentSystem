@@ -244,6 +244,19 @@ jobs:
           } | ConvertTo-Json -Depth 3
           $log | Out-File -FilePath $logFile -Encoding utf8
 
+      - name: Verify DONE claim (done-check)
+        if: always()
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # Mechanically verify a DONE claim (PR merged, commit landed, files exist)
+          # and annotate the run log; compute-trust-scores.js counts a contradicted
+          # DONE as a failure instead of a success.
+          $logDir = Join-Path $env:USERPROFILE "agent-memory\nexus\run-log"
+          $date = Get-Date -Format "yyyy-MM-dd"
+          $logFile = Join-Path $logDir "$date-issue-${{ github.event.issue.number }}.json"
+          if (Test-Path $logFile) { node tools/done-check.js "$logFile" }
+
       - name: Post failure detail
         if: steps.run_claude.outputs.exit_code != '0'
         uses: actions/github-script@v7
