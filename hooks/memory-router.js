@@ -22,6 +22,10 @@ const KNOWN_REPOS_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'known
 // #124: routing accuracy telemetry — one line per routed prompt, joined against actual-agent
 // entries appended by hooks/sona-writeback-hook.js (same promptHash) by tools/routing-report.js.
 const ROUTING_LOG_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'routing-log.jsonl');
+// Memory feedback loop: one line per injection event {ts, sessionKey, promptHash, nodes}.
+// Read back at Stop time by hooks/injection-feedback-hook.js to score whether injected nodes
+// were actually used in the session, closing the retrieval->usefulness loop.
+const INJECTION_LOG_PATH = path.join(os.homedir(), 'agent-memory', 'nexus', 'injection-log.jsonl');
 const { execFileSync } = require('child_process');
 
 // Stable short hash of a prompt's text, shared with sona-writeback-hook.js so a hint record
@@ -35,6 +39,14 @@ function logRoutingEvent(record) {
   try {
     fs.mkdirSync(path.dirname(ROUTING_LOG_PATH), { recursive: true });
     fs.appendFileSync(ROUTING_LOG_PATH, JSON.stringify(record) + '\n');
+  } catch { /* non-fatal */ }
+}
+
+// Append one injection record to injection-log.jsonl. Never throws.
+function logInjection(record) {
+  try {
+    fs.mkdirSync(path.dirname(INJECTION_LOG_PATH), { recursive: true });
+    fs.appendFileSync(INJECTION_LOG_PATH, JSON.stringify(record) + '\n');
   } catch { /* non-fatal */ }
 }
 
@@ -79,9 +91,7 @@ function extractKeywords(promptRaw) {
 // session_id, else a process-lifetime fallback. Lives in os.tmpdir() — mirrors the pattern of
 // other session-scoped state files in this codebase (e.g. sona-writeback-hook's offset files).
 function markerPath(payload) {
-  const key = (payload && (payload.transcript_path || payload.session_id)) || 'unknown-session';
-  const safe = key.replace(/[^a-zA-Z0-9]/g, '_').slice(-120);
-  return path.join(os.tmpdir(), `memory-router-injected-${safe}.marker`);
+  return path.join(os.tmpdir(), `memory-router-injected-${sessionKey(payload)}.marker`);
 }
 
 function alreadyInjected(marker) {
@@ -95,6 +105,17 @@ function markInjected(marker) {
 // Detect the repo slug for the given cwd via known-repos.json, without importing the ESM
 // memory-context.js module (memory-router.js is CommonJS) — a light local re-implementation
 // of the same "cwd is under repo.path" match used by tools/memory-context.js:detectRepo.
+// Absolute brain directory for a known repo slug (repo.path/nexus/<slug>) — used to tag
+// injection-log records so the feedback hook knows which brain's visits.log to reinforce.
+function repoBrainDir(slug) {
+  try {
+    if (!fs.existsSync(KNOWN_REPOS_PATH)) return null;
+    const registry = JSON.parse(fs.readFileSync(KNOWN_REPOS_PATH, 'utf8'));
+    const repo = (registry.repos || []).find(r => r.slug === slug);
+    return repo && repo.path ? path.join(repo.path, 'nexus', slug) : null;
+  } catch { return null; }
+}
+
 function detectRepoSlug(cwd) {
   try {
     if (!fs.existsSync(KNOWN_REPOS_PATH)) return null;
@@ -131,10 +152,16 @@ function queryBrain(slug, brainPathFlag, keywords, cwd) {
 // #170: per-session dedup of injected node ids, so the same pattern is never injected twice in
 // one session. Lives in os.tmpdir(), keyed the same way as markerPath (transcript_path first,
 // falling back to session_id) — mirrors the existing marker-file pattern in this file.
-function dedupPath(payload) {
+// Shared session key: sanitized transcript_path (stable per session) falling back to
+// session_id. Used by the marker/dedup files here AND by injection-log.jsonl records, so
+// hooks/injection-feedback-hook.js can join a Stop-time transcript back to what was injected.
+function sessionKey(payload) {
   const key = (payload && (payload.transcript_path || payload.session_id)) || 'unknown-session';
-  const safe = key.replace(/[^a-zA-Z0-9]/g, '_').slice(-120);
-  return path.join(os.tmpdir(), `memory-router-dedup-${safe}.json`);
+  return key.replace(/[^a-zA-Z0-9]/g, '_').slice(-120);
+}
+
+function dedupPath(payload) {
+  return path.join(os.tmpdir(), `memory-router-dedup-${sessionKey(payload)}.json`);
 }
 
 function loadInjectedIds(dedupFile) {
@@ -160,11 +187,14 @@ function saveInjectedIds(dedupFile, idsSet) {
 function retrieveTaskContext(promptRaw, cwd, excludeIds) {
   const exclude = excludeIds || new Set();
   const keywords = extractKeywords(promptRaw);
-  if (keywords.length === 0) return { text: '', injected: [] };
+  if (keywords.length === 0) return { text: '', injected: [], injectedNodes: [] };
 
-  const personal = queryBrain('personal-brain', PB, keywords, cwd);
+  const pbDir = PB.replace(/^~(?=$|\/|\\)/, os.homedir());
+  const personal = queryBrain('personal-brain', PB, keywords, cwd)
+    .map(r => ({ ...r, brain: 'personal-brain', brainDir: pbDir }));
   const slug = detectRepoSlug(cwd);
-  const repoNodes = slug ? queryBrain(slug, null, keywords, cwd) : [];
+  const repoNodes = (slug ? queryBrain(slug, null, keywords, cwd) : [])
+    .map(r => ({ ...r, brain: slug, brainDir: repoBrainDir(slug) }));
 
   const candidates = [...personal, ...repoNodes]
     .filter(r => r.score >= SCORE_FLOOR)
@@ -172,10 +202,14 @@ function retrieveTaskContext(promptRaw, cwd, excludeIds) {
     .sort((a, b) => b.score - a.score)
     .slice(0, RETRIEVAL_TOP);
 
-  if (candidates.length === 0) return { text: '', injected: [] };
+  if (candidates.length === 0) return { text: '', injected: [], injectedNodes: [] };
   const ids = candidates.map(r => r.nodeId);
   const text = `RELEVANT MEMORY (task-aware retrieval): ${ids.join(', ')} — query full content with graph-query.js if needed.`;
-  return { text, injected: ids };
+  return {
+    text,
+    injected: ids,
+    injectedNodes: candidates.map(r => ({ id: r.nodeId, brain: r.brain, brainDir: r.brainDir })),
+  };
 }
 
 // #124: domain rules now live in config/routing.yml (single source of truth, loaded via
@@ -241,6 +275,7 @@ module.exports = {
   classify, matchDomain, DOMAIN_RULES,
   extractKeywords, markerPath, alreadyInjected, detectRepoSlug, retrieveTaskContext,
   promptHash, logRoutingEvent, ROUTING_LOG_PATH,
+  sessionKey, logInjection, INJECTION_LOG_PATH, repoBrainDir,
   isTrivialPrompt, dedupPath, loadInjectedIds, saveInjectedIds,
   SCORE_FLOOR, RETRIEVAL_TOP, MIN_PROMPT_LEN, ACK_REGEX,
 };
@@ -289,6 +324,14 @@ if (require.main === module) {
           taskContext = result.text;
           for (const id of result.injected) alreadyInjectedIds.add(id);
           saveInjectedIds(dedupFile, alreadyInjectedIds);
+          // Memory feedback loop: record WHAT was injected (with brain dirs) so the Stop-time
+          // feedback hook can score usefulness against the transcript and reinforce used nodes.
+          logInjection({
+            ts: new Date().toISOString(),
+            sessionKey: sessionKey(payload),
+            promptHash: promptHash(prompt),
+            nodes: result.injectedNodes,
+          });
         }
       }
     } catch { /* never let task-aware retrieval break the base routing hint */ }
