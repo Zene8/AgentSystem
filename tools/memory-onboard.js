@@ -122,7 +122,13 @@ export const defaultLlm = (prompt) =>
     '--model', 'claude-sonnet-5',
     '--effort', 'low',
     '--exclude-dynamic-system-prompt-sections',
-  ], { encoding: 'utf8', timeout: 120_000 });
+  ], {
+    encoding: 'utf8',
+    timeout: 120_000,
+    windowsHide: true,
+    // Guard: hooks inside this headless session must not re-trigger memory capture.
+    env: { ...process.env, AGENT_MEMORY_CAPTURE: '1' },
+  });
 
 /**
  * Extract durable facts from free text, classify each by tier, and write via remember().
