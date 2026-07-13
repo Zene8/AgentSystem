@@ -29,6 +29,7 @@ import { SessionRegistry } from './session-registry.js';
 import { validateRepo } from './repo-validator.js';
 import { spawnAgyOneShotDirect, spawnAgyPersistent } from './agy-dispatcher.js';
 import { ipAllowed as ipAllowedFor, normalizeIp } from './ip-utils.js';
+import { publish as publishEvent } from '../event-bus.js';
 
 const HOME      = homedir();
 const KEY_FILE  = `${HOME}/.claude/remote-webhook.key`;
@@ -304,7 +305,21 @@ function spawnAgent(agent, prompt, cwd = HOME) {
     }
     if (activeCount >= MAX_CONCURRENT_BG_SESSIONS) {
       console.log(`[spawn-guard] Rejected spawn for agent=${agent} — concurrency cap reached (${activeCount}/${MAX_CONCURRENT_BG_SESSIONS} active bg sessions)`);
-      resolve({ skipped: true, reason: 'concurrency_cap', agent, active: activeCount, cap: MAX_CONCURRENT_BG_SESSIONS, ts: now });
+      // Don't lose the trigger: queue it on the event bus so the scheduled
+      // dispatcher drain retries the spawn once capacity frees up.
+      let queuedId = null;
+      try {
+        const evt = publishEvent({
+          type: 'spawn-agent',
+          source: 'webhook-server:concurrency_cap',
+          payload: { agent, prompt, cwd },
+        });
+        queuedId = evt.id;
+        console.log(`[spawn-guard] Queued spawn on event bus id=${evt.id}`);
+      } catch (err) {
+        console.error(`[spawn-guard] Failed to queue spawn event: ${err.message}`);
+      }
+      resolve({ skipped: true, reason: 'concurrency_cap', queuedEventId: queuedId, agent, active: activeCount, cap: MAX_CONCURRENT_BG_SESSIONS, ts: now });
       return;
     }
 
