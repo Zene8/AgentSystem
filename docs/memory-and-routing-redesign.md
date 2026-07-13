@@ -349,3 +349,18 @@ Closes retrieval -> usefulness loop; three legs:
 3. **Retrieval eval harness** — `tools/memory-eval.js` builds a fixture brain and asserts recall@1/@3
    on canned queries; pinned in CI via `tools/memory-eval.test.js`. `node tools/memory-eval.js --report`
    summarizes the usefulness rate from injection-feedback.jsonl per brain.
+
+## 13. Routine compliance telemetry (2026-07-13)
+
+"enforce: hard" agent-rule routines are injected text, not mechanical gates (#119) — nothing
+measured whether sessions actually followed them. `hooks/routine-compliance-hook.js` (Stop hook,
+registered via `sync_hooks_from_repo.ps1`) replays the session's Bash/PowerShell commands from the
+transcript and checks the mechanically-checkable routines:
+
+- **fix-pr-until-green** — `gh pr create` must be followed by a `pr-guard.js` run
+- **post-merge-cleanup** — `gh pr merge` must use `--delete-branch` or delete the branch later
+- **verify-before-close** — no direct `gh issue close`; `tools/issue-close.js` is the sanctioned path
+
+One record per session appends to `~/agent-memory/nexus/routine-compliance.jsonl`
+(`{ ts, sessionId, checked, violations }`). Summarize: `node tools/routine-compliance-report.js
+[--days=7] [--json]`. Telemetry only — never blocks Stop, never throws.
