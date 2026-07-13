@@ -60,6 +60,7 @@ function appendJsonl(file, obj) {
 // webhook-server producer): type must be a known handler id, payload must be a
 // plain object under a size cap. Keeps attacker-shaped input out of the queue.
 export const KNOWN_TYPES = ['run-tool', 'spawn-agent', 'noop'];
+let publishSeq = 0;
 export const MAX_PAYLOAD_BYTES = 64 * 1024;
 
 // Publish an event. `type` must be in KNOWN_TYPES; payload is handler-specific.
@@ -91,7 +92,10 @@ export function publish(evt, root) {
     nextAttemptAt: evt.nextAttemptAt || new Date(now).toISOString(),
     lastError: null,
   };
-  const file = path.join(d.queue, `${String(now).padStart(15, '0')}-${event.id}.json`);
+  // Per-process counter keeps FIFO order stable when two publishes land in the
+  // same millisecond — otherwise directory sort falls through to the random id.
+  const seq = String(publishSeq++).padStart(6, '0');
+  const file = path.join(d.queue, `${String(now).padStart(15, '0')}-${seq}-${event.id}.json`);
   const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(event, null, 2));
   fs.renameSync(tmp, file); // atomic on same volume

@@ -146,9 +146,11 @@ jobs:
             # 400-line cap silently dropped later files from multi-file PRs, making Sam block
             # on "file not in diff" for files that WERE in the PR (#175). Cap generously and
             # mark truncation explicitly so the auditor knows the diff is partial, not the PR.
+            # ASCII only in this string: the runner reads the step script as non-UTF8 and a
+            # multibyte dash mojibakes into tokens that break PowerShell 5.1 parsing.
             $lines = @($diffOut)
             if ($lines.Count -gt 4000) {
-              $lines = $lines[0..3999] + "", "[DIFF TRUNCATED at 4000 of $($lines.Count) lines — do NOT treat missing files as absent from the PR]"
+              $lines = $lines[0..3999] + "", "[DIFF TRUNCATED at 4000 of $($lines.Count) lines - do NOT treat missing files as absent from the PR]"
             }
             $lines | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
           } catch {
