@@ -16,6 +16,12 @@ warn() { echo -e "   ${YELLOW}!!${NC}  $1"; }
 fail() { echo -e "   ${RED}XX${NC}  $1"; }
 step() { echo -e "\n${CYAN}>> $1${NC}"; }
 
+# Counter helpers -- avoid `((VAR++))` which returns exit 1 when incrementing
+# from 0 and aborts the script under `set -e`.
+bump_pass() { PASS=$((PASS + 1)); }
+bump_warn() { WARN=$((WARN + 1)); }
+bump_fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); }
+
 SKIP_LABELS=0
 for arg in "$@"; do [[ "$arg" == "--skip-labels" ]] && SKIP_LABELS=1; done
 
@@ -26,10 +32,10 @@ step "Checking prerequisites"
 for cmd in node git gh; do
   if command -v "$cmd" &>/dev/null; then
     ok "$cmd  $($cmd --version 2>&1 | head -1)"
-    ((PASS++))
+    bump_pass
   else
     fail "$cmd not found - install before continuing"
-    ((FAIL_COUNT++))
+    bump_fail
   fi
 done
 
@@ -49,13 +55,13 @@ NAME="${NAME:-$(git config user.name 2>/dev/null || echo 'User')}"
 EMAIL="${EMAIL:-$(git config user.email 2>/dev/null || echo '')}"
 node "$SCRIPT_DIR/tools/personal-brain-init.js" --name="$NAME" --email="$EMAIL"
 ok "Personal brain ready"
-((PASS++))
+bump_pass
 
 # 3. Sync agents
 step "Syncing agents to all CLIs"
 node "$SCRIPT_DIR/tools/sync-agents.js"
 ok "Agents synced"
-((PASS++))
+bump_pass
 
 # 4. GitHub labels
 if [ "$SKIP_LABELS" -eq 0 ]; then
@@ -71,10 +77,10 @@ if [ "$SKIP_LABELS" -eq 0 ]; then
       fi
     done
     ok "Labels ready"
-    ((PASS++))
+    bump_pass
   else
     warn "gh not authenticated - skipping labels (run: gh auth login)"
-    ((WARN++))
+    bump_warn
   fi
 else
   echo "  -- Labels skipped (--skip-labels)"
@@ -102,13 +108,13 @@ if [ -d "$HOOKS_SRC" ]; then
       cp "$src" "$dst"
       chmod +x "$dst"
       ok "Installed $hook"
-      ((PASS++))
+      bump_pass
     fi
   done
 else
   warn "hooks/claude-hooks/ not found in repo — skipping hook install"
   warn "Manually copy hook scripts to $HOOKS_DIR"
-  ((WARN++))
+  bump_warn
 fi
 
 # 6. Runner note (Linux/Mac manual setup)
@@ -116,7 +122,7 @@ step "Self-hosted runner"
 warn "Runner must be set up manually on Linux/Mac:"
 echo "     GitHub > repo Settings > Actions > Runners > New self-hosted runner"
 echo "     Choose Linux or macOS, follow the on-screen commands"
-((WARN++))
+bump_warn
 
 # Summary
 echo ""
