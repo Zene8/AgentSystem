@@ -39,6 +39,30 @@ bash tools/mission-control/install-local.sh
 By default this installs a **system** service bound to **loopback (127.0.0.1)** —
 the safe default. Nothing is exposed to the network until you opt in.
 
+### Co-locating the GitHub Actions self-hosted runner (recommended)
+
+The Sam/Friday audits, `/agent` dispatch, and scheduled cron workflows all run on a
+**self-hosted runner** (`runs-on: [self-hosted, Linux]`). Install one on this same
+box so CI is co-located with Mission Control and there's no dependency on a separate
+desktop:
+
+```bash
+# authenticate gh with repo-admin scope first (auto-fetches the registration token):
+gh auth login
+bash tools/mission-control/install-runner.sh
+# or fold it into the mission-control install:
+bash tools/mission-control/install-local.sh --with-runner
+# no gh admin? pass a token from repo Settings > Actions > Runners > New:
+bash tools/mission-control/install-runner.sh --token <registration-token>
+```
+
+The runner installs as its own boot-persistent systemd service (via the runner's
+`svc.sh`). It gets the built-in labels `self-hosted, Linux, X64` (plus
+`mission-control`), which satisfy the workflows' `[self-hosted, Linux]` target. The
+audit/dispatch workflows shell out to `gh` and the `claude` CLI, resolving them by
+absolute path (`~/.local/bin` first) so the runner's minimal service PATH is a
+non-issue — but both CLIs must be installed on this host.
+
 ### Installer options
 
 | Flag | Effect |

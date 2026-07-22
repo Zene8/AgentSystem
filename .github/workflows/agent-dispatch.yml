@@ -19,7 +19,10 @@ concurrency:
 
 jobs:
   dispatch:
-    runs-on: self-hosted
+    # Linux self-hosted runner co-located with Mission Control (see
+    # tools/mission-control/install-runner.sh). BOTH labels required so only the
+    # Linux runner picks this up.
+    runs-on: [self-hosted, Linux]
     # Trigger on:
     #   agent:* label on issue
     #   /agent <name> comment (issue or PR) from repo owner
@@ -37,55 +40,52 @@ jobs:
     steps:
       - name: Parse command + task
         id: parse
-        shell: pwsh
+        shell: bash
+        # SECURITY: untrusted user text (comment body, issue body, label name) is
+        # passed via env and referenced as "$VAR" — NEVER interpolated into the script
+        # body, so a comment containing $(...), backticks, or quotes cannot inject.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          LABEL_NAME: ${{ github.event.label.name }}
+          PR_NUMBER: ${{ github.event.issue.number }}
         run: |
-          $eventName = "${{ github.event_name }}"
-          $body = @"
-          ${{ github.event.comment.body }}
-          "@
-          $body = $body.Trim()
+          set -o pipefail
+          TASK_FILE="$RUNNER_TEMP/task.txt"
+          body="$(printf '%s' "$COMMENT_BODY" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
-          if ($eventName -eq "issues") {
-            # Label dispatch
-            $agent = "${{ github.event.label.name }}" -replace "^agent:", ""
-            $task  = @"
-          ${{ github.event.issue.body }}
-          "@
-            "agent=$agent" >> $env:GITHUB_OUTPUT
-            "command=agent" >> $env:GITHUB_OUTPUT
+          if [ "$EVENT_NAME" = "issues" ]; then
+            # Label dispatch: agent:<name> → <name>
+            agent="${LABEL_NAME#agent:}"
+            echo "agent=$agent" >> "$GITHUB_OUTPUT"
+            echo "command=agent" >> "$GITHUB_OUTPUT"
+            printf '%s' "$ISSUE_BODY" > "$TASK_FILE"
 
-          } elseif ($body -eq "/merge") {
-            # Merge command on PR
-            "agent=friday" >> $env:GITHUB_OUTPUT
-            "command=merge" >> $env:GITHUB_OUTPUT
-            $prNumber = "${{ github.event.issue.number }}"
-            $task = "Be Friday (CTO). Merge PR #$prNumber with squash and delete branch. Run: gh pr merge $prNumber --squash --delete-branch"
-            $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+          elif [ "$body" = "/merge" ]; then
+            echo "agent=friday" >> "$GITHUB_OUTPUT"
+            echo "command=merge" >> "$GITHUB_OUTPUT"
+            printf 'Be Friday (CTO). Merge PR #%s with squash and delete branch. Run: gh pr merge %s --squash --delete-branch' "$PR_NUMBER" "$PR_NUMBER" > "$TASK_FILE"
 
-          } elseif ($body -eq "/close") {
-            # Close command on PR
-            "agent=friday" >> $env:GITHUB_OUTPUT
-            "command=close" >> $env:GITHUB_OUTPUT
-            $prNumber = "${{ github.event.issue.number }}"
-            $task = "Be Friday (CTO). Close PR #$prNumber without merging. Run: gh pr close $prNumber"
-            $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
+          elif [ "$body" = "/close" ]; then
+            echo "agent=friday" >> "$GITHUB_OUTPUT"
+            echo "command=close" >> "$GITHUB_OUTPUT"
+            printf 'Be Friday (CTO). Close PR #%s without merging. Run: gh pr close %s' "$PR_NUMBER" "$PR_NUMBER" > "$TASK_FILE"
 
-          } else {
-            # /agent <name> <task>
-            $parts = $body -split '\s+', 3
-            $agent = $parts[1]
-            $task  = if ($parts.Count -gt 2) { $parts[2] } else { "${{ github.event.issue.body }}" }
-            "agent=$agent" >> $env:GITHUB_OUTPUT
-            "command=agent" >> $env:GITHUB_OUTPUT
-            $task | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
-          }
+          else
+            # /agent <name> <task...>
+            agent="$(printf '%s' "$body" | awk '{print $2}')"
+            rest="$(printf '%s' "$body" | cut -s -d' ' -f3-)"
+            echo "agent=$agent" >> "$GITHUB_OUTPUT"
+            echo "command=agent" >> "$GITHUB_OUTPUT"
+            if [ -n "$rest" ]; then
+              printf '%s' "$rest" > "$TASK_FILE"
+            else
+              printf '%s' "$ISSUE_BODY" > "$TASK_FILE"
+            fi
+          fi
 
-          if (-not (Test-Path "$env:RUNNER_TEMP\task.txt")) {
-            # Fallback write for label dispatch
-            @"
-          ${{ github.event.issue.body }}
-          "@ | Out-File -FilePath "$env:RUNNER_TEMP\task.txt" -Encoding utf8
-          }
+          [ -f "$TASK_FILE" ] || printf '%s' "$ISSUE_BODY" > "$TASK_FILE"
 
       - name: Post "running" acknowledgement
         uses: actions/github-script@v7
@@ -105,20 +105,39 @@ jobs:
               body: msg
             });
 
+      - name: Resolve gh/claude/node absolute paths for runner service context
+        id: tools
+        shell: bash
+        # The self-hosted runner runs as a systemd service whose PATH may not include
+        # ~/.local/bin. Resolve absolute paths once and invoke by full path.
+        run: |
+          resolve() {
+            local name="$1"; shift
+            local c
+            for c in "$@"; do [ -x "$c" ] && { echo "$c"; return; }; done
+            command -v "$name" 2>/dev/null || true
+          }
+          echo "gh_path=$(resolve gh "$HOME/.local/bin/gh" /usr/local/bin/gh /usr/bin/gh)" >> "$GITHUB_OUTPUT"
+          echo "claude_path=$(resolve claude "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude)" >> "$GITHUB_OUTPUT"
+          echo "node_path=$(resolve node "$HOME/.local/bin/node" /usr/local/bin/node /usr/bin/node)" >> "$GITHUB_OUTPUT"
+
       - name: Gate /merge on pr-guard (hard security gate — #112)
         id: guard
         if: steps.parse.outputs.command == 'merge'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
         run: |
-          $prNumber = "${{ github.event.issue.number }}"
-          node tools/pr-guard.js $prNumber
-          $guardExit = $LASTEXITCODE
-          "guard_exit=$guardExit" >> $env:GITHUB_OUTPUT
-          if ($guardExit -ne 0) {
-            Write-Host "pr-guard blocked merge of PR #$prNumber (exit $guardExit)"
-          }
+          NODE="${{ steps.tools.outputs.node_path }}"
+          set +e
+          "$NODE" tools/pr-guard.js "$PR_NUMBER"
+          guard_exit=$?
+          set -e
+          echo "guard_exit=$guard_exit" >> "$GITHUB_OUTPUT"
+          if [ "$guard_exit" -ne 0 ]; then
+            echo "pr-guard blocked merge of PR #$PR_NUMBER (exit $guard_exit)"
+          fi
         continue-on-error: true
 
       - name: Post blocked-merge comment (pr-guard failed)
@@ -135,45 +154,49 @@ jobs:
 
       - name: Run agent (claude)
         id: run_claude
-        shell: pwsh
+        shell: bash
         if: steps.parse.outputs.agent != '' && (steps.parse.outputs.command != 'merge' || steps.guard.outputs.guard_exit == '0')
         run: |
-          $task = Get-Content "$env:RUNNER_TEMP\task.txt" -Raw
+          set -o pipefail
+          CLAUDE="${{ steps.tools.outputs.claude_path }}"
+          TASK_FILE="$RUNNER_TEMP/task.txt"
+          task="$(cat "$TASK_FILE")"
 
           # Classify task complexity → select model
-          $taskLen = $task.Length
-          $complexKeywords = @('architecture','security','design','cross-cutting','migration','refactor','multi-file','system','infrastructure')
-          $isComplex = ($taskLen -gt 500) -or ($complexKeywords | Where-Object { $task -match $_ } | Measure-Object).Count -gt 0
-          $isSimple  = ($taskLen -lt 200) -and -not ($task -match 'file|function|class|module|import')
+          taskLen=${#task}
+          model="claude-sonnet-5"
+          if [ "$taskLen" -gt 500 ] || printf '%s' "$task" | grep -qiE 'architecture|security|design|cross-cutting|migration|refactor|multi-file|system|infrastructure'; then
+            model="claude-opus-4-8"
+          elif [ "$taskLen" -lt 200 ] && ! printf '%s' "$task" | grep -qiE 'file|function|class|module|import'; then
+            model="claude-haiku-4-5-20251001"
+          fi
+          echo "model=$model" >> "$GITHUB_OUTPUT"
 
-          $model = if ($isComplex) { 'claude-opus-4-8' }
-                   elseif ($isSimple) { 'claude-haiku-4-5-20251001' }
-                   else { 'claude-sonnet-5' }
-
-          "model=$model" >> $env:GITHUB_OUTPUT
-          $result = claude -p $task --model $model 2>&1
-          $result | Out-File -FilePath "$env:RUNNER_TEMP\result.txt" -Encoding utf8
-          echo "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+          # Prompt piped via stdin (see sam-audit.yml) — avoids argv length/quoting limits.
+          set +e
+          "$CLAUDE" -p --model "$model" < "$TASK_FILE" > "$RUNNER_TEMP/result.txt" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
         continue-on-error: true
 
       - name: Parse agent output protocol (DONE:/BLOCKED:/NEEDS_INPUT:)
         id: protocol
         if: steps.run_claude.outputs.exit_code != ''
-        shell: pwsh
+        shell: bash
         run: |
           # Every agent's first output line is required to be DONE:/BLOCKED:/NEEDS_INPUT:
-          # (see .agents/agents/*.md "Output Protocol"). Previously nothing consumed this —
-          # the workflow only checked $LASTEXITCODE. This step makes the protocol load-bearing:
+          # (see .agents/agents/*.md "Output Protocol"). This makes the protocol load-bearing:
           # it drives an issue label so the prefix is visible/actionable outside the raw log (#115).
-          $result = ''
-          try { $result = Get-Content "$env:RUNNER_TEMP\result.txt" -Raw } catch {}
-          $firstLine = ($result -split "`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1)
-          $prefix = 'unknown'
-          if ($firstLine -match '^\s*DONE:')        { $prefix = 'done' }
-          elseif ($firstLine -match '^\s*BLOCKED:')    { $prefix = 'blocked' }
-          elseif ($firstLine -match '^\s*NEEDS_INPUT:') { $prefix = 'needs-input' }
-          "prefix=$prefix" >> $env:GITHUB_OUTPUT
-          "first_line=$firstLine" >> $env:GITHUB_OUTPUT
+          firstLine="$(grep -m1 -v '^[[:space:]]*$' "$RUNNER_TEMP/result.txt" 2>/dev/null || true)"
+          prefix='unknown'
+          trimmed="$(printf '%s' "$firstLine" | sed 's/^[[:space:]]*//')"
+          case "$trimmed" in
+            DONE:*)        prefix='done' ;;
+            BLOCKED:*)     prefix='blocked' ;;
+            NEEDS_INPUT:*) prefix='needs-input' ;;
+          esac
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "first_line=$firstLine" >> "$GITHUB_OUTPUT"
 
       - name: Apply agent status label
         if: steps.protocol.outputs.prefix != '' && steps.protocol.outputs.prefix != 'unknown'
@@ -223,39 +246,52 @@ jobs:
 
       - name: Write run log
         if: always()
-        shell: pwsh
+        shell: bash
+        env:
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          AGENT: ${{ steps.parse.outputs.agent }}
+          COMMAND: ${{ steps.parse.outputs.command }}
+          MODEL: ${{ steps.run_claude.outputs.model }}
+          EXIT_CODE: ${{ steps.run_claude.outputs.exit_code }}
         run: |
-          $logDir = Join-Path $env:USERPROFILE "agent-memory\nexus\run-log"
-          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-          $date = Get-Date -Format "yyyy-MM-dd"
-          $issueNum = "${{ github.event.issue.number }}"
-          $logFile = Join-Path $logDir "$date-issue-$issueNum.json"
-          $result = ''
-          try { $result = Get-Content "$env:RUNNER_TEMP\result.txt" -Raw } catch {}
-          if ($result.Length -gt 10240) { $result = $result.Substring(0, 10240) + '...(truncated)' }
-          $log = @{
-            issue     = [int]$issueNum
-            agent     = "${{ steps.parse.outputs.agent }}"
-            command   = "${{ steps.parse.outputs.command }}"
-            model     = "${{ steps.run_claude.outputs.model }}"
-            exit_code = "${{ steps.run_claude.outputs.exit_code }}"
-            timestamp = (Get-Date -Format o)
-            result    = $result
-          } | ConvertTo-Json -Depth 3
-          $log | Out-File -FilePath $logFile -Encoding utf8
+          NODE="${{ steps.tools.outputs.node_path }}"
+          logDir="$HOME/agent-memory/nexus/run-log"
+          mkdir -p "$logDir"
+          date="$(date +%Y-%m-%d)"
+          logFile="$logDir/$date-issue-$ISSUE_NUM.json"
+          # Build JSON with node so arbitrary result text is escaped safely (no manual quoting).
+          RESULT_FILE="$RUNNER_TEMP/result.txt" LOG_FILE="$logFile" "$NODE" -e '
+            const fs = require("fs");
+            let result = "";
+            try { result = fs.readFileSync(process.env.RESULT_FILE, "utf8"); } catch {}
+            if (result.length > 10240) result = result.slice(0, 10240) + "...(truncated)";
+            const log = {
+              issue: parseInt(process.env.ISSUE_NUM, 10),
+              agent: process.env.AGENT || "",
+              command: process.env.COMMAND || "",
+              model: process.env.MODEL || "",
+              exit_code: process.env.EXIT_CODE || "",
+              timestamp: new Date().toISOString(),
+              result,
+            };
+            fs.writeFileSync(process.env.LOG_FILE, JSON.stringify(log, null, 2));
+          '
 
       - name: Verify DONE claim (done-check)
         if: always()
-        shell: pwsh
+        shell: bash
         continue-on-error: true
+        env:
+          ISSUE_NUM: ${{ github.event.issue.number }}
         run: |
           # Mechanically verify a DONE claim (PR merged, commit landed, files exist)
           # and annotate the run log; compute-trust-scores.js counts a contradicted
           # DONE as a failure instead of a success.
-          $logDir = Join-Path $env:USERPROFILE "agent-memory\nexus\run-log"
-          $date = Get-Date -Format "yyyy-MM-dd"
-          $logFile = Join-Path $logDir "$date-issue-${{ github.event.issue.number }}.json"
-          if (Test-Path $logFile) { node tools/done-check.js "$logFile" }
+          NODE="${{ steps.tools.outputs.node_path }}"
+          logDir="$HOME/agent-memory/nexus/run-log"
+          date="$(date +%Y-%m-%d)"
+          logFile="$logDir/$date-issue-$ISSUE_NUM.json"
+          [ -f "$logFile" ] && "$NODE" tools/done-check.js "$logFile" || true
 
       - name: Post failure detail
         if: steps.run_claude.outputs.exit_code != '0'
@@ -291,7 +327,7 @@ jobs:
             }
 
   ambient-sam-review:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     # Quick Haiku-tier security scan on every PR marked ready for review.
     # Full Sonnet audit by Sam is still required before any merge to main.
     # Trigger on ready_for_review only (not opened) to avoid draft noise.
@@ -303,41 +339,58 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
+      - name: Resolve claude absolute path for runner service context
+        id: tools
+        shell: bash
+        run: |
+          resolve() {
+            local name="$1"; shift
+            local c
+            for c in "$@"; do [ -x "$c" ] && { echo "$c"; return; }; done
+            command -v "$name" 2>/dev/null || true
+          }
+          echo "claude_path=$(resolve claude "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude)" >> "$GITHUB_OUTPUT"
+
       - name: Generate diff summary
         id: diff
-        shell: pwsh
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          $base = "${{ github.event.pull_request.base.sha }}"
-          $head = "${{ github.event.pull_request.head.sha }}"
-          $diff = git diff $base $head --stat 2>&1
-          $diffFull = git diff $base $head -- '*.js' '*.ts' '*.py' '*.yml' '*.yaml' '*.json' 2>&1
-          # Truncate to avoid token limits — Haiku context window is sufficient for 8k chars
-          if ($diffFull.Length -gt 8000) { $diffFull = $diffFull.Substring(0, 8000) + "`n...(truncated)" }
-          $diffFull | Out-File -FilePath "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
-          "stat=$diff" >> $env:GITHUB_OUTPUT
+          git diff "$BASE_SHA" "$HEAD_SHA" --stat > "$RUNNER_TEMP/diff-stat.txt" 2>&1 || true
+          git diff "$BASE_SHA" "$HEAD_SHA" -- '*.js' '*.ts' '*.py' '*.yml' '*.yaml' '*.json' > "$RUNNER_TEMP/pr-diff-full.txt" 2>&1 || true
+          # Truncate to ~8000 chars — Haiku context is sufficient and keeps tokens down.
+          head -c 8000 "$RUNNER_TEMP/pr-diff-full.txt" > "$RUNNER_TEMP/pr-diff.txt"
+          if [ "$(wc -c < "$RUNNER_TEMP/pr-diff-full.txt")" -gt 8000 ]; then
+            printf '\n...(truncated)\n' >> "$RUNNER_TEMP/pr-diff.txt"
+          fi
 
       - name: Sam ambient scan (Haiku)
         id: sam_scan
-        shell: pwsh
+        shell: bash
+        # Untrusted PR url/title via env, not interpolated.
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          $prUrl = "${{ github.event.pull_request.html_url }}"
-          $prTitle = "${{ github.event.pull_request.title }}"
-          $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
-          $prompt = @"
-          You are Sam (CSO). Perform a quick security scan of this PR diff.
-          Focus only on: (1) secrets or credentials in code, (2) auth bypasses or missing auth checks, (3) unsafe user input handling or injection risks.
-          Be concise. If clean, respond with exactly: "Sam: clean scan"
-          If issues found, list them briefly with file:line if visible.
-          PR: $prUrl
-          Title: $prTitle
-
-          Diff:
-          $diff
-          "@
-          $prompt | Out-File -FilePath "$env:RUNNER_TEMP\sam-prompt.txt" -Encoding utf8
-          $result = claude -p (Get-Content "$env:RUNNER_TEMP\sam-prompt.txt" -Raw) --model claude-haiku-4-5-20251001 2>&1
-          $result | Out-File -FilePath "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
-          "exit_code=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+          set -o pipefail
+          CLAUDE="${{ steps.tools.outputs.claude_path }}"
+          {
+            echo 'You are Sam (CSO). Perform a quick security scan of this PR diff.'
+            echo 'Focus only on: (1) secrets or credentials in code, (2) auth bypasses or missing auth checks, (3) unsafe user input handling or injection risks.'
+            echo 'Be concise. If clean, respond with exactly: "Sam: clean scan"'
+            echo 'If issues found, list them briefly with file:line if visible.'
+            printf 'PR: %s\n' "$PR_URL"
+            printf 'Title: %s\n' "$PR_TITLE"
+            echo ''
+            echo 'Diff:'
+            cat "$RUNNER_TEMP/pr-diff.txt"
+          } > "$RUNNER_TEMP/sam-prompt.txt"
+          set +e
+          "$CLAUDE" -p --model claude-haiku-4-5-20251001 < "$RUNNER_TEMP/sam-prompt.txt" > "$RUNNER_TEMP/sam-result.txt" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
         continue-on-error: true
 
       - name: Post scan result as PR comment
@@ -349,7 +402,6 @@ jobs:
             try { result = fs.readFileSync(process.env.RUNNER_TEMP + '/sam-result.txt', 'utf8').trim(); }
             catch (e) { result = `Error reading scan result: ${e.message}`; }
             const isClean = result.toLowerCase().includes('clean scan');
-            const icon = isClean ? 'Sam: clean scan' : 'Sam: issues found';
             const body = isClean
               ? `Sam (ambient scan): clean scan — no secrets, auth bypasses, or injection risks detected. Full audit still required before merge to main.`
               : `**Sam (ambient scan) — issues detected:**\n\n${result}\n\n> Full Sam audit required before merge to main.`;
@@ -361,7 +413,7 @@ jobs:
             });
 
   auto-merge:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     if: |
       github.event_name == 'pull_request_review' &&
       github.event.review.state == 'approved' &&
@@ -375,31 +427,29 @@ jobs:
 
       - name: Check path safety
         id: path_check
-        shell: pwsh
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          $files = gh pr view ${{ github.event.pull_request.number }} --json files --jq '.files[].path' 2>&1
-          $unsafe = $files | Where-Object {
-            $_ -notmatch '^docs/' -and
-            $_ -notmatch '\.md$' -and
-            $_ -notmatch '^tests/' -and
-            $_ -notmatch '\.test\.js$'
-          }
-          if ($unsafe) {
-            Write-Host 'UNSAFE files detected -- skipping auto-merge:'
-            $unsafe | ForEach-Object { Write-Host "  $_" }
-            'safe=false' >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Host 'All files in safe paths -- proceeding with auto-merge'
-            'safe=true' >> $env:GITHUB_OUTPUT
-          }
+          set -o pipefail
+          files="$(gh pr view "$PR_NUMBER" --json files --jq '.files[].path')"
+          unsafe="$(printf '%s\n' "$files" | grep -vE '^docs/|\.md$|^tests/|\.test\.js$' || true)"
+          if [ -n "$unsafe" ]; then
+            echo 'UNSAFE files detected -- skipping auto-merge:'
+            printf '  %s\n' $unsafe
+            echo 'safe=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'All files in safe paths -- proceeding with auto-merge'
+            echo 'safe=true' >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Auto-merge
         if: steps.path_check.outputs.safe == 'true'
-        shell: pwsh
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh pr merge ${{ github.event.pull_request.number }} --squash --delete-branch
-          gh pr comment ${{ github.event.pull_request.number }} --body 'Auto-merged: docs/test-only PR, Sam approved, all checks passed.'
+          gh pr merge "$PR_NUMBER" --squash --delete-branch
+          gh pr comment "$PR_NUMBER" --body 'Auto-merged: docs/test-only PR, Sam approved, all checks passed.'

@@ -26,7 +26,10 @@ concurrency:
 jobs:
   sam-audit:
     name: Security Audit (Sam CSO)
-    runs-on: self-hosted
+    # Linux self-hosted runner, co-located with Mission Control (installed via
+    # tools/mission-control/install-runner.sh). Requires BOTH labels so only the
+    # Linux runner picks this up — never a stray Windows runner.
+    runs-on: [self-hosted, Linux]
     permissions:
       pull-requests: write
       contents: read
@@ -78,183 +81,122 @@ jobs:
       - name: Resolve gh/claude absolute paths for runner service context
         if: steps.precheck.outputs.skip != 'true'
         id: tools
-        # #131/#154 follow-up: the self-hosted runner (nathan-desktop) runs as a Windows service
-        # under a logon task, which does NOT reliably inherit the interactive user's PATH — same
-        # root cause class as the earlier `pwsh: command not found` failure. `gh pr diff` failed
-        # here with $LASTEXITCODE -1 (native "term not recognized") even after prepending known
-        # install dirs to $GITHUB_PATH (both a plain and a BOM-less UTF8 write were tried — the
-        # runner never picked up either for the next step, for reasons not further diagnosable
-        # from the workflow file alone). Bypassing PATH resolution entirely by resolving absolute
-        # exe paths once here and invoking them by full path in every later step is more reliable
-        # than depending on $GITHUB_PATH/service PATH inheritance behaving as documented.
-        shell: powershell
+        shell: bash
+        # The self-hosted runner runs as a systemd service whose PATH does not
+        # necessarily include ~/.local/bin (where the claude CLI usually lives).
+        # Resolve absolute paths once and invoke by full path in later steps rather
+        # than depending on the service PATH.
         run: |
-          $ErrorActionPreference = 'Continue'
-          $ghCandidates = @(
-            "$env:ProgramFiles\GitHub CLI\gh.exe",
-            "${env:ProgramFiles(x86)}\GitHub CLI\gh.exe",
-            "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
-          )
-          $claudeCandidates = @(
-            "$env:USERPROFILE\.local\bin\claude.exe",
-            "$env:LOCALAPPDATA\Programs\claude\claude.exe",
-            "$env:APPDATA\npm\claude.cmd"
-          )
-          $gh = ($ghCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
-          $claude = ($claudeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
-          if (-not $gh) { $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source }
-          if (-not $claude) { $claude = (Get-Command claude -ErrorAction SilentlyContinue).Source }
-          Write-Host "Resolved gh: $gh"
-          Write-Host "Resolved claude: $claude"
-          "gh_path=$gh" >> $env:GITHUB_OUTPUT
-          "claude_path=$claude" >> $env:GITHUB_OUTPUT
+          resolve() {
+            local name="$1"; shift
+            local c
+            for c in "$@"; do [ -x "$c" ] && { echo "$c"; return; }; done
+            command -v "$name" 2>/dev/null || true
+          }
+          GH_PATH=$(resolve gh "$HOME/.local/bin/gh" /usr/local/bin/gh /usr/bin/gh)
+          CLAUDE_PATH=$(resolve claude "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude)
+          echo "Resolved gh: $GH_PATH"
+          echo "Resolved claude: $CLAUDE_PATH"
+          echo "gh_path=$GH_PATH" >> "$GITHUB_OUTPUT"
+          echo "claude_path=$CLAUDE_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Get PR diff
         if: steps.precheck.outputs.skip != 'true'
-        # #131/#154 follow-up: self-hosted runner (nathan-desktop) has Windows PowerShell 5.1
-        # (powershell.exe) but not PowerShell Core (pwsh.exe) on PATH — `shell: pwsh` failed with
-        # "pwsh: command not found" once the file finally parsed and the job actually started.
-        # Confirmed via `gh run view <id> --log-failed` on run 28776426326. Switched to
-        # `shell: powershell` (built into every Windows box) which is syntax-compatible with the
-        # script bodies used here (no PS7-only features used).
-        shell: powershell
-        run: |
-          # GitHub Actions sets $ErrorActionPreference = 'Stop' for pwsh/powershell steps. Native
-          # exes like `gh` writing ANYTHING to stderr (even a benign notice) get turned into a
-          # terminating PowerShell error under that setting, aborting the script with no visible
-          # output — this is what caused a silent exit-code-1 failure here with zero log lines.
-          # Force 'Continue' for this native-command block and check $LASTEXITCODE explicitly
-          # instead of relying on PowerShell's stream-based error handling.
-          # Do NOT merge stderr with 2>&1 here: in PowerShell 5.1 that wraps each stderr line from
-          # a native exe in a NativeCommandError object, which corrupts the plain-text diff file
-          # if any land in the pipeline. $ErrorActionPreference = 'Continue' alone is enough to
-          # stop stderr noise from becoming a terminating exception.
-          $ErrorActionPreference = 'Continue'
-          $gh = "${{ steps.tools.outputs.gh_path }}"
-          Write-Host "Using gh: $gh"
-          Write-Host "Exists: $(Test-Path $gh)"
-          try {
-            $verOut = & $gh --version 2>&1
-            Write-Host "gh --version exit=$LASTEXITCODE output=$verOut"
-          } catch {
-            Write-Host "gh --version threw: $($_.Exception.Message)"
-          }
-          try {
-            $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
-            $ghExit = $LASTEXITCODE
-            Write-Host "gh pr diff exit=$ghExit"
-            $diffOut | Select-Object -First 400 | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
-          } catch {
-            Write-Host "gh pr diff threw: $($_.Exception.Message)"
-            $ghExit = 1
-          }
-          if ($ghExit -ne 0) {
-            Write-Error "gh pr diff failed with exit code $ghExit"
-            exit $ghExit
-          }
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          GH="${{ steps.tools.outputs.gh_path }}"
+          echo "Using gh: $GH"
+          "$GH" --version || true
+          if ! "$GH" pr diff "${{ github.event.pull_request.number }}" > "$RUNNER_TEMP/pr-diff-full.txt"; then
+            echo "gh pr diff failed"
+            exit 1
+          fi
+          # #175: cap the diff at 4000 lines (was 400 — which silently dropped later
+          # files and made Sam report them as "absent from the PR"). Mark truncation
+          # explicitly so the auditor doesn't treat missing files as not-in-the-PR.
+          total=$(wc -l < "$RUNNER_TEMP/pr-diff-full.txt")
+          head -n 4000 "$RUNNER_TEMP/pr-diff-full.txt" > "$RUNNER_TEMP/pr-diff.txt"
+          if [ "$total" -gt 4000 ]; then
+            {
+              echo ""
+              echo "[DIFF TRUNCATED at 4000 of $total lines - files after this point are"
+              echo "still part of this PR; do not treat them as absent.]"
+            } >> "$RUNNER_TEMP/pr-diff.txt"
+          fi
 
       - name: Run Sam security audit
         if: steps.precheck.outputs.skip != 'true'
         id: audit
-        # See "Get PR diff" step comment above — pwsh not present on this self-hosted runner.
-        shell: powershell
-        # #131/#154: this step used to build $task with a PowerShell here-string (@" ... "@)
-        # whose body lines started at column 0. A YAML literal block scalar (`run: |`) requires
-        # every content line to be indented at least as much as its first content line — a
-        # column-0 line ends the block early, so YAML tried to parse "PR #<num>: <title>" as a
-        # new mapping key and failed with "can not read a block mapping entry; a multiline key
-        # may not be an implicit key". That made this entire workflow file unparseable, which is
-        # why every run (regardless of trigger) showed a 0s "workflow file issue" failure —
-        # confirmed via `npx js-yaml .github/workflows/sam-audit.yml`.
-        #
-        # Fixed by building the task text from a properly-indented array of lines instead of a
-        # bare here-string, AND by passing the untrusted PR title/branch values in via `env:`
-        # (below) rather than substituting `${{ github.event.pull_request.title }}` directly
-        # into the script text — GitHub Actions expression substitution happens before pwsh ever
-        # sees the script, so a title containing quotes/backticks/`$(...)` could otherwise break
-        # or inject into the script. Reading them from $env:* is the standard mitigation.
+        shell: bash
+        # Untrusted PR title/branch values come in via env: (below), NEVER interpolated
+        # into the script text — GitHub Actions expression substitution happens before the
+        # shell sees the script, so a title with quotes/backticks/$(...) could otherwise
+        # break or inject. Read them from $VAR in double quotes; the shell does not
+        # re-evaluate variable *contents*.
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          # Same $ErrorActionPreference = 'Stop' trap as "Get PR diff" above — `claude` writing
-          # anything to stderr would otherwise abort this step before sam-result.txt is written.
-          $ErrorActionPreference = 'Continue'
-          $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
-          $lines = @(
-            'You are Sam (CSO). Run your pre-merge security audit on this pull request.'
-            ''
-            "PR #$env:PR_NUMBER`: $env:PR_TITLE"
-            "Base branch: $env:BASE_REF"
-            "Head branch: $env:HEAD_REF"
-            ''
-            '## Your 10-item Audit Checklist'
-            '1. Data access patterns reviewed'
-            '2. Auth/authz logic correct'
-            '3. Credential handling secure (no secrets in diff)'
-            '4. PHI exposure assessment'
-            '5. Compliance with applicable standards'
-            '6. Audit trail logging present'
-            '7. Input validation at system boundaries'
-            '8. Error messages don''t leak sensitive data'
-            '9. No secrets, API keys, or credentials in code/config'
-            '10. Vendor contracts reviewed if new vendor with PHI'
-            ''
-            '## Diff'
-            $diff
-            ''
-            '## Required Output Format'
-            'Your FIRST LINE must be exactly one of (this is a machine-parsed marker — do not'
-            'compress, reword, or drop it):'
-            '  APPROVED: <one-line summary of what was audited>'
-            '  BLOCKED: <one-line reason for blocking>'
-            ''
-            'Then list each checklist item result: PASS / FAIL / N/A with a brief note.'
-            'If BLOCKED, list each specific issue that must be resolved before merge.'
-            ''
-            '## Response Style (#164 token diet)'
-            'Write the checklist and notes in caveman-compressed style: drop articles/filler'
-            'words, fragments are fine, no preamble or sign-off. Keep full technical substance --'
-            'every security finding, file/line reference, and required fix must still be'
-            'complete and precise. Do NOT compress the APPROVED:/BLOCKED: marker line itself or'
-            'any code/security finding text -- write those in normal, unambiguous language so'
-            'nothing is lost or misread.'
-          )
-          $task = $lines -join "`n"
-
-          $task | Out-File "$env:RUNNER_TEMP\sam-task.txt" -Encoding utf8
-          # --agent sam: run the real Sam agent definition (.agents/agents/sam.md), not a bare
-          # model call. Sam's "CI Pre-Merge Audit Mode" there emits the APPROVED:/BLOCKED:
-          # vocabulary this workflow parses below (aligned with sam.md, see issue #112).
-          # NOTE 1: agent names are case-sensitive — `--agent sam` silently fails with
-          # "--agent 'sam' not found" (the registered agent is `Sam`, capitalized).
-          #
-          # NOTE 2: passing the (large, quote/backtick-laden PR diff) prompt as a literal
-          # command-line ARGUMENT — `-p (Get-Content ... -Raw)` — is fragile on Windows: CreateProcess
-          # argv quoting can mis-split a multi-KB string containing embedded double-quotes/backticks
-          # from a diff, truncating what `claude` actually receives as its prompt. This produced
-          # near-instant (~1-2s) completions whose output never matched "^APPROVED:" (e.g. a bare
-          # greeting or the CLI's version banner), so every PR was auto-blocked regardless of diff
-          # content — the true root cause of #131 once the case-sensitivity bug (note 1) was also
-          # fixed. `claude -p` reads the prompt from stdin when no positional prompt is given, which
-          # avoids argv-length/quoting limits entirely — switched to piping the task text in via
-          # stdin instead.
-          $claude = "${{ steps.tools.outputs.claude_path }}"
-          $taskText = Get-Content "$env:RUNNER_TEMP\sam-task.txt" -Raw
-          Write-Host "sam-task.txt length: $($taskText.Length)"
-          $result = $taskText | & $claude --agent Sam --model sonnet --effort medium -p 2>&1
-          Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
-          $result | Out-File "$env:RUNNER_TEMP\sam-result.txt" -Encoding utf8
-
-          if ($result -match "^APPROVED:") {
-            "status=approved" >> $env:GITHUB_OUTPUT
-          } else {
-            "status=blocked" >> $env:GITHUB_OUTPUT
-          }
+          set -o pipefail
+          CLAUDE="${{ steps.tools.outputs.claude_path }}"
+          TASK="$RUNNER_TEMP/sam-task.txt"
+          RESULT="$RUNNER_TEMP/sam-result.txt"
+          {
+            echo 'You are Sam (CSO). Run your pre-merge security audit on this pull request.'
+            echo ''
+            printf 'PR #%s: %s\n' "$PR_NUMBER" "$PR_TITLE"
+            printf 'Base branch: %s\n' "$BASE_REF"
+            printf 'Head branch: %s\n' "$HEAD_REF"
+            echo ''
+            echo '## Your 10-item Audit Checklist'
+            echo '1. Data access patterns reviewed'
+            echo '2. Auth/authz logic correct'
+            echo '3. Credential handling secure (no secrets in diff)'
+            echo '4. PHI exposure assessment'
+            echo '5. Compliance with applicable standards'
+            echo '6. Audit trail logging present'
+            echo '7. Input validation at system boundaries'
+            echo "8. Error messages don't leak sensitive data"
+            echo '9. No secrets, API keys, or credentials in code/config'
+            echo '10. Vendor contracts reviewed if new vendor with PHI'
+            echo ''
+            echo '## Diff'
+            cat "$RUNNER_TEMP/pr-diff.txt"
+            echo ''
+            echo '## Required Output Format'
+            echo 'Your FIRST LINE must be exactly one of (this is a machine-parsed marker — do not'
+            echo 'compress, reword, or drop it):'
+            echo '  APPROVED: <one-line summary of what was audited>'
+            echo '  BLOCKED: <one-line reason for blocking>'
+            echo ''
+            echo 'Then list each checklist item result: PASS / FAIL / N/A with a brief note.'
+            echo 'If BLOCKED, list each specific issue that must be resolved before merge.'
+            echo ''
+            echo '## Response Style (#164 token diet)'
+            echo 'Write the checklist and notes in caveman-compressed style: drop articles/filler'
+            echo 'words, fragments are fine, no preamble or sign-off. Keep full technical substance --'
+            echo 'every security finding, file/line reference, and required fix must still be'
+            echo 'complete and precise. Do NOT compress the APPROVED:/BLOCKED: marker line itself or'
+            echo 'any code/security finding text -- write those in normal, unambiguous language so'
+            echo 'nothing is lost or misread.'
+          } > "$TASK"
+          echo "sam-task.txt length: $(wc -c < "$TASK")"
+          # --agent Sam: run the real Sam agent definition (.agents/agents/sam.md), whose
+          # "CI Pre-Merge Audit Mode" emits the APPROVED:/BLOCKED: vocabulary parsed below.
+          # Agent names are case-sensitive (registered as `Sam`). Prompt is piped via stdin
+          # (`-p` with no positional arg) to avoid argv length/quoting limits with a large diff.
+          "$CLAUDE" --agent Sam --model sonnet --effort medium -p < "$TASK" > "$RESULT" 2>&1 || true
+          echo "claude done; result bytes: $(wc -c < "$RESULT")"
+          if grep -q '^APPROVED:' "$RESULT"; then
+            echo "status=approved" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=blocked" >> "$GITHUB_OUTPUT"
+          fi
         continue-on-error: true
 
       - name: Post Sam review to PR

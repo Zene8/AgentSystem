@@ -8,6 +8,10 @@
 #
 # #164: pr-auto-review (cavecrew reviewer) job removed. friday-audit.yml is now the single
 # engineering reviewer on every PR; sam-audit.yml remains the security gate.
+#
+# Runner is the Linux self-hosted runner co-located with Mission Control
+# (tools/mission-control/install-runner.sh). Steps run under bash; the default
+# self-hosted,Linux,X64 labels satisfy `runs-on: [self-hosted, Linux]`.
 name: Scheduled Tasks
 
 on:
@@ -21,68 +25,70 @@ jobs:
   # memory-maintenance.js operates on the local ~/agent-memory brain — local machine state.
   weekly-brain-consolidation:
     if: github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1'
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@v4
       - name: Run full memory sleep cycle
-        shell: pwsh
+        shell: bash
         run: |
-          node ${{ github.workspace }}\tools\memory-maintenance.js --reflect
+          node "${{ github.workspace }}/tools/memory-maintenance.js" --reflect
 
   # memory-decay.js reads/writes ~/agent-memory/nexus/* brains directly — local machine state.
   weekly-memory-decay:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@v4
       - name: Memory decay
-        shell: pwsh
+        shell: bash
         run: |
-          node ${{ github.workspace }}\tools\memory-decay.js --brain=agentsystem
-          node ${{ github.workspace }}\tools\memory-decay.js --brain=personal-brain
+          node "${{ github.workspace }}/tools/memory-decay.js" --brain=agentsystem
+          node "${{ github.workspace }}/tools/memory-decay.js" --brain=personal-brain
 
   # compute-trust-scores.js reads ~/agent-memory/nexus/run-log/* — local machine state.
   weekly-trust-scores:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@v4
       - name: Compute trust scores
-        shell: pwsh
-        run: node ${{ github.workspace }}\tools\compute-trust-scores.js
+        shell: bash
+        run: node "${{ github.workspace }}/tools/compute-trust-scores.js"
       # #168: feed real routing-accuracy data into trust-scores.md weekly so the router
       # (memory-router.js) reads live numbers instead of a stale/empty stub.
       - name: Append routing accuracy to trust-scores.md
-        shell: pwsh
+        shell: bash
         run: |
-          $report = node ${{ github.workspace }}\tools\routing-report.js
-          $target = Join-Path $HOME "agent-memory\nexus\trust-scores.md"
-          $header = "`n## Routing Accuracy (auto-updated $(Get-Date -Format yyyy-MM-dd))`n"
-          Add-Content -Path $target -Value ($header + $report)
+          report=$(node "${{ github.workspace }}/tools/routing-report.js")
+          target="$HOME/agent-memory/nexus/trust-scores.md"
+          {
+            printf '\n## Routing Accuracy (auto-updated %s)\n' "$(date +%Y-%m-%d)"
+            printf '%s\n' "$report"
+          } >> "$target"
 
   # Operates on ~/.claude and ~/agent-memory directly (rotate-logs, claude-json-hygiene,
   # caveman-cache-fix, deploy-hooks --check) — none of these paths exist on a hosted runner.
   weekly-hygiene:
     if: github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0'
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@v4
       - name: Rotate jsonl logs (session-log etc.)
-        shell: pwsh
-        run: node ${{ github.workspace }}\tools\rotate-logs.js --threshold-mb=5 --keep=3
+        shell: bash
+        run: node "${{ github.workspace }}/tools/rotate-logs.js" --threshold-mb=5 --keep=3
       # #168: session-log.jsonl archive-with-30-day-retention + auto-capture.log truncation.
       # Separate tool from rotate-logs.js above: different semantics (dated archive +
       # retention window vs. generation-suffix rotation; also handles non-.jsonl .log files).
       - name: Archive session-log.jsonl + truncate auto-capture.log
-        shell: pwsh
-        run: node ${{ github.workspace }}\tools\log-rotate.js --jsonl-threshold-kb=500 --log-threshold-kb=100 --keep-days=30
+        shell: bash
+        run: node "${{ github.workspace }}/tools/log-rotate.js" --jsonl-threshold-kb=500 --log-threshold-kb=100 --keep-days=30
       - name: Prune ~/.claude tmp orphans + backup churn
-        shell: pwsh
-        run: node ${{ github.workspace }}\tools\claude-json-hygiene.js --keep=5 --tmp-age-hours=24
+        shell: bash
+        run: node "${{ github.workspace }}/tools/claude-json-hygiene.js" --keep=5 --tmp-age-hours=24
       - name: Dedupe caveman plugin cache
-        shell: pwsh
-        run: node ${{ github.workspace }}\tools\caveman-cache-fix.js
+        shell: bash
+        run: node "${{ github.workspace }}/tools/caveman-cache-fix.js"
       - name: Report hook drift (repo vs ~/.claude)
-        shell: pwsh
-        run: node ${{ github.workspace }}\tools\deploy-hooks.js --check
+        shell: bash
+        run: node "${{ github.workspace }}/tools/deploy-hooks.js" --check
         continue-on-error: true

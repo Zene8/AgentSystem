@@ -17,6 +17,9 @@
 #   --public-url <u>  Externally-reachable base URL to advertise (behind a proxy/Tailscale),
 #                     e.g. https://mc.example.com. Sets PUBLIC_URL in the unit.
 #   --no-service      Do everything except install/start the systemd service.
+#   --with-runner     Also register a GitHub Actions self-hosted runner on this host
+#                     (Sam/Friday audits, /agent dispatch, cron). See install-runner.sh.
+#   --runner-token <t>  Registration token passed through to the runner installer.
 #   -h | --help       Show this help.
 #
 # See docs/mission-control-linux-deploy.md for the full remote-server guide
@@ -36,17 +39,21 @@ PORT="8765"
 PUBLIC_URL=""
 INSTALL_SERVICE="yes"
 FIREWALL="no"        # open a firewall port only when binding non-loopback
+WITH_RUNNER="no"
+RUNNER_TOKEN=""
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
   case "$1" in
-    --user)       MODE="user"; shift ;;
-    --lan)        HOST="0.0.0.0"; FIREWALL="yes"; shift ;;
-    --bind)       HOST="$2"; FIREWALL="yes"; shift 2 ;;
-    --port)       PORT="$2"; shift 2 ;;
-    --public-url) PUBLIC_URL="$2"; shift 2 ;;
-    --no-service) INSTALL_SERVICE="no"; shift ;;
-    -h|--help)    sed -n '2,22p' "$0"; exit 0 ;;
+    --user)         MODE="user"; shift ;;
+    --lan)          HOST="0.0.0.0"; FIREWALL="yes"; shift ;;
+    --bind)         HOST="$2"; FIREWALL="yes"; shift 2 ;;
+    --port)         PORT="$2"; shift 2 ;;
+    --public-url)   PUBLIC_URL="$2"; shift 2 ;;
+    --no-service)   INSTALL_SERVICE="no"; shift ;;
+    --with-runner)  WITH_RUNNER="yes"; shift ;;
+    --runner-token) RUNNER_TOKEN="$2"; shift 2 ;;
+    -h|--help)      sed -n '2,26p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -185,3 +192,12 @@ else
   echo "  docs/mission-control-linux-deploy.md). Access key: $KEY_FILE"
 fi
 echo "================================================================="
+
+# ── Optional: co-locate the GitHub Actions self-hosted runner on this host ─────
+if [ "$WITH_RUNNER" = "yes" ]; then
+  echo
+  echo "Installing GitHub Actions self-hosted runner on this host..."
+  RUNNER_ARGS=()
+  [ -n "$RUNNER_TOKEN" ] && RUNNER_ARGS+=(--token "$RUNNER_TOKEN")
+  bash "$SCRIPT_DIR/install-runner.sh" "${RUNNER_ARGS[@]}"
+fi
