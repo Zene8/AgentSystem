@@ -21,7 +21,7 @@
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, openSync, closeSync, mkdirSync, readdirSync, statSync, appendFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 import { createHmac, timingSafeEqual, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,7 @@ import { SessionRegistry } from './session-registry.js';
 import { validateRepo } from './repo-validator.js';
 import { spawnAgyOneShotDirect, spawnAgyPersistent } from './agy-dispatcher.js';
 import { ipAllowed as ipAllowedFor, normalizeIp } from './ip-utils.js';
+import { lanAddresses, publicBaseUrl } from './url-utils.js';
 import { publish as publishEvent } from '../event-bus.js';
 
 const HOME      = homedir();
@@ -45,6 +46,10 @@ const KNOWN_REPOS_FILE = `${HOME}/agent-memory/nexus/known-repos.json`;
 const MC_REGISTRY_FILE = `${HOME}/.claude/mission-control-registry.json`;
 const PORT      = parseInt(process.env.PORT || '8765');
 const GH_SECRET = process.env.GITHUB_WEBHOOK_SECRET || '';
+// PUBLIC_URL: externally-reachable base URL (e.g. behind a reverse proxy or
+// Tailscale). When set, advertised log URLs use it instead of a Host-header or
+// localhost guess. No trailing slash needed.
+const PUBLIC_URL = process.env.PUBLIC_URL || '';
 
 const SECRET = existsSync(KEY_FILE) ? readFileSync(KEY_FILE, 'utf8').trim() : null;
 if (!SECRET) { console.error('No ~/.claude/remote-webhook.key found'); process.exit(1); }
@@ -743,7 +748,12 @@ const server = http.createServer(async (req, res) => {
           repo,
           status: dispatchResult.status || 'running',
           spawnedAt: sessionRecord.spawnedAt,
-          logUrl: `http://localhost:${PORT}/log/${sessionRecord.id}`,
+          logUrl: `${publicBaseUrl({
+            publicUrl: PUBLIC_URL,
+            hostHeader: req.headers.host,
+            forwardedProto: req.headers['x-forwarded-proto'],
+            port: PORT,
+          })}/log/${sessionRecord.id}`,
         });
       } catch (e) {
         registry.exitSession(sessionRecord.id, 1);
@@ -1036,8 +1046,16 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`\nClaude Remote Control Server`);
   console.log(`  Local:   http://${HOST}:${PORT}`);
-  console.log(`  WSL:     http://172.22.131.86:${PORT}`);
-  console.log(`  Windows: http://172.22.128.1:${PORT} (after port forward)`);
+  if (PUBLIC_URL) {
+    console.log(`  Public:  ${PUBLIC_URL}`);
+  }
+  // Advertise the host's real external IPv4 addresses (LAN / Tailscale) so a
+  // phone or laptop can reach the panel — only meaningful when not loopback-only.
+  if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
+    for (const ip of lanAddresses(networkInterfaces())) {
+      console.log(`  LAN:     http://${ip}:${PORT}`);
+    }
+  }
   console.log(`  Panel:   http://${HOST}:${PORT}/panel?key=<key>`);
   console.log(`  Key:     ${SECRET.slice(0,8)}...${SECRET.slice(-4)}\n`);
   if (HOST !== '127.0.0.1' && HOST !== 'localhost') {

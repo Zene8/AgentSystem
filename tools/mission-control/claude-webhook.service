@@ -1,15 +1,33 @@
+# Mission Control webhook server — systemd unit TEMPLATE.
+#
+# Do NOT install this file verbatim. install-local.sh substitutes the __PLACEHOLDER__
+# tokens (user, absolute paths, node binary, bind address) and writes the result to
+# /etc/systemd/system/claude-webhook.service (system mode) or
+# ~/.config/systemd/user/claude-webhook.service (--user mode).
+#
+# Bind address defaults to loopback (127.0.0.1). Exposing the agent-spawn API on a
+# LAN or public interface is opt-in only — pass --lan or --bind <addr> to the
+# installer, and put TLS + a trusted network (Tailscale / reverse proxy) in front.
 [Unit]
-Description=Claude Code Webhook Server
+Description=Claude Code Mission Control Webhook Server
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=natha
-WorkingDirectory=/home/natha/dev/AgentSystem
-ExecStart=/usr/bin/node tools/mission-control/webhook-server.js
+User=__USER__
+WorkingDirectory=__WORKDIR__
+# Ensure the claude / agy / tmux CLIs (often in ~/.local/bin) are on PATH.
+Environment=PATH=__PATH__
+Environment=PORT=8765
+Environment=HOST=__HOST__
+ExecStart=__NODE__ __WORKDIR__/tools/mission-control/webhook-server.js
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-Environment=PORT=8765
-Environment=HOST=0.0.0.0
+# Basic hardening — the service only needs its own $HOME.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=__WANTEDBY__

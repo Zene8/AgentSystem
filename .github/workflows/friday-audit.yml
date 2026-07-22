@@ -18,7 +18,9 @@ concurrency:
 jobs:
   friday-audit:
     name: Engineering Audit (Friday CTO)
-    runs-on: self-hosted
+    # Linux self-hosted runner, co-located with Mission Control. Requires BOTH labels
+    # so only the Linux runner picks this up.
+    runs-on: [self-hosted, Linux]
     permissions:
       pull-requests: write
       contents: read
@@ -33,127 +35,109 @@ jobs:
 
       - name: Resolve gh/claude absolute paths for runner service context
         id: tools
-        shell: powershell
+        shell: bash
+        # The self-hosted runner runs as a systemd service whose PATH may not include
+        # ~/.local/bin (where claude usually lives). Resolve absolute paths once.
         run: |
-          $ErrorActionPreference = 'Continue'
-          $ghCandidates = @(
-            "$env:ProgramFiles\GitHub CLI\gh.exe",
-            "${env:ProgramFiles(x86)}\GitHub CLI\gh.exe",
-            "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
-          )
-          $claudeCandidates = @(
-            "$env:USERPROFILE\.local\bin\claude.exe",
-            "$env:LOCALAPPDATA\Programs\claude\claude.exe",
-            "$env:APPDATA\npm\claude.cmd"
-          )
-          $gh = ($ghCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
-          $claude = ($claudeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
-          if (-not $gh) { $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source }
-          if (-not $claude) { $claude = (Get-Command claude -ErrorAction SilentlyContinue).Source }
-          Write-Host "Resolved gh: $gh"
-          Write-Host "Resolved claude: $claude"
-          "gh_path=$gh" >> $env:GITHUB_OUTPUT
-          "claude_path=$claude" >> $env:GITHUB_OUTPUT
+          resolve() {
+            local name="$1"; shift
+            local c
+            for c in "$@"; do [ -x "$c" ] && { echo "$c"; return; }; done
+            command -v "$name" 2>/dev/null || true
+          }
+          GH_PATH=$(resolve gh "$HOME/.local/bin/gh" /usr/local/bin/gh /usr/bin/gh)
+          CLAUDE_PATH=$(resolve claude "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude)
+          echo "Resolved gh: $GH_PATH"
+          echo "Resolved claude: $CLAUDE_PATH"
+          echo "gh_path=$GH_PATH" >> "$GITHUB_OUTPUT"
+          echo "claude_path=$CLAUDE_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Get PR diff
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Continue'
-          $gh = "${{ steps.tools.outputs.gh_path }}"
-          Write-Host "Using gh: $gh"
-          Write-Host "Exists: $(Test-Path $gh)"
-          try {
-            $verOut = & $gh --version 2>&1
-            Write-Host "gh --version exit=$LASTEXITCODE output=$verOut"
-          } catch {
-            Write-Host "gh --version threw: $($_.Exception.Message)"
-          }
-          try {
-            $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
-            $ghExit = $LASTEXITCODE
-            Write-Host "gh pr diff exit=$ghExit"
-            # Same fix as sam-audit.yml: 400-line cap silently dropped later files (#175).
-            # ASCII only in the marker string — multibyte dash mojibakes and breaks PS 5.1 parse.
-            $lines = @($diffOut)
-            if ($lines.Count -gt 4000) {
-              $lines = $lines[0..3999] + "", "[DIFF TRUNCATED at 4000 of $($lines.Count) lines - do NOT treat missing files as absent from the PR]"
-            }
-            $lines | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
-          } catch {
-            Write-Host "gh pr diff threw: $($_.Exception.Message)"
-            $ghExit = 1
-          }
-          if ($ghExit -ne 0) {
-            Write-Error "gh pr diff failed with exit code $ghExit"
-            exit $ghExit
-          }
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          GH="${{ steps.tools.outputs.gh_path }}"
+          echo "Using gh: $GH"
+          "$GH" --version || true
+          if ! "$GH" pr diff "${{ github.event.pull_request.number }}" > "$RUNNER_TEMP/pr-diff-full.txt"; then
+            echo "gh pr diff failed"
+            exit 1
+          fi
+          # #175: 4000-line cap (was 400, which dropped later files) + explicit marker.
+          total=$(wc -l < "$RUNNER_TEMP/pr-diff-full.txt")
+          head -n 4000 "$RUNNER_TEMP/pr-diff-full.txt" > "$RUNNER_TEMP/pr-diff.txt"
+          if [ "$total" -gt 4000 ]; then
+            {
+              echo ""
+              echo "[DIFF TRUNCATED at 4000 of $total lines - files after this point are"
+              echo "still part of this PR; do not treat them as absent.]"
+            } >> "$RUNNER_TEMP/pr-diff.txt"
+          fi
 
       - name: Run Friday engineering audit
         id: audit
-        shell: powershell
+        shell: bash
+        # Untrusted PR title/branch values come in via env: (below), never interpolated
+        # into the script text (injection mitigation — see sam-audit.yml).
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_REF: ${{ github.base_ref }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          $ErrorActionPreference = 'Continue'
-          $diff = Get-Content "$env:RUNNER_TEMP\pr-diff.txt" -Raw
-          $lines = @(
-            'You are Friday (CTO). Run your engineering-quality audit on this pull request.'
-            ''
-            "PR #$env:PR_NUMBER`: $env:PR_TITLE"
-            "Base branch: $env:BASE_REF"
-            "Head branch: $env:HEAD_REF"
-            ''
-            '## Your 8-item Engineering Audit Checklist'
-            '1. Code correctness — no obvious bugs or logic errors'
-            '2. Test coverage — critical paths have tests'
-            '3. Standards compliance — follows repo style (CLAUDE.md path-scoped rules)'
-            '4. No dead code — all changes serve the two purposes (#162)'
-            '5. Architecture fit — aligns with system design'
-            '6. Performance — no degradation in hot paths'
-            '7. Refactoring candidates — any duplication or complexity to simplify'
-            '8. Documentation — changes are documented where needed'
-            ''
-            '## Diff'
-            $diff
-            ''
-            '## Required Output Format'
-            'Your FIRST LINE must be exactly one of (this is a machine-parsed marker — do not'
-            'compress, reword, or drop it):'
-            '  REVIEWED: <one-line summary of what was audited>'
-            '  CONCERNS: <one-line statement of what needs discussion before merge>'
-            ''
-            'Then list each checklist item result: PASS / NOTE / SKIP with a brief comment.'
-            'If CONCERNS, describe each specific concern (architectural, correctness, or standards).'
-            'This is informational — never blocks merge (Sam is the merge gate).'
-            ''
-            '## Response Style (#164 token diet)'
-            'Write the checklist and notes in caveman-compressed style: drop articles/filler'
-            'words, fragments are fine, no preamble or sign-off. Keep full technical substance --'
-            'every finding, file/line reference, and suggested fix must still be complete and'
-            'precise. Do NOT compress the REVIEWED:/CONCERNS: marker line itself or any code'
-            'finding text -- write those in normal, unambiguous language so nothing is lost or'
-            'misread.'
-          )
-          $task = $lines -join "`n"
-
-          $task | Out-File "$env:RUNNER_TEMP\friday-task.txt" -Encoding utf8
-          $claude = "${{ steps.tools.outputs.claude_path }}"
-          $taskText = Get-Content "$env:RUNNER_TEMP\friday-task.txt" -Raw
-          Write-Host "friday-task.txt length: $($taskText.Length)"
-          $result = $taskText | & $claude --agent Friday --model sonnet --effort medium -p 2>&1
-          Write-Host "claude exit=$LASTEXITCODE resultCount=$($result.Count)"
-          $result | Out-File "$env:RUNNER_TEMP\friday-result.txt" -Encoding utf8
-
-          if ($result -match "^REVIEWED:") {
-            "status=reviewed" >> $env:GITHUB_OUTPUT
-          } else {
-            "status=concerns" >> $env:GITHUB_OUTPUT
-          }
+          set -o pipefail
+          CLAUDE="${{ steps.tools.outputs.claude_path }}"
+          TASK="$RUNNER_TEMP/friday-task.txt"
+          RESULT="$RUNNER_TEMP/friday-result.txt"
+          {
+            echo 'You are Friday (CTO). Run your engineering-quality audit on this pull request.'
+            echo ''
+            printf 'PR #%s: %s\n' "$PR_NUMBER" "$PR_TITLE"
+            printf 'Base branch: %s\n' "$BASE_REF"
+            printf 'Head branch: %s\n' "$HEAD_REF"
+            echo ''
+            echo '## Your 8-item Engineering Audit Checklist'
+            echo '1. Code correctness — no obvious bugs or logic errors'
+            echo '2. Test coverage — critical paths have tests'
+            echo '3. Standards compliance — follows repo style (CLAUDE.md path-scoped rules)'
+            echo '4. No dead code — all changes serve the two purposes (#162)'
+            echo '5. Architecture fit — aligns with system design'
+            echo '6. Performance — no degradation in hot paths'
+            echo '7. Refactoring candidates — any duplication or complexity to simplify'
+            echo '8. Documentation — changes are documented where needed'
+            echo ''
+            echo '## Diff'
+            cat "$RUNNER_TEMP/pr-diff.txt"
+            echo ''
+            echo '## Required Output Format'
+            echo 'Your FIRST LINE must be exactly one of (this is a machine-parsed marker — do not'
+            echo 'compress, reword, or drop it):'
+            echo '  REVIEWED: <one-line summary of what was audited>'
+            echo '  CONCERNS: <one-line statement of what needs discussion before merge>'
+            echo ''
+            echo 'Then list each checklist item result: PASS / NOTE / SKIP with a brief comment.'
+            echo 'If CONCERNS, describe each specific concern (architectural, correctness, or standards).'
+            echo 'This is informational — never blocks merge (Sam is the merge gate).'
+            echo ''
+            echo '## Response Style (#164 token diet)'
+            echo 'Write the checklist and notes in caveman-compressed style: drop articles/filler'
+            echo 'words, fragments are fine, no preamble or sign-off. Keep full technical substance --'
+            echo 'every finding, file/line reference, and suggested fix must still be complete and'
+            echo 'precise. Do NOT compress the REVIEWED:/CONCERNS: marker line itself or any code'
+            echo 'finding text -- write those in normal, unambiguous language so nothing is lost or'
+            echo 'misread.'
+          } > "$TASK"
+          echo "friday-task.txt length: $(wc -c < "$TASK")"
+          # Agent names are case-sensitive (registered as `Friday`). Prompt piped via stdin.
+          "$CLAUDE" --agent Friday --model sonnet --effort medium -p < "$TASK" > "$RESULT" 2>&1 || true
+          echo "claude done; result bytes: $(wc -c < "$RESULT")"
+          if grep -q '^REVIEWED:' "$RESULT"; then
+            echo "status=reviewed" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=concerns" >> "$GITHUB_OUTPUT"
+          fi
         continue-on-error: true
 
       - name: Post Friday review to PR

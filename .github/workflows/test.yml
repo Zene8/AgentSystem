@@ -22,4 +22,4 @@ jobs:
 
       # node --test globs its args (Node >=22). Quoted so node expands, not bash.
       - name: Run all tests
-        run: node --test "tests/test_*.js" "tools/*.test.js" "tools/graph/*.test.js" "hooks/*.test.js"
+        run: node --test "tests/test_*.js" "tools/*.test.js" "tools/mission-control/*.test.js" "tools/graph/*.test.js" "hooks/*.test.js"
