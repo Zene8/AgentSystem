@@ -41,7 +41,7 @@ export function jaccardSimilarity(a, b) {
 // Non-essential background feature (dedup judge) -- pinned to the cheapest tier, see
 // memory-reflect.js for why (bare `claude -p` inherits the CLI's default model).
 export const defaultLlm = (prompt) =>
-  execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 60000 });
+  execFileSync('claude', ['-p', prompt, '--model', 'claude-haiku-4-5-20251001'], { encoding: 'utf8', timeout: 60000, windowsHide: true, env: { ...process.env, AGENT_MEMORY_CAPTURE: '1' } });
 
 // Pure: build a prompt asking the LLM to classify newFact against candidates.
 // Returns prompt string.

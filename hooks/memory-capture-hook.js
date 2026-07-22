@@ -33,6 +33,13 @@ function captureLogFd() {
 }
 
 if (require.main === module) {
+  // Recursion guard: the capture pipeline itself runs `claude -p` sessions whose own
+  // SessionEnd would re-trigger capture — an unbounded chain of headless sessions.
+  if (process.env.AGENT_MEMORY_CAPTURE === '1') {
+    process.stdout.write('OK');
+    process.exit(0);
+  }
+
   let transcriptPath = null;
 
   try {
@@ -45,7 +52,9 @@ if (require.main === module) {
     process.exit(0);
   }
 
-  if (!transcriptPath) {
+  // Skip CI-runner sessions too — audit bots produce no durable user facts, and each
+  // capture costs a headless `claude -p` session.
+  if (!transcriptPath || /actions-runner/i.test(transcriptPath)) {
     process.stdout.write('OK');
     process.exit(0);
   }
@@ -55,6 +64,7 @@ if (require.main === module) {
     const child = spawn(process.execPath, [path.join(TOOLS, 'memory-capture.js'), transcriptPath], {
       detached: true,
       stdio: ['ignore', logFd, logFd],
+      windowsHide: true,
     });
     child.unref();
   } catch {

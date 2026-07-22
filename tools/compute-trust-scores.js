@@ -11,10 +11,16 @@ const USAGE = 'Usage: node tools/compute-trust-scores.js [--dry-run] [--help]';
 const RUN_LOG_DIR = path.join(os.homedir(), 'agent-memory', 'nexus', 'run-log');
 const OUTPUT_FILE = path.join(os.homedir(), 'agent-memory', 'nexus', 'trust-scores.md');
 
-function classifyResult(result) {
+function classifyResult(result, verification) {
   if (!result || typeof result !== 'string') return 'unknown';
   const trimmed = result.trim().toUpperCase();
-  if (trimmed.startsWith('DONE')) return 'success';
+  if (trimmed.startsWith('DONE')) {
+    // done-check.js mechanically verifies DONE claims (PR merged, commit landed,
+    // files exist). A contradicted DONE is a false completion claim — count it
+    // as a failure so it erodes trust instead of inflating it.
+    if (verification && verification.verdict === 'contradicted') return 'failure';
+    return 'success';
+  }
   if (trimmed.startsWith('BLOCKED')) return 'failure';
   return 'unknown';
 }
@@ -54,7 +60,7 @@ function main(dryRun = false) {
     }
 
     const agent = (data.agent || 'unknown').toLowerCase();
-    const classification = classifyResult(data.result);
+    const classification = classifyResult(data.result, data.verification);
 
     if (!scores[agent]) {
       scores[agent] = { total: 0, successes: 0, failures: 0, unknown: 0 };

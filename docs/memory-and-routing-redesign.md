@@ -371,3 +371,18 @@ record to `alerts.jsonl`.
   `node tools/event-dispatcher.js --drain [--max=N]`.
 - Tests: `tools/event-bus.test.js` (10), `tools/event-dispatcher.test.js` (7). Test roots via
   `AGENT_EVENT_ROOT` or explicit root param.
+
+## 13. Routine compliance telemetry (2026-07-13)
+
+"enforce: hard" agent-rule routines are injected text, not mechanical gates (#119) — nothing
+measured whether sessions actually followed them. `hooks/routine-compliance-hook.js` (Stop hook,
+registered via `sync_hooks_from_repo.ps1`) replays the session's Bash/PowerShell commands from the
+transcript and checks the mechanically-checkable routines:
+
+- **fix-pr-until-green** — `gh pr create` must be followed by a `pr-guard.js` run
+- **post-merge-cleanup** — `gh pr merge` must use `--delete-branch` or delete the branch later
+- **verify-before-close** — no direct `gh issue close`; `tools/issue-close.js` is the sanctioned path
+
+One record per session appends to `~/agent-memory/nexus/routine-compliance.jsonl`
+(`{ ts, sessionId, checked, violations }`). Summarize: `node tools/routine-compliance-report.js
+[--days=7] [--json]`. Telemetry only — never blocks Stop, never throws.
