@@ -72,7 +72,13 @@ jobs:
             $diffOut = & $gh pr diff ${{ github.event.pull_request.number }} 2>&1
             $ghExit = $LASTEXITCODE
             Write-Host "gh pr diff exit=$ghExit"
-            $diffOut | Select-Object -First 400 | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
+            # Same fix as sam-audit.yml: 400-line cap silently dropped later files (#175).
+            # ASCII only in the marker string — multibyte dash mojibakes and breaks PS 5.1 parse.
+            $lines = @($diffOut)
+            if ($lines.Count -gt 4000) {
+              $lines = $lines[0..3999] + "", "[DIFF TRUNCATED at 4000 of $($lines.Count) lines - do NOT treat missing files as absent from the PR]"
+            }
+            $lines | Out-File "$env:RUNNER_TEMP\pr-diff.txt" -Encoding utf8
           } catch {
             Write-Host "gh pr diff threw: $($_.Exception.Message)"
             $ghExit = 1
