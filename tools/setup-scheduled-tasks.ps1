@@ -6,6 +6,7 @@
 #   AgentSystem-WeeklyMemoryDecay         — Sunday   00:00, runs memory-decay.js for both brains
 #   AgentSystem-WeeklyTrustScores         — Saturday 08:00, runs compute-trust-scores.js
 #   AgentSystem-WeeklyAgentReview         — Saturday 09:00, spawns headless Jarvis review via `claude --bg`
+#   AgentSystem-EventDispatcherDrain      — every 5 min, drains the durable event bus (event-dispatcher.js)
 #
 # Note: daily-standup is skipped: interactive agent invocation requires an active session.
 # (weekly-trust-scores was previously skipped citing an ESM/CJS bug in compute-trust-scores.js —
@@ -176,6 +177,33 @@ if ($claudeCmd) {
 } else {
     Write-Host "Skipped: AgentSystem-WeeklyAgentReview (claude CLI not on PATH)"
 }
+
+# ── Task 5: EventDispatcherDrain — every 5 minutes ───────────────────────────
+# Drains the durable event bus (~/agent-memory/nexus/events/) so queued triggers
+# (e.g. spawns skipped by webhook-server's concurrency cap) retry instead of dying.
+$drainName = 'AgentSystem-EventDispatcherDrain'
+$drainLog  = "$LogDir\event-dispatcher.log"
+$action5 = New-ScheduledTaskAction `
+    -Execute 'cmd.exe' `
+    -Argument "/c `"`"$NodePath`" `"$ToolsRoot\event-dispatcher.js`" --drain >> `"$drainLog`" 2>&1`"" `
+    -WorkingDirectory $ToolsRoot
+$trigger5 = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
+    -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+$settings5 = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
+    -StartWhenAvailable `
+    -RunOnlyIfNetworkAvailable:$false
+if (Get-ScheduledTask -TaskName $drainName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $drainName -Confirm:$false
+}
+Register-ScheduledTask `
+    -TaskName $drainName `
+    -Description 'Drain durable event bus (retries, dead-letter) every 5 minutes' `
+    -Action $action5 `
+    -Trigger $trigger5 `
+    -Settings $settings5 `
+    -Principal $principal | Out-Null
+Write-Host "Registered: $drainName (every 5 minutes)"
 
 Write-Host ""
 Write-Host "Done. Tasks registered for current user ($env:USERNAME)."

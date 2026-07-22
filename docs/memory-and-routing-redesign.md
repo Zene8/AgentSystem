@@ -350,6 +350,28 @@ Closes retrieval -> usefulness loop; three legs:
    on canned queries; pinned in CI via `tools/memory-eval.test.js`. `node tools/memory-eval.js --report`
    summarizes the usefulness rate from injection-feedback.jsonl per brain.
 
+## 12. Unified event bus (2026-07-13)
+
+Durable file-backed event queue at `~/agent-memory/nexus/events/` (`tools/event-bus.js`) plus a
+stateless dispatcher (`tools/event-dispatcher.js`). Async triggers that previously fired side
+effects directly — and silently lost them on a skipped spawn or crashed process — now publish a
+small JSON event instead; the dispatcher drains the queue with retries + exponential backoff
+(1/2/4 min), dead-letters events that exhaust `maxAttempts` (default 3) and writes an alert
+record to `alerts.jsonl`.
+
+- Layout: `queue/` (pending, atomic tmp+rename), `processing/` (atomic claim via rename —
+  concurrent-drain safe), `done.jsonl`, `dead-letter.jsonl`, `alerts.jsonl`. Stale claims
+  (>15 min) auto-recover on next drain.
+- Handlers: `run-tool` (path-confined to `tools/`), `spawn-agent` (`claude --bg`), `noop`.
+- Producers wired: `webhook-server.js` queues `spawn-agent` when the concurrency cap rejects
+  a spawn (dedupe skips stay dropped by design).
+- Drain: `AgentSystem-EventDispatcherDrain` scheduled task, every 5 min
+  (`tools/setup-scheduled-tasks.ps1`).
+- CLI: `node tools/event-bus.js [stats|list|dead|requeue-dead|publish --type=... --json=...]`,
+  `node tools/event-dispatcher.js --drain [--max=N]`.
+- Tests: `tools/event-bus.test.js` (10), `tools/event-dispatcher.test.js` (7). Test roots via
+  `AGENT_EVENT_ROOT` or explicit root param.
+
 ## 13. Routine compliance telemetry (2026-07-13)
 
 "enforce: hard" agent-rule routines are injected text, not mechanical gates (#119) — nothing
