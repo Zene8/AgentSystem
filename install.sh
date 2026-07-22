@@ -6,6 +6,7 @@
 #   ./install.sh
 #   NAME="Your Name" EMAIL="you@example.com" ./install.sh
 #   ./install.sh --skip-labels
+#   ./install.sh --with-mission-control   # also install the remote-dispatch server
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +18,12 @@ fail() { echo -e "   ${RED}XX${NC}  $1"; }
 step() { echo -e "\n${CYAN}>> $1${NC}"; }
 
 SKIP_LABELS=0
-for arg in "$@"; do [[ "$arg" == "--skip-labels" ]] && SKIP_LABELS=1; done
+WITH_MC=0
+MC_ARGS=()
+for arg in "$@"; do
+  [[ "$arg" == "--skip-labels" ]] && SKIP_LABELS=1
+  [[ "$arg" == "--with-mission-control" ]] && WITH_MC=1
+done
 
 PASS=0; WARN=0; FAIL_COUNT=0
 
@@ -111,7 +117,21 @@ else
   ((WARN++))
 fi
 
-# 6. Runner note (Linux/Mac manual setup)
+# 6. Mission Control (optional — remote agent dispatch server)
+if [ "$WITH_MC" -eq 1 ]; then
+  step "Installing Mission Control webhook server"
+  bash "$SCRIPT_DIR/tools/mission-control/install-local.sh" "${MC_ARGS[@]}"
+  ok "Mission Control installed (see docs/mission-control-linux-deploy.md)"
+  ((PASS++))
+else
+  step "Mission Control (optional)"
+  echo "     Skipped. To install the remote agent-dispatch server on this host:"
+  echo "       bash $SCRIPT_DIR/tools/mission-control/install-local.sh"
+  echo "     or re-run: ./install.sh --with-mission-control"
+  echo "     Guide: docs/mission-control-linux-deploy.md"
+fi
+
+# 7. Runner note (Linux/Mac manual setup)
 step "Self-hosted runner"
 warn "Runner must be set up manually on Linux/Mac:"
 echo "     GitHub > repo Settings > Actions > Runners > New self-hosted runner"
