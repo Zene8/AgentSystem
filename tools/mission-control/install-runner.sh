@@ -26,6 +26,14 @@
 
 set -euo pipefail
 
+# The GitHub Actions runner refuses to configure as root (and shouldn't run as
+# root). Fail early with a clear message rather than deep inside config.sh.
+if [ "$(id -u)" = "0" ]; then
+  echo "Do not run as root — the runner must run as a normal user." >&2
+  echo "Run as your deploy user; this script uses sudo only for the svc.sh step." >&2
+  exit 1
+fi
+
 REPO=""
 TOKEN="${RUNNER_TOKEN:-}"
 RUNNER_DIR="$HOME/actions-runner"
@@ -111,6 +119,11 @@ if [ ! -f "config.sh" ]; then
   curl -fsSL -o "$TARBALL" "$URL"
   tar xzf "$TARBALL"
   rm -f "$TARBALL"
+fi
+# Runner's own OS-level prerequisites (libicu, etc.) — without these the service
+# starts and immediately crashes on a fresh Ubuntu box.
+if [ -x ./bin/installdependencies.sh ]; then
+  sudo ./bin/installdependencies.sh || echo "  !! installdependencies.sh failed — install libicu manually if the runner won't start"
 fi
 
 # ── Configure (idempotent via --replace) ─────────────────────────────────────────
