@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>⚡ Mission Control</title>
+<link rel="manifest" href="/manifest.webmanifest?key=${key}">
+<meta name="theme-color" content="#0a152e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mission Ctl">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Urbanist:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   /* ── Basely design tokens (dark, industrial — IBM Carbon inspired) ── */
@@ -469,6 +477,69 @@
     border-radius: var(--radius);
   }
 
+  .status-badge.passing { background: rgba(66, 190, 101, 0.14); color: var(--success); border-color: rgba(66, 190, 101, 0.4); }
+  .status-badge.failing { background: rgba(250, 77, 86, 0.12); color: var(--danger); border-color: rgba(250, 77, 86, 0.4); }
+  .status-badge.pending { background: rgba(255, 131, 43, 0.14); color: var(--warning); border-color: rgba(255, 131, 43, 0.4); }
+  .status-badge.draft   { background: rgba(107, 122, 156, 0.14); color: var(--text-muted); border-color: rgba(107, 122, 156, 0.4); }
+
+  /* Anchor styled as an action button (PR "Open" links) */
+  a.btn-action { text-decoration: none; display: inline-flex; align-items: center; }
+
+  /* ── Header alert toggle ── */
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+    background: var(--field);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    font-size: 17px;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+  .icon-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .icon-btn.on { border-color: var(--success); color: var(--success); }
+
+  /* ── Runner-down banner ── */
+  .banner {
+    display: none;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    background: rgba(250, 77, 86, 0.1);
+    border: 1px solid var(--danger);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius);
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .banner.show { display: block; }
+
+  /* ── Quick-prompt / recent-dispatch chips ── */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .chip {
+    max-width: 100%;
+    background: var(--field);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    padding: 8px 12px;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: var(--transition);
+  }
+  .chip:hover { border-color: var(--primary); color: var(--primary); }
+  .chip.tmpl { border-left: 3px solid var(--primary); }
+  .chip.recent { border-left: 3px solid var(--ignition); }
+
   /* ── Responsive ── */
   @media (min-width: 600px) {
     body { padding: 24px; }
@@ -491,12 +562,18 @@
 
   <header>
     <h1>⚡ Mission Control <span class="pulse-dot" aria-hidden="true"></span></h1>
-    <span class="status-badge running" id="server-health-badge">Online</span>
+    <div class="header-actions">
+      <button class="icon-btn" id="alerts-btn" onclick="enableAlerts()" title="Enable alerts" aria-label="Enable completion alerts">🔔</button>
+      <span class="status-badge running" id="server-health-badge">Online</span>
+    </div>
   </header>
+
+  <div class="banner" id="runner-banner" role="alert"></div>
 
   <nav class="tabs" aria-label="Panels">
     <button class="tab-btn active" onclick="switchTab('dispatch')">🚀 Dispatch</button>
     <button class="tab-btn" onclick="switchTab('fleet'); loadSessions(); loadRuns();">📡 Fleet</button>
+    <button class="tab-btn" onclick="switchTab('pipelines'); loadPipelines();">⚙️ Pipelines</button>
     <button class="tab-btn" onclick="switchTab('memory')">🧠 Memory</button>
     <button class="tab-btn" onclick="switchTab('scratchpads'); loadScratchpads();">📝 Tasks</button>
   </nav>
@@ -553,6 +630,16 @@
         </div>
       </div>
 
+      <div class="form-group" id="recent-group" style="display:none;">
+        <label>Recent Dispatches</label>
+        <div class="chip-row" id="recent-chips"></div>
+      </div>
+
+      <div class="form-group">
+        <label>Quick Prompts</label>
+        <div class="chip-row" id="template-chips"></div>
+      </div>
+
       <div class="form-group">
         <label for="prompt-input">Instruction / Prompt</label>
         <textarea id="prompt-input" rows="4" placeholder="Enter instructions for the agent..."></textarea>
@@ -596,6 +683,23 @@
       <h2>📜 Execution History</h2>
       <div class="runs-list" id="runs-list">
         <div class="loading">Loading execution runs...</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- PANEL: PIPELINES -->
+  <div id="panel-pipelines" class="panel-content">
+    <section class="glass-card">
+      <h2>🏃 Self-Hosted Runner</h2>
+      <div id="runner-status">
+        <div class="loading">Checking runner health...</div>
+      </div>
+    </section>
+
+    <section class="glass-card">
+      <h2>🔀 Open Pull Requests</h2>
+      <div class="runs-list" id="pr-list">
+        <div class="loading">Loading pull requests...</div>
       </div>
     </section>
   </div>
@@ -741,11 +845,175 @@
       document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('.panel-content').forEach(p => p.classList.remove('active'));
 
-      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.toLowerCase().includes(tabId));
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn'))
+        .find(b => (b.getAttribute('onclick') || '').includes(`switchTab('${tabId}')`));
       if (activeBtn) activeBtn.classList.add('active');
 
       const panel = document.getElementById('panel-' + tabId);
       if (panel) panel.classList.add('active');
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    // ── PWA service worker (makes the panel installable) ──
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    // ── Completion alerts (Notification on session finish) ──
+    let prevSessionMap = {};
+
+    function updateAlertsBtn() {
+      const b = document.getElementById('alerts-btn');
+      const granted = ('Notification' in window) && Notification.permission === 'granted';
+      b.classList.toggle('on', granted);
+      b.title = granted ? 'Alerts on' : 'Enable alerts';
+    }
+
+    function enableAlerts() {
+      if (!('Notification' in window)) { alert('Notifications are not supported on this device.'); return; }
+      Notification.requestPermission().then(() => {
+        updateAlertsBtn();
+        if (Notification.permission === 'granted') {
+          notify('Mission Control', "Alerts on — you'll be pinged when a session finishes.");
+        }
+      });
+    }
+
+    async function notify(title, body) {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      try {
+        const reg = ('serviceWorker' in navigator) ? await navigator.serviceWorker.ready : null;
+        if (reg && reg.showNotification) reg.showNotification(title, { body, icon: '/icon.svg', badge: '/icon.svg' });
+        else new Notification(title, { body, icon: '/icon.svg' });
+      } catch { try { new Notification(title, { body }); } catch {} }
+    }
+
+    // ── Quick-prompt templates ──
+    const TEMPLATES = [
+      { label: 'Review open PR', text: 'Review the latest open PR in this repo: check correctness, security, and style, then post a concise summary of any issues found.' },
+      { label: 'Fix failing tests', text: 'The test suite is failing. Find the root cause and fix it, then run the tests to confirm they pass.' },
+      { label: 'Audit dependencies', text: "Audit this repo's dependencies for known vulnerabilities and unused packages. Report findings and propose fixes." },
+      { label: 'Update docs', text: 'Review the most recent changes and update the README and relevant docs to match. Keep it concise.' },
+      { label: 'Triage issues', text: 'Triage the open GitHub issues: label them, flag duplicates, and route each to the right agent.' },
+    ];
+
+    function renderTemplateChips() {
+      document.getElementById('template-chips').innerHTML = TEMPLATES.map((t, i) =>
+        `<button type="button" class="chip tmpl" onclick="applyTemplate(${i})">${escapeHtml(t.label)}</button>`
+      ).join('');
+    }
+
+    function applyTemplate(i) {
+      const el = document.getElementById('prompt-input');
+      el.value = TEMPLATES[i].text;
+      el.focus();
+    }
+
+    // ── Recent dispatches (one-tap rerun, stored client-side) ──
+    const RECENT_KEY = 'mc_recent_dispatches';
+    function loadRecent() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; } }
+    function saveRecent(list) { try { localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8))); } catch {} }
+
+    function pushRecent(entry) {
+      const list = loadRecent().filter(e => !(e.repo === entry.repo && e.agent === entry.agent && e.prompt === entry.prompt));
+      list.unshift(entry);
+      saveRecent(list);
+      renderRecentChips();
+    }
+
+    function renderRecentChips() {
+      const list = loadRecent();
+      const group = document.getElementById('recent-group');
+      if (!list.length) { group.style.display = 'none'; return; }
+      group.style.display = 'block';
+      document.getElementById('recent-chips').innerHTML = list.map((e, i) => {
+        const p = e.prompt || '';
+        const short = p.length > 34 ? p.slice(0, 34) + '…' : p;
+        const tag = e.harness === 'agy' ? 'AGY' : (e.agent || '?').toUpperCase();
+        return `<button type="button" class="chip recent" title="${escapeHtml(p)}" onclick="applyRecent(${i})">↻ ${escapeHtml(tag)}: ${escapeHtml(short)}</button>`;
+      }).join('');
+    }
+
+    function applyRecent(i) {
+      const e = loadRecent()[i];
+      if (!e) return;
+      setHarness(e.harness || 'claude');
+      if (e.repo) document.getElementById('repo-select').value = e.repo;
+      if (e.agent) document.getElementById('agent-select').value = e.agent;
+      if (e.model) document.getElementById('model-select').value = e.model;
+      document.getElementById('prompt-input').value = e.prompt || '';
+      document.getElementById('btn-dispatch').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // ── Pipelines: runner health + open PRs ──
+    async function loadPipelines() {
+      try {
+        const data = await api('/pipelines');
+        renderRunner(data.runner);
+        updateRunnerBanner(data.runner);
+        renderPRs(data);
+      } catch (e) {
+        document.getElementById('runner-status').innerHTML = '<div class="error">' + escapeHtml(e.message) + '</div>';
+        document.getElementById('pr-list').innerHTML = '';
+      }
+    }
+
+    function renderRunner(r) {
+      const el = document.getElementById('runner-status');
+      if (!r) { el.innerHTML = '<div class="error">No runner data available.</div>'; return; }
+      if (r.healthy) {
+        el.innerHTML = `<div class="run-item">
+          <div>
+            <div class="run-name">🟢 Runner online</div>
+            <div class="run-meta">${r.online}/${r.total} online · ${r.busy ? 'busy' : 'idle'}</div>
+          </div>
+          <span class="status-badge passing">Healthy</span>
+        </div>`;
+      } else {
+        el.innerHTML = `<div class="run-item" style="border-left-color:var(--danger)">
+          <div>
+            <div class="run-name">🔴 Runner offline</div>
+            <div class="run-meta">${escapeHtml(r.error || 'no online runners')} — dispatched /agent, /merge, /close silently no-op (see #115)</div>
+          </div>
+          <span class="status-badge failing">Down</span>
+        </div>`;
+      }
+    }
+
+    function updateRunnerBanner(r) {
+      const b = document.getElementById('runner-banner');
+      if (r && r.healthy === false) {
+        b.textContent = '⚠ Self-hosted runner is OFFLINE — dispatched GitHub commands (/agent, /merge, /close) will not run until it is back (see #115).';
+        b.classList.add('show');
+      } else {
+        b.classList.remove('show');
+      }
+    }
+
+    function renderPRs(data) {
+      const el = document.getElementById('pr-list');
+      if (data.prsError) { el.innerHTML = '<div class="error">Failed to load PRs: ' + escapeHtml(data.prsError) + '</div>'; return; }
+      if (!data.prs || !data.prs.length) { el.innerHTML = '<div class="no-runs">No open pull requests.</div>'; return; }
+      el.innerHTML = data.prs.map(p => {
+        const badges = [];
+        if (p.draft) badges.push('<span class="status-badge draft">Draft</span>');
+        if (p.checks && p.checks !== 'none') badges.push(`<span class="status-badge ${p.checks}">${p.checks}</span>`);
+        if (p.reviewDecision) {
+          const cls = p.reviewDecision === 'APPROVED' ? 'passing' : (p.reviewDecision === 'CHANGES_REQUESTED' ? 'failing' : 'pending');
+          badges.push(`<span class="status-badge ${cls}">${escapeHtml(p.reviewDecision.replace(/_/g, ' '))}</span>`);
+        }
+        return `<div class="run-item">
+          <div>
+            <div class="run-name">#${p.number} ${escapeHtml(p.title)}</div>
+            <div class="run-meta">${escapeHtml(p.branch || '')}</div>
+            <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">${badges.join('')}</div>
+          </div>
+          <a class="btn-action" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open ↗</a>
+        </div>`;
+      }).join('');
     }
 
     function setHarness(h) {
@@ -826,7 +1094,16 @@
       const container = document.getElementById('sessions-list');
       try {
         const data = await api('/sessions');
-        document.getElementById('val-active-runs').textContent = (data.sessions || []).filter(s => s.status === 'running' || s.status === 'spawning').length;
+        const active = data.sessions || [];
+        document.getElementById('val-active-runs').textContent = active.filter(s => s.status === 'running' || s.status === 'spawning').length;
+
+        // Detect sessions that finished since the last poll → notify.
+        const curMap = {};
+        active.forEach(s => { curMap[s.id] = s.harness === 'agy' ? 'Antigravity' : 'Claude: ' + (s.agent || 'Agent').toUpperCase(); });
+        Object.keys(prevSessionMap).forEach(id => {
+          if (!(id in curMap)) notify('Session finished', prevSessionMap[id] + ' completed');
+        });
+        prevSessionMap = curMap;
 
         if (!data.sessions || data.sessions.length === 0) {
           container.innerHTML = '<div class="no-runs">No active agent sessions running.</div>';
@@ -913,6 +1190,13 @@
           body: JSON.stringify(payload)
         });
 
+        pushRecent({
+          harness: currentHarness,
+          repo,
+          agent: currentHarness === 'claude' ? agent : null,
+          model: currentHarness === 'agy' ? model : null,
+          prompt,
+        });
         document.getElementById('prompt-input').value = '';
         alert('Session dispatched successfully! ID: ' + data.id);
         loadSessions();
@@ -1152,11 +1436,15 @@
     }
 
     // Initialize Page
+    updateAlertsBtn();
+    renderTemplateChips();
+    renderRecentChips();
     loadRepos();
     loadCost();
     loadSessions();
     loadRuns();
     loadHealth();
+    loadPipelines();   // populates runner-down banner even before opening the tab
 
     // Auto-refresh loops
     setInterval(() => {
@@ -1166,6 +1454,7 @@
     }, 15000);
 
     setInterval(loadCost, 90000);
+    setInterval(loadPipelines, 60000);  // runner health + PRs (hits gh, slower cadence)
   </script>
 </body>
 </html>
