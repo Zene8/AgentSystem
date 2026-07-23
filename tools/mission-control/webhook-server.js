@@ -559,6 +559,11 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { status: 'dispatched', ...run, agent: route.agent, event });
   }
 
+  // GET /favicon.ico — no auth; browsers auto-request it and 401s spam the console
+  if (req.method === 'GET' && path === '/favicon.ico') {
+    res.writeHead(204); res.end(); return;
+  }
+
   // All other routes need Bearer auth
   if (!checkAuth(req)) {
     recordAuthFail(clientIp);

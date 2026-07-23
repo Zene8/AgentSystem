@@ -780,16 +780,16 @@
             <div class="session-item">
               <div>
                 <div class="session-name">
-                  \${name}
-                  <span class="status-badge \${s.status}">\${s.status}</span>
+                  ${name}
+                  <span class="status-badge ${s.status}">${s.status}</span>
                 </div>
                 <div class="session-meta" style="font-size:12px; color:var(--text-secondary); margin-top:2px;">
-                  Repo: \${(s.repo || 'unknown').toUpperCase()} | ID: \${s.id}
+                  Repo: ${(s.repo || 'unknown').toUpperCase()} | ID: ${s.id}
                 </div>
               </div>
               <div style="display:flex; gap:6px;">
-                <button class="btn-action" onclick="viewLogStream('\${s.id}', '\${name}')">Logs</button>
-                \${running ? `<button class="btn-action btn-stop" onclick="stopSession('\${s.id}')">Stop</button>` : ''}
+                <button class="btn-action" onclick="viewLogStream('${s.id}', '${name}')">Logs</button>
+                ${running ? `<button class="btn-action btn-stop" onclick="stopSession('${s.id}')">Stop</button>` : ''}
               </div>
             </div>
           `;
@@ -813,10 +813,10 @@
           return `
             <div class="run-item">
               <div>
-                <div class="run-name">👤 \${r.agent.toUpperCase()}</div>
-                <div class="run-meta">Started at \${date} | ID: \${r.id}</div>
+                <div class="run-name">👤 ${r.agent.toUpperCase()}</div>
+                <div class="run-meta">Started at ${date} | ID: ${r.id}</div>
               </div>
-              <button class="btn-action" onclick="viewLogStream('\${r.id}', '\${r.agent}')">Read Logs</button>
+              <button class="btn-action" onclick="viewLogStream('${r.id}', '${r.agent}')">Read Logs</button>
             </div>
           `;
         }).join('');
@@ -883,7 +883,7 @@
     async function viewLogStream(id, name) {
       const modal = document.getElementById('log-modal');
       const terminal = document.getElementById('log-terminal');
-      document.getElementById('log-modal-title').textContent = `Logs: \${name} (\${id})`;
+      document.getElementById('log-modal-title').textContent = `Logs: ${name} (${id})`;
       
       modal.style.display = 'flex';
       terminal.textContent = 'Reading tail logs...';
@@ -929,10 +929,10 @@
           return;
         }
         container.innerHTML = data.scratchpads.map(s => `
-          <div class="repo-item" onclick="viewScratchpad('\${s.project}', '\${s.issue}')">
+          <div class="repo-item" onclick="viewScratchpad('${s.project}', '${s.issue}')">
             <div>
-              <div class="repo-name">🔧 \${s.project} / Issue #\${s.issue}</div>
-              <div class="repo-path" style="font-size:11px;">\${s.path.split('/').pop()}</div>
+              <div class="repo-name">🔧 ${s.project} / Issue #${s.issue}</div>
+              <div class="repo-path" style="font-size:11px;">${s.path.split('/').pop()}</div>
             </div>
             <span style="font-size:12px; color:var(--neon-blue);">View &rarr;</span>
           </div>
@@ -948,13 +948,13 @@
     async function viewScratchpad(project, issue) {
       activeProject = project;
       activeIssue = issue;
-      document.getElementById('scratchpad-viewer-title').textContent = `🔧 \${project} / Issue #\${issue}`;
+      document.getElementById('scratchpad-viewer-title').textContent = `🔧 ${project} / Issue #${issue}`;
       document.getElementById('scratchpad-viewer').style.display = 'block';
       const container = document.getElementById('scratchpad-body');
       container.innerHTML = '<div class="loading">Fetching scratchpad...</div>';
       
       try {
-        const r = await fetch(`/scratchpad?project=\${project}&issue=\${issue}`, {
+        const r = await fetch(`/scratchpad?project=${project}&issue=${issue}`, {
           headers: { 'Authorization': 'Bearer ' + KEY }
         });
         if (r.ok) {
@@ -1044,20 +1044,20 @@
       resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
       
       try {
-        const data = await api(`/memory/search?agent=\${agent}&query=\${encodeURIComponent(query)}`);
+        const data = await api(`/memory/search?agent=${agent}&query=${encodeURIComponent(query)}`);
         if (!data.results || data.results.length === 0) {
           resultsDiv.innerHTML = '<div class="no-runs">No matching memory nodes found.</div>';
           return;
         }
         
         resultsDiv.innerHTML = data.results.map(r => `
-          <div class="repo-item" onclick="loadMemoryFile('\${r.path.replace(/\\\\/g, "/")}')">
+          <div class="repo-item" onclick="loadMemoryFile('${r.path.replace(/\\\\/g, "/")}')">
             <div>
-              <div class="repo-name">🧠 \${r.file}</div>
-              <div class="repo-path" style="font-size:11px; word-break:break-all;">Path: \${r.path}</div>
+              <div class="repo-name">🧠 ${r.file}</div>
+              <div class="repo-path" style="font-size:11px; word-break:break-all;">Path: ${r.path}</div>
             </div>
             <div style="text-align:right;">
-              <span class="status-badge running" style="margin-left:0; font-size:11px;">Score: \${r.score.toFixed(2)}</span>
+              <span class="status-badge running" style="margin-left:0; font-size:11px;">Score: ${r.score.toFixed(2)}</span>
             </div>
           </div>
         `).join('');
@@ -1076,7 +1076,7 @@
       body.innerHTML = '<div class="loading">Loading file...</div>';
       
       try {
-        const r = await fetch(`/memory/file?path=\${encodeURIComponent(filePath)}`, {
+        const r = await fetch(`/memory/file?path=${encodeURIComponent(filePath)}`, {
           headers: { 'Authorization': 'Bearer ' + KEY }
         });
         if (r.ok) {
