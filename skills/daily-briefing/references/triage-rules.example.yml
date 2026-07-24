@@ -1,0 +1,37 @@
+# Auto-triage rules for the daily-briefing skill.
+# Copy to ~/life/triage-rules.yml and edit. Missing file => everything is suggest-only (dry-run).
+#
+# Evaluation: first matching rule wins, top to bottom. No match => FYI, no action.
+# mode: suggest  -> only proposed in the briefing, never acted on (safe default).
+# mode: auto     -> acted on automatically. Irreversible actions (send/archive) also
+#                   require the per-action allow flag below.
+
+defaults:
+  mode: suggest          # global default until you trust it; flip individual rules to auto
+  allow_send: false      # master kill-switch for sending email to humans
+  allow_archive: false   # master kill-switch for archiving/removing from inbox
+
+rules:
+  - name: newsletters
+    match:               # all conditions must hold
+      from_contains: ["newsletter@", "noreply@", "no-reply@"]
+    action: archive      # archive | label:<name> | draft-reply | none
+    mode: suggest        # -> set auto once you trust it (needs allow_archive: true)
+
+  - name: receipts-and-invoices
+    match:
+      subject_contains: ["receipt", "invoice", "payment"]
+    action: label:Finance
+    mode: suggest
+
+  - name: recruiter-spam
+    match:
+      subject_contains: ["opportunity", "reaching out", "quick chat"]
+    action: archive
+    mode: suggest
+
+  # Example of a trusted auto rule (still won't send unless allow_send: true above):
+  # - name: internal-standup-drafts
+  #   match: { from_contains: ["team@arborgenie.com"] }
+  #   action: draft-reply
+  #   mode: auto

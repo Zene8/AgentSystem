@@ -1,0 +1,76 @@
+---
+name: daily-briefing
+description: >
+  Life-OS morning rundown. Reads inbox + calendar (via MCP connectors: Gmail,
+  Microsoft 365, Google Calendar, Google Chat), open GitHub work-items, PRs/CI,
+  and the life repo's current objectives — then writes a prioritised briefing to
+  ~/life/briefings/YYYY-MM-DD.md and prints it. Triggers on "daily briefing",
+  "life brief", "morning rundown", "check my comms", "/daily-briefing".
+  Read-only by default; auto-triage is opt-in and gated (see step 4).
+---
+
+Gather deterministically first, summarise second. This is the life-scoped
+superset of the dev-only `standup` skill — reuse its `gh` gather block verbatim
+for the GitHub sections.
+
+Life repo lives at `~/life` (override with `$LIFE_REPO`). If it doesn't exist,
+tell the user to run the life-os skeleton setup and stop.
+
+## 1. Anchor — what does today serve?
+
+Read, in order, and keep the raw text:
+- `~/life/identity/objectives.md` → "This week's focus" + quarter objectives
+- Active projects: `~/life/projects/*/project.md` where `Status: active`
+
+Every later section is ranked by how it moves these. Anything that conflicts
+with `~/life/identity/values.md` gets flagged in step 3.
+
+## 2. Gather (all read-only; run in parallel where possible)
+
+**Comms — MCP connectors.** Only call connectors that are actually available
+this session (they may be absent in headless/cron runs — if so, mark that
+section "unavailable: connector offline" and continue, don't guess):
+- Gmail: `search_threads` with `newer_than:1d is:unread` and `newer_than:2d is:important` → subjects, senders, snippets. One pass per connected account.
+- Microsoft 365 mail: same intent via the M365 connector (authenticate first if it returns unauthenticated).
+- Google Calendar: `list_events` for today + tomorrow → times, titles, attendees, conflicts.
+- Google Chat: `list_messages` / unread mentions (optional; skip if noisy).
+
+**GitHub — reuse `standup` gather block:**
+```bash
+gh issue list --state=open --assignee=@me --json number,title,labels,updatedAt,repository
+gh pr list --search "assignee:@me" --state=open --json number,title,statusCheckRollup,updatedAt
+gh pr list --search "assignee:@me" --state=merged --json number,title,mergedAt --limit 10
+```
+Work-items due/started = open issues labeled `work-item`/`feature`/`epic` on repos
+named in active `project.md` files. Blockers = open PRs with a `FAILURE`/`ERROR`
+check, or any calendar conflict, or any "important" unread older than 2 days.
+
+## 3. Write the briefing
+
+Write to `~/life/briefings/$(date +%F).md` (this file is gitignored by default).
+Sections, in this fixed priority order — omit a section only if genuinely empty:
+
+1. **Today serves** — this week's focus + the 1–3 objectives today should move.
+2. **Calendar** — today's events chronologically; flag conflicts + prep needed.
+3. **Inbox — action needed** — messages needing a reply/decision, most urgent first, grouped by account. Each: sender, one-line ask, suggested next action.
+4. **Inbox — FYI** — everything else unread, one line each.
+5. **Work-items** — GitHub issues due/started on active projects, grouped by project.
+6. **PRs / CI** — anything waiting on you; failing CI first.
+7. **Flags** — anything conflicting with values/objectives, or dropped balls (stale important mail, overdue work-items).
+
+Keep it skimmable. Then print the same brief to the user.
+
+## 4. Auto-triage — OPT-IN, GATED (default: OFF)
+
+Do **not** send, archive, label, or reply to anything unless BOTH are true:
+1. `~/life/triage-rules.yml` exists and defines the rule that matches, and
+2. that rule's `mode` is `auto` (else the rule is `suggest` → propose only).
+
+If `triage-rules.yml` is missing or a rule is `suggest`, produce a **dry-run
+plan** in the briefing under "Proposed triage" — "would archive X, would draft
+reply to Y" — and take no action. Sending email and archiving are irreversible;
+never act on an unmatched or `suggest` rule. See `references/triage-rules.example.yml`.
+
+Never auto-send a reply to a human unless a matching rule is explicitly
+`mode: auto` AND `allow_send: true`. Drafts (`create_draft`) are safe and
+preferred — they wait for the user in Gmail.
