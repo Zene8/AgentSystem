@@ -11,6 +11,15 @@ defaults:
   allow_send: false      # master kill-switch for sending email to humans
   allow_archive: false   # master kill-switch for archiving/removing from inbox
 
+# AUTO-SEND is the one irreversible action with a hard extra gate. A reply is sent
+# automatically ONLY when ALL of: the matched rule is mode:auto AND allow_send:true
+# AND the recipient is in trusted_senders below. Anyone not listed => draft only.
+# Empty list = auto-send disabled entirely (the safe default). Add addresses you
+# genuinely trust an agent to reply to on your behalf.
+trusted_senders: []
+  # - chris@arborgenie.com
+  # - team@arborgenie.com
+
 rules:
   - name: newsletters
     match:               # all conditions must hold
