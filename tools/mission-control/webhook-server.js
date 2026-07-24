@@ -44,6 +44,8 @@ const LOG_DIR   = `${HOME}/.claude/agent-runs`;
 const COST_LOG  = `${HOME}/agent-memory/nexus/session-log.jsonl`;
 const KNOWN_REPOS_FILE = `${HOME}/agent-memory/nexus/known-repos.json`;
 const MC_REGISTRY_FILE = `${HOME}/.claude/mission-control-registry.json`;
+// Repo whose PRs + self-hosted runner health the /pipelines endpoint reports on.
+const GH_REPO   = process.env.GH_REPO || 'Zene8/AgentSystem';
 const PORT      = parseInt(process.env.PORT || '8765');
 const GH_SECRET = process.env.GITHUB_WEBHOOK_SECRET || '';
 // PUBLIC_URL: externally-reachable base URL (e.g. behind a reverse proxy or
@@ -450,10 +452,103 @@ function panelHTML(key) {
   const htmlPath = path.join(dir, 'panel.html');
   try {
     const raw = readFileSync(htmlPath, 'utf8');
-    return raw.replace('${key}', key);
+    return raw.replaceAll('${key}', key);
   } catch (err) {
     return `<!DOCTYPE html><html><body>Error loading panel template: ${err.message}</body></html>`;
   }
+}
+
+// ── PWA assets (installable home-screen app) ──────────────────────────────────
+const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="#0a152e"/><path d="M300 56 150 288h92l-42 168 214-256H316z" fill="#ff6933"/></svg>`;
+
+const SW_JS = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', () => {});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window' }).then((cs) => {
+    for (const c of cs) { if ('focus' in c) return c.focus(); }
+  }));
+});`;
+
+function manifest(key) {
+  return {
+    name: 'Mission Control',
+    short_name: 'Mission Ctl',
+    description: 'Agent dispatch & fleet control',
+    start_url: `/panel?key=${key}`,
+    scope: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#0a152e',
+    theme_color: '#0a152e',
+    icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+  };
+}
+
+// ── Pipelines: self-hosted runner health + open PRs (read-only gh) ────────────
+function runGh(args, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    let out = '', err = '';
+    const child = spawn('gh', args, { env: { ...process.env, HOME } });
+    const t = setTimeout(() => { child.kill(); resolve({ ok: false, error: 'gh timed out' }); }, timeoutMs);
+    child.stdout?.on('data', d => out += d);
+    child.stderr?.on('data', d => err += d);
+    child.on('close', code => { clearTimeout(t); code === 0 ? resolve({ ok: true, out }) : resolve({ ok: false, error: (err.trim() || `gh exited ${code}`) }); });
+    child.on('error', e => { clearTimeout(t); resolve({ ok: false, error: e.message }); });
+  });
+}
+
+function rollupState(rollup) {
+  if (!Array.isArray(rollup) || rollup.length === 0) return 'none';
+  let fail = 0, pending = 0;
+  for (const c of rollup) {
+    const s = (c.conclusion || c.state || c.status || '').toUpperCase();
+    if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED'].includes(s)) fail++;
+    else if (['PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED', ''].includes(s)) pending++;
+  }
+  if (fail) return 'failing';
+  if (pending) return 'pending';
+  return 'passing';
+}
+
+async function getPipelines() {
+  const result = { repo: GH_REPO, runner: null, prs: [], generatedAt: new Date().toISOString() };
+
+  const r1 = await runGh(['api', `repos/${GH_REPO}/actions/runners`]);
+  if (r1.ok) {
+    try {
+      const runners = JSON.parse(r1.out).runners || [];
+      const online = runners.filter(x => x.status === 'online');
+      result.runner = {
+        healthy: online.length > 0,
+        total: runners.length,
+        online: online.length,
+        busy: runners.some(x => x.busy),
+      };
+    } catch { result.runner = { healthy: false, error: 'failed to parse runner status' }; }
+  } else {
+    result.runner = { healthy: false, error: r1.error };
+  }
+
+  const r2 = await runGh(['pr', 'list', '--repo', GH_REPO, '--limit', '20', '--json',
+    'number,title,url,isDraft,reviewDecision,statusCheckRollup,headRefName']);
+  if (r2.ok) {
+    try {
+      result.prs = JSON.parse(r2.out).map(p => ({
+        number: p.number,
+        title: p.title,
+        url: p.url,
+        draft: p.isDraft,
+        branch: p.headRefName,
+        reviewDecision: p.reviewDecision || null,
+        checks: rollupState(p.statusCheckRollup),
+      }));
+    } catch { result.prsError = 'failed to parse PR list'; }
+  } else {
+    result.prsError = r2.error;
+  }
+  return result;
 }
 
 // ── GitHub webhook router ─────────────────────────────────────────────────────
@@ -559,6 +654,22 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { status: 'dispatched', ...run, agent: route.agent, event });
   }
 
+  // GET /favicon.ico — no auth; browsers auto-request it and 401s spam the console
+  if (req.method === 'GET' && path === '/favicon.ico') {
+    res.writeHead(204); res.end(); return;
+  }
+
+  // PWA static assets — no auth (contain no secrets); the browser fetches the
+  // service worker and icon without the bearer key.
+  if (req.method === 'GET' && path === '/icon.svg') {
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'max-age=86400' });
+    res.end(ICON_SVG); return;
+  }
+  if (req.method === 'GET' && path === '/sw.js') {
+    res.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-cache' });
+    res.end(SW_JS); return;
+  }
+
   // All other routes need Bearer auth
   if (!checkAuth(req)) {
     recordAuthFail(clientIp);
@@ -578,6 +689,17 @@ const server = http.createServer(async (req, res) => {
   // GET /panel — mobile control panel
   if (req.method === 'GET' && path === '/panel') {
     return html(res, panelHTML(SECRET));
+  }
+
+  // GET /manifest.webmanifest — PWA manifest (auth'd: start_url embeds the key)
+  if (req.method === 'GET' && path === '/manifest.webmanifest') {
+    res.writeHead(200, { 'Content-Type': 'application/manifest+json' });
+    return res.end(JSON.stringify(manifest(SECRET)));
+  }
+
+  // GET /pipelines — self-hosted runner health + open PRs (for the Pipelines tab)
+  if (req.method === 'GET' && path === '/pipelines') {
+    return json(res, 200, await getPipelines());
   }
 
   // GET /repos — list spawnable repos
