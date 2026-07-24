@@ -19,11 +19,11 @@ tell the user to run the life-os skeleton setup and stop.
 ## 1. Anchor — what does today serve?
 
 Read, in order, and keep the raw text:
-- `~/life/identity/objectives.md` → "This week's focus" + quarter objectives
-- Active projects: `~/life/projects/*/project.md` where `Status: active`
+- `~/life/now.md` → current "This week's focus" + near-term (this quarter/year) outcomes
+- Active projects (any depth in the tree): `~/life/objectives/**/project.md` where `Status: active`
 
 Every later section is ranked by how it moves these. Anything that conflicts
-with `~/life/identity/values.md` gets flagged in step 3.
+with `~/life/values.md` gets flagged in step 3.
 
 ## 2. Gather (all read-only; run in parallel where possible)
 
@@ -39,15 +39,17 @@ continue, don't guess):
 - Google Calendar: `list_events` for today + tomorrow → times, titles, attendees, conflicts.
 - Google Chat: `list_messages` / unread mentions (optional; skip if noisy).
 
-**GitHub — reuse `standup` gather block:**
+**GitHub — cross-repo via `gh search`** (needs a user-authed token; `gh issue list`
+is single-repo and has no `repository` field — don't use it here):
 ```bash
-gh issue list --state=open --assignee=@me --json number,title,labels,updatedAt,repository
-gh pr list --search "assignee:@me" --state=open --json number,title,statusCheckRollup,updatedAt
-gh pr list --search "assignee:@me" --state=merged --json number,title,mergedAt --limit 10
+gh search issues --assignee=@me --state=open --json number,title,repository,updatedAt --limit 30
+gh search prs --author=@me --state=open --json number,title,repository,url --limit 30
 ```
-Work-items due/started = open issues labeled `work-item`/`feature`/`epic` on repos
-named in active `project.md` files. Blockers = open PRs with a `FAILURE`/`ERROR`
-check, or any calendar conflict, or any "important" unread older than 2 days.
+If `gh` is offline or the token lacks user scope (`gh api user` → 401), mark the
+GitHub section "unavailable" — note that GitHub notifications also arrive in the
+hub inbox, so they're partly covered there. Work-items due/started = open issues
+labeled `work-item`/`feature`/`epic` on repos named in active `project.md` files.
+Blockers = failing PR checks, calendar conflicts, or "important" unread >2 days old.
 
 ## 3. Write the briefing
 

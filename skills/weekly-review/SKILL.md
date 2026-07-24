@@ -18,8 +18,8 @@ tell the user to run the life-os skeleton setup and stop.
 ## 1. Anchor — what did this week serve?
 
 Read and keep the raw text:
-- `~/life/identity/objectives.md` → current "This week's focus" + quarter objectives
-- Active projects: `~/life/projects/*/project.md` where `Status: active` — note each project's GitHub `owner/repo`.
+- `~/life/now.md` → current "This week's focus" + quarter objectives
+- Active projects (any depth): `~/life/objectives/**/project.md` where `Status: active` — note each project's GitHub `owner/repo`.
 
 Every section below is measured against these.
 
@@ -32,11 +32,11 @@ ls ~/life/briefings/*.md | tail -7
 These are the ground truth for what happened day-to-day; mine them for
 commitments made and dropped.
 
-**GitHub — closed/merged in the last 7 days:**
+**GitHub — cross-repo via `gh search` (last 7 days):**
 ```bash
-gh issue list --state=closed --assignee=@me --search "closed:>=$(date -d '7 days ago' +%F)" --json number,title,labels,closedAt,repository
-gh pr list --search "assignee:@me merged:>=$(date -d '7 days ago' +%F)" --state=merged --json number,title,mergedAt,repository
-gh issue list --state=open --assignee=@me --json number,title,labels,updatedAt,repository
+gh search issues --assignee=@me --state=closed --json number,title,repository,closedAt "closed:>=$(date -d '7 days ago' +%F)"
+gh search prs --author=@me --state=merged --json number,title,repository "merged:>=$(date -d '7 days ago' +%F)"
+gh search issues --assignee=@me --state=open --json number,title,repository,updatedAt --limit 50
 ```
 Moved = closed work-items + merged PRs. Stalled = open issues labeled
 `work-item`/`feature`/`epic` whose `updatedAt` is 7+ days old.
@@ -59,8 +59,7 @@ Keep it skimmable.
 ## 4. Update objectives — PROPOSE, then confirm (default: no write)
 
 The proposed "This week's focus" in section 4 is a **proposal only**. Do
-**not** edit `~/life/identity/objectives.md` until the user explicitly
-confirms the new focus. Ask: "Update this week's focus to the above?" and
-wait. Only on a yes, replace the "This week's focus" block in
-`objectives.md` — leave quarter objectives untouched. Never silently rewrite
-objectives.
+**not** edit `~/life/now.md` until the user explicitly confirms the new focus.
+Ask: "Update this week's focus to the above?" and wait. Only on a yes, replace
+the "This week's focus" block in `now.md` — leave the quarter/year outcomes
+untouched. Never silently rewrite the near-term plan.

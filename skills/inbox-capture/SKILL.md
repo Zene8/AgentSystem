@@ -25,9 +25,10 @@ task). Drop pure FYI/newsletters.
 
 ## 2. Match each message to a project
 
-Read active projects and their GitHub targets:
+Read active projects and their GitHub targets (projects live at any depth in the
+objectives tree):
 ```bash
-grep -l 'Status: active' ~/life/projects/*/project.md
+grep -rl 'Status: active' ~/life/objectives --include=project.md
 ```
 For each `project.md`, read the GitHub `owner/repo` field. Match a message to
 a project by sender domain, subject keywords, or project name. If a message
