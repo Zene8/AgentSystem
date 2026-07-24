@@ -25,14 +25,11 @@ task). Drop pure FYI/newsletters.
 
 ## 2. Match each message to a project
 
-Read active projects and their GitHub targets (projects live at any depth in the
-objectives tree):
-```bash
-grep -rl 'Status: active' ~/life/objectives --include=project.md
-```
-For each `project.md`, read the GitHub `owner/repo` field. Match a message to
-a project by sender domain, subject keywords, or project name. If a message
-matches no project or is ambiguous, don't guess — flag it and ask which repo.
+Query the **Notion Projects** data source (`b8e1ee15-ba07-438c-bed9-a5865dbacdf9`,
+via `notion-query-data-sources`) for `Status = active`, and read each project's
+`GitHub` link. Match a message to a project by sender domain, subject keywords,
+or project name. If a message matches no project, is ambiguous, or the matched
+project has no `GitHub` link set yet, don't guess — flag it and ask which repo.
 
 ## 3. Propose issues — DRY-RUN (default)
 

@@ -17,9 +17,11 @@ tell the user to run the life-os skeleton setup and stop.
 
 ## 1. Anchor — what did this week serve?
 
-Read and keep the raw text:
-- `~/life/now.md` → current "This week's focus" + quarter objectives
-- Active projects (any depth): `~/life/objectives/**/project.md` where `Status: active` — note each project's GitHub `owner/repo`.
+Read from **Notion** (source of truth; home `3a7e23f1-17bd-819c-a3e3-cd262e8d0c60`) via the Notion MCP:
+- **Now** page (`3a7e23f1-17bd-81eb-9d01-e0ba99fbf5f1`) → current "This week's focus" + quarter/year outcomes.
+- **Projects** data source (`b8e1ee15-ba07-438c-bed9-a5865dbacdf9`), `Status = active` — note each project's `GitHub` link.
+
+Fall back to the dormant `~/life` git mirror only if the Notion MCP is unavailable.
 
 Every section below is measured against these.
 
@@ -46,8 +48,9 @@ If any `gh` call fails (offline, rate-limited), mark that section
 
 ## 3. Write the review
 
-Write to `~/life/reviews/$(date +%G-W%V).md` and print the same to the user.
-Sections, in this fixed order — omit one only if genuinely empty:
+Create a Notion page titled `Review <YYYY-Www>` under the Life OS home
+(`notion-create-pages`, parent page_id `3a7e23f1-17bd-819c-a3e3-cd262e8d0c60`) and
+print the same to the user. Sections, in this fixed order — omit one only if genuinely empty:
 
 1. **What moved** — closed work-items + merged PRs, grouped by project.
 2. **What stalled** — open work-items untouched 7+ days, grouped by project, with age.
@@ -59,7 +62,8 @@ Keep it skimmable.
 ## 4. Update objectives — PROPOSE, then confirm (default: no write)
 
 The proposed "This week's focus" in section 4 is a **proposal only**. Do
-**not** edit `~/life/now.md` until the user explicitly confirms the new focus.
-Ask: "Update this week's focus to the above?" and wait. Only on a yes, replace
-the "This week's focus" block in `now.md` — leave the quarter/year outcomes
-untouched. Never silently rewrite the near-term plan.
+**not** edit the Notion **Now** page until the user explicitly confirms the new
+focus. Ask: "Update this week's focus to the above?" and wait. Only on a yes,
+update the "This week's focus" section of the Now page
+(`3a7e23f1-17bd-81eb-9d01-e0ba99fbf5f1`, via `notion-update-page`) — leave the
+quarter/year outcomes untouched. Never silently rewrite the near-term plan.

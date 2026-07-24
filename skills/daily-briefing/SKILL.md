@@ -10,20 +10,21 @@ description: >
 ---
 
 Gather deterministically first, summarise second. This is the life-scoped
-superset of the dev-only `standup` skill — reuse its `gh` gather block verbatim
-for the GitHub sections.
+superset of the dev-only `standup` skill.
 
-Life repo lives at `~/life` (override with `$LIFE_REPO`). If it doesn't exist,
-tell the user to run the life-os skeleton setup and stop.
+**Source of truth = the Notion "Life OS"** (home page `3a7e23f1-17bd-819c-a3e3-cd262e8d0c60`).
+The `~/life` git repo is a dormant backup only — read it just as a fallback.
 
-## 1. Anchor — what does today serve?
+## 1. Anchor — what does today serve? (read from Notion)
 
-Read, in order, and keep the raw text:
-- `~/life/now.md` → current "This week's focus" + near-term (this quarter/year) outcomes
-- Active projects (any depth in the tree): `~/life/objectives/**/project.md` where `Status: active`
+Via the Notion MCP (`notion-fetch`, `notion-query-data-sources`):
+- **Now** page (`3a7e23f1-17bd-81eb-9d01-e0ba99fbf5f1`) → this week's focus + quarter/year outcomes.
+- **Projects** data source (`b8e1ee15-ba07-438c-bed9-a5865dbacdf9`), rows where `Status = active` → active projects + their Goal/Objective relation + `GitHub` link.
+- **Values** page (`3a7e23f1-17bd-81cb-b5c6-e333c5f4f285`) → for the value-alignment flags in step 3.
 
-Every later section is ranked by how it moves these. Anything that conflicts
-with `~/life/values.md` gets flagged in step 3.
+If the Notion MCP is unavailable this session (headless/cron), fall back to the
+`~/life` git mirror (`now.md`, `objectives/**/project.md`, `values.md`) and note
+it may be stale. Every later section is ranked by how it moves the focus + active projects.
 
 ## 2. Gather (all read-only; run in parallel where possible)
 
@@ -48,7 +49,8 @@ gh search prs --author=@me --state=open --json number,title,repository,url --lim
 If `gh` is offline or the token lacks user scope (`gh api user` → 401), mark the
 GitHub section "unavailable" — note that GitHub notifications also arrive in the
 hub inbox, so they're partly covered there. Work-items due/started = open issues
-labeled `work-item`/`feature`/`epic` on repos named in active `project.md` files.
+labeled `work-item`/`feature`/`epic` on the repos in the `GitHub` field of the
+active Notion projects (from step 1).
 Blockers = failing PR checks, calendar conflicts, or "important" unread >2 days old.
 
 ## 3. Write the briefing
