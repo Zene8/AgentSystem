@@ -27,9 +27,13 @@ with `~/life/identity/values.md` gets flagged in step 3.
 
 ## 2. Gather (all read-only; run in parallel where possible)
 
-**Comms — MCP connectors.** Only call connectors that are actually available
-this session (they may be absent in headless/cron runs — if so, mark that
-section "unavailable: connector offline" and continue, don't guess):
+**Comms — MCP connectors.** The canonical account set + priority lives in
+`~/life/accounts.md`. Each connector is authed to ONE account at a time — pull
+from whatever each is currently signed into, order by the priority in
+`accounts.md`, and mark any listed account the connector can't reach this
+session as "not connected". Only call connectors actually available this session
+(absent in headless/cron — if so, mark "unavailable: connector offline" and
+continue, don't guess):
 - Gmail: `search_threads` with `newer_than:1d is:unread` and `newer_than:2d is:important` → subjects, senders, snippets. One pass per connected account.
 - Microsoft 365 mail: same intent via the M365 connector (authenticate first if it returns unauthenticated).
 - Google Calendar: `list_events` for today + tomorrow → times, titles, attendees, conflicts.
