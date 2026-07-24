@@ -1,0 +1,20 @@
+# Mission Control self-update — systemd oneshot TEMPLATE.
+#
+# Do NOT install verbatim. install-local.sh --with-auto-update substitutes the
+# __PLACEHOLDER__ tokens and installs it alongside mission-control-update.timer.
+# In system mode this runs as root (so it can restart the system webhook unit and
+# sudo to the deploy user for git); in user mode it runs as the deploy user.
+[Unit]
+Description=Mission Control self-update (pull main + restart webhook)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=REPO_ROOT=__WORKDIR__
+Environment=SERVICE=claude-webhook.service
+Environment=MODE=__MODE__
+Environment=DEPLOY_USER=__USER__
+Environment=BRANCH=main
+Environment=PATH=__PATH__
+ExecStart=/bin/bash __WORKDIR__/tools/mission-control/auto-update.sh

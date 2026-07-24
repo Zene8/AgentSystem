@@ -20,6 +20,8 @@
 #   --with-runner     Also register a GitHub Actions self-hosted runner on this host
 #                     (Sam/Friday audits, /agent dispatch, cron). See install-runner.sh.
 #   --runner-token <t>  Registration token passed through to the runner installer.
+#   --with-auto-update  Install a daily systemd timer that pulls origin/main
+#                     (fast-forward only) and restarts the service. Self-updating box.
 #   -h | --help       Show this help.
 #
 # See docs/mission-control-linux-deploy.md for the full remote-server guide
@@ -41,6 +43,7 @@ INSTALL_SERVICE="yes"
 FIREWALL="no"        # open a firewall port only when binding non-loopback
 WITH_RUNNER="no"
 RUNNER_TOKEN=""
+WITH_AUTO_UPDATE="no"
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -53,7 +56,8 @@ while [ $# -gt 0 ]; do
     --no-service)   INSTALL_SERVICE="no"; shift ;;
     --with-runner)  WITH_RUNNER="yes"; shift ;;
     --runner-token) RUNNER_TOKEN="$2"; shift 2 ;;
-    -h|--help)      sed -n '2,26p' "$0"; exit 0 ;;
+    --with-auto-update) WITH_AUTO_UPDATE="yes"; shift ;;
+    -h|--help)      sed -n '2,27p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -192,6 +196,47 @@ else
   echo "  docs/mission-control-linux-deploy.md). Access key: $KEY_FILE"
 fi
 echo "================================================================="
+
+# ── Optional: daily self-update timer ──────────────────────────────────────────
+if [ "$WITH_AUTO_UPDATE" = "yes" ] && [ "$INSTALL_SERVICE" = "yes" ]; then
+  echo
+  echo "Installing daily self-update timer..."
+  UPD_SVC_TMPL="$SCRIPT_DIR/mission-control-update.service"
+  UPD_TIMER_TMPL="$SCRIPT_DIR/mission-control-update.timer"
+  render_update_unit() {
+    sed \
+      -e "s|__WORKDIR__|$REPO_ROOT|g" \
+      -e "s|__MODE__|$MODE|g" \
+      -e "s|__USER__|$(whoami)|g" \
+      -e "s|__PATH__|$SVC_PATH|g" \
+      "$UPD_SVC_TMPL"
+  }
+  if [ "$MODE" = "user" ]; then
+    UNIT_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$UNIT_DIR"
+    render_update_unit > "$UNIT_DIR/mission-control-update.service"
+    cp "$UPD_TIMER_TMPL" "$UNIT_DIR/mission-control-update.timer"
+    systemctl --user daemon-reload
+    systemctl --user enable --now mission-control-update.timer
+    echo "  timer: systemctl --user list-timers mission-control-update"
+  else
+    TMP_SVC="$(mktemp)"; render_update_unit > "$TMP_SVC"
+    sudo cp "$TMP_SVC" /etc/systemd/system/mission-control-update.service
+    sudo cp "$UPD_TIMER_TMPL" /etc/systemd/system/mission-control-update.timer
+    rm -f "$TMP_SVC"
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now mission-control-update.timer
+    echo "  timer: systemctl list-timers mission-control-update"
+  fi
+  echo "  runs daily ~04:00 -> git pull origin/main (ff-only) + restart service."
+  if [ "$MODE" = "user" ]; then
+    echo "  run once now:  systemctl --user start mission-control-update.service"
+  else
+    echo "  run once now:  sudo systemctl start mission-control-update.service"
+  fi
+elif [ "$WITH_AUTO_UPDATE" = "yes" ]; then
+  echo "  (--with-auto-update ignored: needs the systemd service, not --no-service)"
+fi
 
 # ── Optional: co-locate the GitHub Actions self-hosted runner on this host ─────
 if [ "$WITH_RUNNER" = "yes" ]; then
