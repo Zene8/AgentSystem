@@ -1,10 +1,14 @@
-# Auto-triage rules for the daily-briefing skill.
-# Copy to ~/life/triage-rules.yml and edit. Missing file => everything is suggest-only (dry-run).
+# OPTIONAL customization for the daily-briefing triage. Not required — by default
+# the skill triages into spam / actionable / FYI on its own: spam -> Trash
+# (recoverable, auto-OK), actionable -> a Notion Task, FYI -> label + summarise,
+# and email replies are NEVER auto-sent (drafts only, on request).
 #
-# Evaluation: first matching rule wins, top to bottom. No match => FYI, no action.
-# mode: suggest  -> only proposed in the briefing, never acted on (safe default).
-# mode: auto     -> acted on automatically. Irreversible actions (send/archive) also
-#                   require the per-action allow flag below.
+# Use this file only to override defaults for specific senders/subjects. Copy to
+# ~/life/triage-rules.yml and edit. Missing file => the built-in behaviour above.
+#
+# Evaluation: first matching rule wins, top to bottom. No match => built-in triage.
+# mode: suggest  -> only proposed in the digest, never acted on.
+# mode: auto     -> acted on automatically. Sending email stays gated/off (see below).
 
 defaults:
   mode: suggest          # global default until you trust it; flip individual rules to auto
