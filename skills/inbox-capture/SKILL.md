@@ -19,9 +19,12 @@ Gather deterministically first, propose second. **Source of truth = the Notion
 Only call connectors available this session. Headless/cron → absent → report
 **"connectors offline"** and stop. Never fabricate mail.
 
-- **Gmail** (hub `nathanj91905`): `search_threads` `newer_than:3d is:unread`
-  → sender, subject, snippet, thread link.
-- **Zoho/Basely**: `ZohoMail_listEmails` / `ZohoMail_SearchEmails` → same fields.
+- **Gmail** (hub `nathanj91905`) — ALL folders/labels, not just Inbox:
+  `search_threads` `newer_than:3d -in:sent -in:draft -in:trash -in:spam -in:chats`
+  (no `in:inbox` — catches filtered/labelled mail) → sender, subject, snippet, link.
+- **Zoho/Basely** (account `6906367000000002002`) — ALL folders: use
+  `ZohoMail_SearchEmails` `searchKey: "fromDate:<DD-MMM-YYYY>"` (spans Inbox +
+  Notification + Newsletter; bare `listEmails` returns only one folder).
 
 Triage each message into the three buckets:
 - **True spam** (unsolicited junk/phishing/cold outreach) → propose marking **Spam** (trains the filter — use sparingly, never on a legit sender).

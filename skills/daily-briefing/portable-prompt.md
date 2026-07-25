@@ -19,7 +19,7 @@ CONTEXT — my "Life OS" lives in Notion:
 - Projects database (data source `b8e1ee15-ba07-438c-bed9-a5865dbacdf9`): active projects each have a GitHub link. Query it for Status = active first, so you can match mail to a project.
 
 STEP 1 — Gather (only from tools you actually have; skip + note any you don't):
-- Email across my accounts (Gmail hub, Zoho/Basely): unread from the last 1–3 days — sender, subject, snippet, link.
+- Email across my accounts (Gmail hub, Zoho/Basely), last 1–3 days — sender, subject, snippet, link. IMPORTANT: sweep ALL folders/labels, not just the Inbox. Gmail: search without `in:inbox` (exclude sent/draft/trash/spam/chats), so filtered/labelled mail is included. Zoho: use SearchEmails by date (it spans Inbox + Notification + Newsletter folders); a plain folder listing misses the auto-sorted ones.
 - Calendar: today + tomorrow.
 
 STEP 2 — Triage EVERY message into exactly one bucket and act:

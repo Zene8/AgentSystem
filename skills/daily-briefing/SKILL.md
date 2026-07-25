@@ -30,11 +30,18 @@ Notion data sources:
 Only call connectors available this session. **Headless/cron → connectors
 absent → report "connectors offline", create nothing, don't guess.**
 
-- **Gmail** (hub `nathanj91905`): `search_threads` `newer_than:1d is:unread`
-  and `newer_than:2d is:important` → sender, subject, snippet, link.
-- **Zoho/Basely**: `ZohoMail_listEmails` / `ZohoMail_SearchEmails` on the
-  Basely account → same fields.
-- **Google Chat**: `list_messages` / unread mentions (optional; skip if noisy).
+- **Gmail** (hub `nathanj91905`) — **ALL folders/labels, not just Inbox.**
+  Forwarded/filtered mail often skips the Inbox straight to a label, so do NOT
+  scope to `in:inbox`. Use `search_threads` `newer_than:2d -in:sent -in:draft
+  -in:trash -in:spam -in:chats` → sender, subject, snippet, link.
+- **Zoho/Basely** (account `6906367000000002002`) — **ALL folders.** Zoho
+  auto-sorts into separate `Inbox`, `Notification`, and `Newsletter` folders (all
+  type Inbox), so a bare `ZohoMail_listEmails` only returns ONE folder and misses
+  the rest. Use `ZohoMail_SearchEmails` with `searchKey: "fromDate:<DD-MMM-YYYY>"`
+  (last ~2 days) — SearchEmails spans every folder (excludes Spam/Trash by
+  default), catching Notification + Newsletter too.
+- **Google Chat**: usually **unavailable** (Arbor Genie Workspace restricts the
+  Chat API → "not found"); attempt once, skip on error.
 - **Google Calendar**: `list_events` today + tomorrow → times, titles,
   attendees, conflicts.
 
