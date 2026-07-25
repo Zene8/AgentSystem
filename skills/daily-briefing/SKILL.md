@@ -100,8 +100,13 @@ Concise, skimmable, no file written:
 ## Safety (non-negotiable)
 
 - Spam → **Trash (recoverable)**, never permanent delete.
-- **Never auto-SEND** email replies. Drafts only (`create_draft`), and only
-  when explicitly asked. Auto-send stays disabled by default; a trusted-sender
-  allowlist could enable it later, but default off.
+- **Auto-send is allowed ONLY for evidence-grounded replies.** You may send a
+  reply automatically when BOTH hold: (a) the message asks something whose answer
+  is directly available in **Notion** (a Task/Project/Outcome/note) or **GitHub**
+  (an issue/PR/commit/status), and (b) the reply is purely that factual info — a
+  status, date, link, or confirmation — that the evidence fully supports. Cite the
+  source you used in the reply. Anything needing a decision, commitment, opinion,
+  new information, or not fully grounded → **draft only** (`create_draft`). When
+  in doubt, draft — never send.
 - Creating tasks, labelling, archiving, trashing are auto-OK.
 - Connectors absent → "connectors offline", create nothing, don't guess.
