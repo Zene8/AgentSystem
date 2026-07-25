@@ -23,7 +23,8 @@ STEP 1 — Gather (only from tools you actually have; skip + note any you don't)
 - Calendar: today + tomorrow.
 
 STEP 2 — Triage EVERY message into exactly one bucket and act:
-- SPAM/junk (promos, cold recruiters, unwanted newsletters, no-action notifications) → move to Trash (recoverable). Ignore after.
+- TRUE SPAM (unsolicited junk, phishing, cold outreach from strangers) → mark Spam so the filter learns. Use sparingly — never mark a legit sender as spam.
+- UNIMPORTANT (legit but valueless: notifications, changelogs, expected sign-in/security alerts, subscribed job blasts, delivery notices, closed-PR emails) → Delete (move to Trash, recoverable). Do NOT mark spam.
 - ACTIONABLE (needs a reply, decision, or action from me) → create a Notion Task: Name = the action (terse); Project = matched active project; Status = "Not started"; Priority = high if there's a deadline / a CEO / time-sensitive; Due = any stated date; task body = sender + subject + one-line ask + link.
 - IMPORTANT-FYI (worth knowing, no action) → summarise it in the digest and label/archive it. No task.
 

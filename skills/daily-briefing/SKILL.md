@@ -45,11 +45,14 @@ step 2 can match. Cache the list for the run.
 
 For each message across all inboxes:
 
-1. **Spam / junk** — promos, cold-recruiter spam, unwanted newsletters,
-   no-action notifications. → move to **Trash (recoverable)** or mark Spam
-   (Gmail `label_thread`/trash; Zoho `markThreadSpam`/`moveThreads` to Trash).
-   Auto-OK. Ignore afterwards.
-2. **Actionable** — needs a reply, decision, or an action from Nathan. →
+1. **True spam** — unsolicited junk, phishing, cold outreach from strangers you
+   have no relationship with. → mark **Spam** (Gmail/Zoho) so the filter learns.
+   Use **sparingly**: marking a legit sender as spam wrongly trains future mail.
+2. **Unimportant** — legit but no value to you: notifications, changelogs,
+   expected security/sign-in alerts, subscribed job blasts, delivery notices,
+   closed-PR/issue emails. → **Delete (move to Trash, recoverable)**. Do NOT mark
+   spam. Ignore afterwards.
+3. **Actionable** — needs a reply, decision, or an action from Nathan. →
    create a **Notion Task** (`notion-create-pages`, parent
    `data_source_id=de298f1e-3642-4702-a604-f57daa356ce5`):
    - `Name` = the action, terse.
@@ -60,7 +63,7 @@ For each message across all inboxes:
    - `Due` = the stated date if any.
    - Page **body** = provenance: sender, subject, one-line ask, message link.
    - Do **NOT** auto-reply.
-3. **Important but not actionable** — FYI worth knowing (a heads-up from Chris,
+4. **Important but not actionable** — FYI worth knowing (a heads-up from Chris,
    a real update). → **summarise** in the digest AND **sort** it (apply a label
    / archive). No task.
 
@@ -99,7 +102,9 @@ Concise, skimmable, no file written:
 
 ## Safety (non-negotiable)
 
-- Spam → **Trash (recoverable)**, never permanent delete.
+- **True spam → Spam label, used sparingly** (it trains the filter, so never on a
+  legit sender). Everything else unwanted → **Trash (recoverable)**. Never
+  permanent-delete.
 - **Auto-send is allowed ONLY for evidence-grounded replies.** You may send a
   reply automatically when BOTH hold: (a) the message asks something whose answer
   is directly available in **Notion** (a Task/Project/Outcome/note) or **GitHub**

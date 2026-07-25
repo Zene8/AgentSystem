@@ -24,7 +24,8 @@ Only call connectors available this session. Headless/cron → absent → report
 - **Zoho/Basely**: `ZohoMail_listEmails` / `ZohoMail_SearchEmails` → same fields.
 
 Triage each message into the three buckets:
-- **Spam/junk** → propose Trash (recoverable). Auto-OK on confirm.
+- **True spam** (unsolicited junk/phishing/cold outreach) → propose marking **Spam** (trains the filter — use sparingly, never on a legit sender).
+- **Unimportant** (legit but valueless: notifications, changelogs, sign-in alerts, job blasts, delivery notices) → propose **Delete (Trash)**, not spam.
 - **Actionable** (needs a reply/decision/action) → propose a Notion Task.
 - **FYI** (important, not actionable) → summarise + propose a label/archive.
 
