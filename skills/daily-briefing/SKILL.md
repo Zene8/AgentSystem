@@ -82,6 +82,10 @@ banking-personal → **Personal Life Management**. Recruiters / job offers →
 **Job Search**. No confident match → put under **Personal Life Management** and
 note "reassign".
 
+**Nathan's triage preferences:**
+- **Recruiting / job-board mail:** software-engineering roles → FYI (Job Search); **non-SWE** (management consulting, finance, generic blasts) → **Trash** (unimportant), no task.
+- **Side gigs** (e.g. Snorkel / expert-network work): Nathan's plate is full — treat routine side-gig mail (onboarding, office hours, admin) as **unimportant → Trash**; only make a task if it's genuinely high-value or time-critical.
+
 ## 3. Surface what's already open
 
 - **Notion Tasks** overdue or `Priority='high'` and not Done — query Tasks DS.
