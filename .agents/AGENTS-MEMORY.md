@@ -42,4 +42,7 @@ Relevant memory is auto-injected at session start via SessionStart/SubagentStart
 
 ## Historical Logs
 
-The pre-2026-06 markdown memory files are archived at `docs/archive/agents-memory/` for reference only. Do not update them — write new facts to the graph brains instead.
+The pre-2026-06 markdown memory files are gone. They were archived under `docs/archive/agents-memory/`
+and are now deleted: nothing read them, and this repo is public while those logs quoted a client's
+private issue numbers, compliance gates, and infrastructure details. Write new facts to the graph
+brains instead. Session history worth keeping lives in the brains and in git.
