@@ -42,7 +42,12 @@ Relevant memory is auto-injected at session start via SessionStart/SubagentStart
 
 ## Historical Logs
 
-The pre-2026-06 markdown memory files are gone. They were archived under `docs/archive/agents-memory/`
-and are now deleted: nothing read them, and this repo is public while those logs quoted a client's
-private issue numbers, compliance gates, and infrastructure details. Write new facts to the graph
-brains instead. Session history worth keeping lives in the brains and in git.
+The pre-2026-06 markdown memory files are gone from HEAD. They were archived under
+`docs/archive/agents-memory/` and removed in #213: nothing read them, and this repo is public
+while those logs quoted a client's private issue numbers, compliance gates, and infrastructure
+details. Write new facts to the graph brains instead.
+
+**The removal is not a scrub.** Deleting from HEAD leaves every blob reachable via `git log -p`
+or `git show <sha>:<path>`, and the repo is public — so that content is still exposed. Purging it
+needs a history rewrite and is tracked in #214. Until #214 closes, assume the client data is
+public.

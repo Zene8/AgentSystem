@@ -113,8 +113,23 @@ if [ -z "$HOST" ]; then
   # $HOME is unexpanded in the defaults so it resolves on the *target*; expand it here.
   life_resolved="$(eval echo "$LIFE_DIR")"
   if [ "$CHECK" = 1 ]; then
-    echo "check-only: local skills present. Run without --check to install into ~/.claude/skills."
-    exit 0
+    # Same two things the remote --check reports: source present (above) and installed copy
+    # present. A check that only proves the source exists says nothing about whether the 07:00
+    # job can find it.
+    gaps=0
+    for s in "${SKILLS[@]}"; do
+      if [ -f "$HOME/.claude/skills/$s/SKILL.md" ]; then
+        printf 'target ok      %s\n' "$HOME/.claude/skills/$s/SKILL.md"
+      else
+        printf 'target MISSING %s\n' "$HOME/.claude/skills/$s/SKILL.md" >&2; gaps=1
+      fi
+    done
+    for d in "$life_resolved/briefings" "$life_resolved/closeouts"; do
+      if [ -d "$d" ]; then printf 'target ok      %s\n' "$d"
+      else printf 'target MISSING %s\n' "$d" >&2; gaps=1; fi
+    done
+    [ "$gaps" = 1 ] && echo "Run without --check to install into ~/.claude/skills." >&2
+    exit "$gaps"
   fi
   run_installer "$target_root" "$life_resolved"
   echo
@@ -144,8 +159,13 @@ echo
 echo "Shipping ${#SKILLS[@]} private skills to $HOST:$REMOTE_PATH/skills/ ..."
 # --no-same-owner: the tarball is written by whatever uid packed it; the deploy user owns the
 # result on the target.
+# The path is double-quoted, not single-quoted, on purpose: $REMOTE_PATH defaults to the literal
+# text `$HOME/dev/AgentSystem` so it resolves on the *target*. Single quotes would survive the
+# local expansion and reach the remote shell as literal `$HOME`, extracting into a directory
+# actually named `$HOME` while the installer looked in the real checkout and reported the skills
+# missing.
 tar -C "$repo_root" -cf - "${SKILLS[@]/#/skills/}" \
-  | ssh "$HOST" "mkdir -p '$REMOTE_PATH' && tar -C '$REMOTE_PATH' -xf - --no-same-owner"
+  | ssh "$HOST" "mkdir -p \"$REMOTE_PATH\" && tar -C \"$REMOTE_PATH\" -xf - --no-same-owner"
 
 run_installer "$REMOTE_PATH" "$LIFE_DIR"
 
