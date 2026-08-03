@@ -48,6 +48,10 @@ say "remote  $REMOTE"
 say "files   $(find "$ROOT" -path "$ROOT/.git" -prune -o -type f -print | wc -l | tr -d ' ') on disk"
 
 # ------------------------------------------------------------------ already joined?
+#
+# This answers "was this host ever joined", not "is it up to date": it reads the locally cached
+# origin/main ref and does not fetch. Staleness is brain-sync.js's job, and fetching here would
+# make the idempotent no-op path require network.
 
 if [ -d "$ROOT/.git" ] && git -C "$ROOT" rev-parse --verify -q HEAD >/dev/null 2>&1 \
    && git -C "$ROOT" rev-parse --verify -q origin/main >/dev/null 2>&1 \
@@ -61,6 +65,9 @@ fi
 # Cheap, and the only thing standing between a bad merge and six months of accumulated facts.
 BACKUP="$(dirname "$ROOT")/$(basename "$ROOT")-preJoin-$(date -u +%Y%m%dT%H%M%SZ).tgz"
 run tar -czf "$BACKUP" -C "$(dirname "$ROOT")" "$(basename "$ROOT")"
+# Owner-only: the brain holds client project notes, and this tarball outlives the join — it sits in
+# the home directory until someone deletes it.
+run chmod 600 "$BACKUP"
 say "backup  $BACKUP"
 
 # ------------------------------------------------------------------ repo + remote
@@ -90,7 +97,14 @@ fi
 # `git restore --source=` rather than `git show origin/main:<path> >file`: under Git Bash on Windows
 # MSYS rewrites the `rev:path` argument as a path list at the colon, and the command dies with
 # "ambiguous argument 'origin\main;.gitignore'". This form has no colon.
-git -C "$ROOT" restore --source=origin/main -- .gitignore .gitattributes
+#
+# One restore per file, failure tolerated: an older brain remote may predate either file, and under
+# `set -e` a single restore naming both paths would abort the entire join on a raw git error rather
+# than just skipping the file that isn't there.
+for f in .gitignore .gitattributes; do
+  git -C "$ROOT" restore --source=origin/main -- "$f" 2>/dev/null \
+    || say "local   origin/main has no $f — continuing without it"
+done
 
 git -C "$ROOT" add -A
 if git -C "$ROOT" diff --cached --quiet; then
