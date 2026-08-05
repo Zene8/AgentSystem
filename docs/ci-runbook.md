@@ -80,3 +80,5 @@ retired; `friday-audit.yml` is the single engineering reviewer.
 so with no usable runner every PR is unmergeable without an admin override — and an admin
 override merges without the security gate. Fix the runner rather than making a habit of
 `--admin`.
+
+<!-- gate probe 1785949886 -->
