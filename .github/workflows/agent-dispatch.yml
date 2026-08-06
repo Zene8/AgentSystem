@@ -23,6 +23,12 @@ jobs:
     # tools/mission-control/install-runner.sh). BOTH labels required so only the
     # Linux runner picks this up.
     runs-on: [self-hosted, Linux]
+    # Repo default_workflow_permissions is `read`, so without this block every
+    # createComment / addLabels / removeLabel below 403s.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     # Trigger on:
     #   agent:* label on issue
     #   /agent <name> comment (issue or PR) from repo owner
@@ -328,6 +334,9 @@ jobs:
 
   ambient-sam-review:
     runs-on: [self-hosted, Linux]
+    permissions:
+      contents: read
+      pull-requests: write
     # Quick Haiku-tier security scan on every PR marked ready for review.
     # Full Sonnet audit by Sam is still required before any merge to main.
     # Trigger on ready_for_review only (not opened) to avoid draft noise.
@@ -365,9 +374,17 @@ jobs:
           if [ "$(wc -c < "$RUNNER_TEMP/pr-diff-full.txt")" -gt 8000 ]; then
             printf '\n...(truncated)\n' >> "$RUNNER_TEMP/pr-diff.txt"
           fi
+          # Docs-only PRs filter down to an empty diff. Feeding that to the model
+          # yields a "need diff content" non-answer posted as a scan result.
+          if [ -s "$RUNNER_TEMP/pr-diff.txt" ]; then
+            echo "has_code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_code=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Sam ambient scan (Haiku)
         id: sam_scan
+        if: steps.diff.outputs.has_code == 'true'
         shell: bash
         # Untrusted PR url/title via env, not interpolated.
         env:
@@ -394,6 +411,7 @@ jobs:
         continue-on-error: true
 
       - name: Post scan result as PR comment
+        if: steps.diff.outputs.has_code == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -414,6 +432,9 @@ jobs:
 
   auto-merge:
     runs-on: [self-hosted, Linux]
+    permissions:
+      contents: write
+      pull-requests: write
     if: |
       github.event_name == 'pull_request_review' &&
       github.event.review.state == 'approved' &&
