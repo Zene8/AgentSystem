@@ -26,6 +26,25 @@ const OVERRIDES_PATH = join(homedir(), 'agent-memory', 'nexus', 'routine-overrid
 const SCHEDULED_YML = join(REPO_ROOT, '.github', 'workflows', 'scheduled-tasks.yml');
 
 // ---------------------------------------------------------------------------
+// Session bypass expiry check — determines if an override is still active.
+// Duplicated in hooks/routines-context-inject.js — keep in sync with that copy.
+// Both copies follow the same logic for consistency across read paths:
+// - If override.session is falsy, it's permanent (always active)
+// - If override.session is true:
+//   - If override.sessionId is missing/falsy, treat as NOT active (fail-closed)
+//   - If override.sessionId matches currentSessionId, it's active
+//   - Otherwise, it's expired (not active in a new session)
+// ---------------------------------------------------------------------------
+function isOverrideActive(override, currentSessionId) {
+  if (!override || !override.bypassed) return false;
+  // Non-session bypasses (session: false or absent) are always active (permanent)
+  if (!override.session) return true;
+  // Session-scoped bypass: only active if sessionId matches
+  // Missing/null sessionId is treated as NOT active (fail-closed)
+  return override.sessionId === currentSessionId && currentSessionId;
+}
+
+// ---------------------------------------------------------------------------
 // Minimal YAML parser — handles the constrained routines.yml format only.
 // Supports: list of objects with string/boolean values. No nested objects.
 // ---------------------------------------------------------------------------
@@ -140,7 +159,11 @@ function cmdList() {
   console.log('Routines:\n');
   for (const r of routines) {
     const bypass = overrides[r.id];
-    const bypassed = bypass ? ` [BYPASSED${bypass.session ? ' session' : ''}]` : '';
+    // For display purposes, show if the bypass exists, but note session-scoped ones.
+    // Session-scoped bypasses are only checked against the current session at SessionStart;
+    // in cmdList context, pass null as currentSessionId to be fail-closed (won't show as active).
+    const isActive = isOverrideActive(bypass, null);
+    const bypassed = bypass ? ` [BYPASSED${bypass.session ? ' session' : ''}${!isActive && bypass.session ? ' (expired)' : ''}]` : '';
     const enabled = r.enabled ? 'enabled' : 'disabled';
     console.log(`  ${r.id}`);
     console.log(`    mechanism: ${r.mechanism}  enforce: ${r.enforce}  ${enabled}${bypassed}`);
@@ -334,7 +357,14 @@ function cmdBypass(id, sessionFlag) {
     console.error(`[routines] unknown routine: ${id}`); process.exit(1);
   }
   const overrides = readOverrides();
-  overrides[id] = { bypassed: true, session: !!sessionFlag, at: new Date().toISOString() };
+  const override = { bypassed: true, session: !!sessionFlag, at: new Date().toISOString() };
+  // When marking as session-scoped, stamp the session ID from environment.
+  // If --session is passed but CLAUDE_CODE_SESSION_ID is not in the environment,
+  // stamp null so the bypass will not be honored on read (fail-closed).
+  if (sessionFlag) {
+    override.sessionId = process.env.CLAUDE_CODE_SESSION_ID ?? null;
+  }
+  overrides[id] = override;
   writeOverrides(overrides);
   console.log(`[routines] bypassed: ${id}${sessionFlag ? ' (session)' : ''}`);
 }
@@ -358,7 +388,10 @@ export function dispatchRoutines({ event, context } = {}) {
 
   return routines.filter(r => {
     if (!r.enabled) return false;
-    if (overrides[r.id]) return false;
+    // Check if bypass is active. Pass null for currentSessionId: session bypasses are
+    // only enforced at SessionStart (routines-context-inject.js hook), not at PostToolUse.
+    // This is fail-closed: expired session bypasses won't apply here, only permanent bypasses.
+    if (isOverrideActive(overrides[r.id], null)) return false;
     if (r.mechanism !== 'hook') return false;
     // Match trigger to event context
     if (event === 'PostToolUse' && r.trigger === 'pr_create') return true;
