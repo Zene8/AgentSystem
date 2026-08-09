@@ -314,13 +314,13 @@ function cmdVerify() {
   const problems = verifyCronRoutines(routines);
   const crons = routines.filter(r => r.mechanism === 'cron' && r.enabled);
   if (!problems.length) {
-    console.log(`[routines] ok — ${crons.length} cron-routine(s) all have a matching job and schedule in scheduled-tasks.yml`);
+    console.log(`[routines] ok — ${crons.length} cron-routine(s) all verified`);
     return;
   }
   for (const p of problems) console.error(`[routines] ${p.severity === 'error' ? 'UNREGISTERED' : 'warning'}: ${p.id} — ${p.detail}`);
   if (problems.some(p => p.severity === 'error')) {
     console.error('\n[routines] A routine declared `enforce: hard` that no scheduler can fire is the #200 defect.');
-    console.error('Add the job to .github/workflows/scheduled-tasks.yml, or `node tools/routines.js disable <id>`.');
+    console.error('Add the job to the specified workflow file (see routine definition workflow_file field), or `node tools/routines.js disable <id>`.');
     process.exit(1);
   }
 }
