@@ -252,33 +252,43 @@ function cmdCompile({ verify = false } = {}) {
  * @returns {Array<{id: string, severity: 'error'|'warning', detail: string}>}
  */
 export function verifyCronRoutines(routines, { workflowText } = {}) {
-  let text = workflowText;
-  if (text === undefined) {
-    try { text = readFileSync(SCHEDULED_YML, 'utf8'); } catch { text = null; }
-  }
   const crons = routines.filter(r => r.mechanism === 'cron' && r.enabled);
   if (!crons.length) return [];
-  if (text === null) {
-    return crons.map(r => ({ id: r.id, severity: 'error', detail: `${SCHEDULED_YML} not found — nothing can schedule this` }));
-  }
-
-  const jobIds = new Set(
-    [...text.matchAll(/^ {2}([a-z0-9][a-z0-9-]*):$/gm)].map(m => m[1]),
-  );
-  const schedules = new Set(
-    [...text.matchAll(/^\s*-\s*cron:\s*['"]([^'"]+)['"]/gm)].map(m => m[1].trim()),
-  );
 
   const problems = [];
   for (const r of crons) {
+    // Support optional workflow_file field; default to scheduled-tasks.yml
+    const workflowFile = r.workflow_file || 'scheduled-tasks.yml';
+    const workflowPath = join(REPO_ROOT, '.github', 'workflows', workflowFile);
+
+    let text = workflowText;
+    if (text === undefined || workflowFile !== 'scheduled-tasks.yml') {
+      try { text = readFileSync(workflowPath, 'utf8'); } catch { text = null; }
+    }
+    if (text === null) {
+      problems.push({
+        id: r.id,
+        severity: 'error',
+        detail: `${workflowPath} not found — nothing can schedule this`,
+      });
+      continue;
+    }
+
+    const jobIds = new Set(
+      [...text.matchAll(/^ {2}([a-z0-9][a-z0-9-]*):$/gm)].map(m => m[1]),
+    );
+    const schedules = new Set(
+      [...text.matchAll(/^\s*-\s*cron:\s*['"]([^'"]+)['"]/gm)].map(m => m[1].trim()),
+    );
+
     const jobName = r.workflow_job || r.id;
     if (!jobIds.has(jobName)) {
       problems.push({
         id: r.id,
         severity: 'error',
         detail: r.workflow_job
-          ? `workflow_job \`${jobName}\` does not exist in scheduled-tasks.yml`
-          : `no job named \`${r.id}\` in scheduled-tasks.yml (set \`workflow_job:\` if the job has a different name)`,
+          ? `workflow_job \`${jobName}\` does not exist in ${workflowFile}`
+          : `no job named \`${r.id}\` in ${workflowFile} (set \`workflow_job:\` if the job has a different name)`,
       });
       continue;
     }
