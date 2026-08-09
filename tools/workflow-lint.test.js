@@ -21,6 +21,7 @@ import {
   extractBlockScalars,
   checkScriptBody,
   checkYamlStructure,
+  checkGithubOutputMultiline,
   lintWorkflowText,
   lint,
   stripWorkflowExpressions,
