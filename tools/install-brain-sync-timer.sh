@@ -38,8 +38,11 @@ Type=oneshot
 WorkingDirectory=$REPO_ROOT
 # PATH is set explicitly: a systemd user unit gets a minimal environment, and both node and gh must
 # resolve. Inheriting the caller's PATH is what makes this work where node came from nvm.
-Environment=PATH=$PATH
-Environment=HOME=$HOME
+# Quoted, and every % doubled: systemd reads % in a unit value as a specifier (%h, %i, %%…), so a
+# PATH containing one — a Windows-style dir under WSL, a directory with a literal % in its name —
+# either expands to something else or makes systemd reject the whole unit at load.
+Environment="PATH=${PATH//%/%%}"
+Environment="HOME=${HOME//%/%%}"
 ExecStart=$NODE_BIN $REPO_ROOT/tools/brain-sync-run.js
 # 3 = a merge conflict was found and a human-needed alert was raised. That is the sync working as
 # designed — it refuses to resolve user data on its own — so systemd must not mark the unit failed
@@ -100,7 +103,11 @@ case "$MODE" in
     if [ ! -f "$svc" ]; then
       echo "missing    $svc"; drift=1
     else
-      exec_line="$(grep -m1 '^ExecStart=' "$svc" | cut -d= -f2-)"
+      # `|| true`: under `set -e` a grep that matches nothing exits 1 and kills the whole check
+      # mid-way, so a service file that had lost its ExecStart line — real drift, the exact thing
+      # being looked for — would abort the script before it could report it, and an aborted check
+      # reads as a failed one with no explanation. Missing is handled below, as a value.
+      exec_line="$(grep -m1 '^ExecStart=' "$svc" | cut -d= -f2- || true)"
       script_path="$(printf '%s\n' "$exec_line" | awk '{print $2}')"
       if [ -z "$script_path" ] || [ ! -f "$script_path" ]; then
         echo "drift      $svc runs a script that is not there: ${script_path:-<none>}"; drift=1

@@ -134,12 +134,15 @@ if (require.main === module) {
   const phase = phaseArg ? phaseArg.slice('--phase='.length) : 'start';
   const isWorker = argv.includes('--worker');
 
+  // Nothing is printed, ever. A SessionStart hook's stdout is injected into the session as context,
+  // so an "OK" here is not a status line for a human — it is a token prepended to every single
+  // session, forever, that says nothing. Whether the sync ran belongs in the log file, which is
+  // where runWorker puts it. Exit 0 is the whole signal the hook runner needs.
   try {
     if (isWorker) runWorker(phase);
-    else { runHook(phase); process.stdout.write('OK'); }
+    else runHook(phase);
   } catch (err) {
     log(`error (${phase}): ${err && err.message}`);
-    if (!isWorker) process.stdout.write('OK');
   }
   process.exit(0);
 }

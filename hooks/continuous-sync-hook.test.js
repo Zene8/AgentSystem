@@ -69,22 +69,33 @@ test('an unknown phase plans nothing rather than guessing', () => {
 
 // ── fast path ─────────────────────────────────────────────────────────────────
 
-test('the hook returns OK immediately and does no git work itself', () => {
+test('the hook returns immediately and does no git work itself', () => {
   const dir = scratch();
   const started = Date.now();
   const r = runHook(['--phase=start'], { dir });
   const elapsed = Date.now() - started;
 
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), 'OK');
   assert.ok(elapsed < 3000, `fast path took ${elapsed}ms — it is supposed to hand off and exit`);
+});
+
+// SessionStart stdout is injected into the session as context. Anything printed here is prepended
+// to every session on this machine for as long as the hook is installed, so the bar is not "is it
+// short" — it is that a sync nobody asked about contributes nothing to the conversation.
+test('the hook prints nothing — its stdout would be injected into every session', () => {
+  const dir = scratch();
+  for (const phase of ['start', 'end']) {
+    const r = runHook([`--phase=${phase}`], { dir });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '', `${phase} phase wrote to stdout: ${JSON.stringify(r.stdout)}`);
+  }
 });
 
 test('a malformed or empty payload never fails the session', () => {
   const dir = scratch();
   const r = runHook(['--phase=start'], { dir, input: 'not json at all' });
   assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), 'OK');
+  assert.equal(r.stdout, '');
 });
 
 test('the hook is inert inside its own child process', () => {

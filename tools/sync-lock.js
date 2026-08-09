@@ -17,12 +17,37 @@
 //
 // Node builtins only (repo rule for tools/).
 
-import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { hostname } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
-/** Default: longer than a normal sync, shorter than the 15-minute timer interval. */
+/**
+ * Default: longer than a normal sync, shorter than the 15-minute timer interval.
+ *
+ * This bound is only safe because the caller also bounds the work it does while holding the lock —
+ * see BUDGET_FRACTION below. A lock window shorter than the job it protects means the next trigger
+ * steals the lock out from under a `git push` that is merely slow, which is the exact overlap the
+ * lock exists to prevent.
+ */
 export const DEFAULT_STALE_MS = 10 * 60 * 1000;
+
+/**
+ * How much of the stale window the holder may actually spend working. The remainder is slack for
+ * process startup and for the holder to notice its own timeout and release.
+ */
+export const BUDGET_FRACTION = 0.8;
+
+/** The wall-clock budget a holder gets, given the stale window it acquired under. */
+export function workBudgetMs(staleMs = DEFAULT_STALE_MS) {
+  return Math.max(1000, Math.floor(staleMs * BUDGET_FRACTION));
+}
+
+/** Block for `ms` without a dependency or an event loop turn. */
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 /** The holder record in `file`, or null when absent or unparseable. */
 export function readLock(file) {
@@ -50,26 +75,47 @@ export function isStale(rec, { staleMs = DEFAULT_STALE_MS, now = Date.now() } = 
  * Try to take `file`.
  * @returns {{acquired: true, token: string} | {acquired: false, holder: object|null}}
  */
-export function acquireLock(file, { staleMs = DEFAULT_STALE_MS, now = Date.now(), meta = {} } = {}) {
+export function acquireLock(
+  file,
+  { staleMs = DEFAULT_STALE_MS, now = Date.now(), meta = {}, settleMs = 50 } = {},
+) {
   const token = JSON.stringify({
-    pid: process.pid, host: hostname(), at: new Date(now).toISOString(), ...meta,
+    pid: process.pid, host: hostname(), at: new Date(now).toISOString(), id: randomUUID(), ...meta,
   });
   try { mkdirSync(dirname(file), { recursive: true }); } catch { /* already there */ }
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(file, token, { flag: 'wx' }); // atomic create-or-fail
-      return { acquired: true, token };
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      const holder = readLock(file);
-      if (!isStale(holder, { staleMs, now })) return { acquired: false, holder };
-      // Stale: clear it and try once more. If we lose that second race the winner now holds a
-      // fresh lock, and the next pass reports them as the holder instead of stealing it.
-      try { rmSync(file, { force: true }); } catch { /* someone else cleared it first */ }
-    }
+  try {
+    writeFileSync(file, token, { flag: 'wx' }); // atomic create-or-fail
+    return { acquired: true, token };
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
   }
-  return { acquired: false, holder: readLock(file) };
+
+  const holder = readLock(file);
+  if (!isStale(holder, { staleMs, now })) return { acquired: false, holder };
+
+  // Taking over a stale lock, atomically. The obvious version — rm, then create with 'wx' — is a
+  // TOCTOU: two processes both see the same stale record, A removes it and creates its own, and B's
+  // rm then deletes A's *fresh* lock before creating its own. Both believe they hold it, and two
+  // brain-syncs in one working tree is exactly the corruption the lock exists to prevent.
+  //
+  // Instead: write a private file and rename it over the lock. Rename is atomic and last-writer-
+  // wins, so after both racers have renamed, the file holds exactly one token. Settle, then read it
+  // back — whoever's token is not there lost and backs off, rather than both proceeding.
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, token);
+    renameSync(tmp, file);
+  } catch {
+    try { rmSync(tmp, { force: true }); } catch { /* nothing to clean up */ }
+    return { acquired: false, holder: readLock(file) };
+  }
+
+  sleepSync(settleMs);
+  let onDisk = null;
+  try { onDisk = readFileSync(file, 'utf8'); } catch { /* vanished under us */ }
+  if (onDisk !== token) return { acquired: false, holder: readLock(file) };
+  return { acquired: true, token };
 }
 
 /** Release `file`, but only if it still carries our token. */

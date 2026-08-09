@@ -12,7 +12,15 @@ import { mkdtempSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { acquireLock, releaseLock, readLock, isStale } from './sync-lock.js';
+import { spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname } from 'node:path';
+
+import {
+  acquireLock, releaseLock, readLock, isStale, workBudgetMs, DEFAULT_STALE_MS,
+} from './sync-lock.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'sync-lock-'));
 
@@ -71,6 +79,47 @@ test('release of our own lock removes the file', () => {
   const held = acquireLock(file);
   assert.equal(releaseLock(file, held.token), true);
   assert.equal(existsSync(file), false);
+});
+
+// The takeover has to be atomic, not "remove it then create mine". Two triggers see the same stale
+// record; under rm-then-create, A removes it and creates its own, then B's rm deletes A's *fresh*
+// lock and B creates its own — both believe they hold it, and two brain-syncs commit in one working
+// tree, which is the corruption the lock exists to prevent, reached through the lock itself.
+test('exactly one of many racing processes takes over a stale lock', async () => {
+  const dir = scratch();
+  const file = join(dir, 'race.lock');
+  const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  writeFileSync(file, JSON.stringify({ pid: 999999, host: 'ghost', at: old }));
+
+  const child = join(dir, 'racer.mjs');
+  writeFileSync(child, `
+    import { acquireLock } from ${JSON.stringify(pathToFileURL(join(HERE, 'sync-lock.js')).href)};
+    const [file, startAt] = process.argv.slice(2);
+    while (Date.now() < Number(startAt)) { /* spin to the barrier */ }
+    const held = acquireLock(file, { staleMs: 60000 });
+    process.stdout.write(held.acquired ? 'ACQUIRED' : 'REFUSED');
+  `);
+
+  const startAt = Date.now() + 400; // long enough for eight node processes to boot and spin
+  const results = await Promise.all(Array.from({ length: 8 }, () => new Promise((res) => {
+    const p = spawn(process.execPath, [child, file, String(startAt)], { encoding: 'utf8' });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('close', () => res(out.trim()));
+  })));
+
+  const winners = results.filter((r) => r === 'ACQUIRED');
+  assert.equal(winners.length, 1,
+    `${winners.length} processes all believed they held the lock: ${JSON.stringify(results)}`);
+});
+
+// The lock window is only a guarantee if the work inside it is bounded by less than the window.
+// An unbounded `git push` against an unreachable remote outlives its own lock, the next trigger
+// legitimately takes over, and the two overlap anyway.
+test('the work budget is strictly inside the stale window', () => {
+  assert.ok(workBudgetMs(DEFAULT_STALE_MS) < DEFAULT_STALE_MS);
+  assert.ok(workBudgetMs(10_000) < 10_000);
+  assert.equal(workBudgetMs(1), 1000, 'a floor, so an absurd stale window cannot mean "no time to work"');
 });
 
 test('isStale is time-based and tolerates a missing timestamp', () => {

@@ -31,7 +31,8 @@
 //
 // Usage:
 //   node tools/brain-sync-run.js [--pull-only] [--path <brain>] [--lock <file>] [--state <file>]
-//                                [--stale-ms <n>] [--brain-sync <script>] [--human-needed <script>]
+//                                [--stale-ms <n>] [--ignore-markers]
+//                                [--brain-sync <script>] [--human-needed <script>]
 //
 // Node builtins only (repo rule for tools/).
 
@@ -41,17 +42,41 @@ import { join, dirname, resolve } from 'node:path';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './is-main.js';
-import { acquireLock, releaseLock, DEFAULT_STALE_MS } from './sync-lock.js';
+import { acquireLock, releaseLock, DEFAULT_STALE_MS, workBudgetMs } from './sync-lock.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Stable human-needed key: one open issue per outage, however many times the timer fires. */
+/** The human-needed key prefix: one open issue per outage, however many times the timer fires. */
 export const ALERT_KEY = 'brain-sync-conflict';
 
-/** What a brain-sync exit code means to us. */
-export function classify(code) {
+/**
+ * The key for one host. Per-host on purpose: the blocked tree is per-host, so a single global key
+ * means the laptop resolving its conflict closes the issue the Mission Control box is still stuck
+ * behind — one host's recovery silently cancelling another's alert.
+ */
+export function alertKey(host = hostname()) {
+  return `${ALERT_KEY}-${String(host).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+}
+
+/** The exact line brain-sync.js prints when a merge stopped for a person. */
+const CONFLICT_MARK = 'merge conflict needs a human';
+
+/**
+ * What a brain-sync exit code means to us.
+ *
+ * Exit 1 alone is NOT a conflict. brain-sync.js `die(..., 1)`s on any failed git command — an
+ * offline fetch, a non-fast-forward push, expired credentials — and treating those as conflicts
+ * does two bad things at once: it opens a "resolve this merge by hand" issue about a network blip,
+ * and it returns 3, which the unit declares a success. A sync that is failing every 15 minutes
+ * would report healthy while crying wolf. So the conflict verdict requires brain-sync to have
+ * actually said so.
+ */
+export function classify(code, stderr = '') {
   if (code === 0) return { outcome: 'ok', alert: false, exit: 0 };
-  if (code === 1) return { outcome: 'conflict', alert: true, exit: 3 };
+  if (code === 1 && String(stderr).includes(CONFLICT_MARK)) {
+    return { outcome: 'conflict', alert: true, exit: 3 };
+  }
+  if (code === 1) return { outcome: 'error', alert: false, exit: 2 };
   if (code === 2) return { outcome: 'setup', alert: false, exit: 2 };
   return { outcome: 'error', alert: false, exit: 2 };
 }
@@ -61,7 +86,7 @@ export function classify(code) {
  * offers no merge strategy: the whole point of stopping here is that only a person can decide which
  * side of a memory node is right.
  */
-export function raiseArgs({ root, host, detail, kind = 'merge' }) {
+export function raiseArgs({ root, host = hostname(), detail, kind = 'merge' }) {
   const cause = kind === 'markers'
     ? `the working tree in ${root} on ${host} still contains merge-conflict markers from an earlier `
       + `merge that was never finished. The sync stopped before touching git: brain-sync.js would `
@@ -69,7 +94,7 @@ export function raiseArgs({ root, host, detail, kind = 'merge' }) {
       + `them to every host. That has already happened once, to nexus/personal-brain/graph.json.`
     : `tools/brain-sync.js reported a merge conflict in ${root} on ${host}.`;
   return [
-    'raise', ALERT_KEY,
+    'raise', alertKey(host),
     '--title', `Agent memory sync is blocked on ${host}`,
     '--why',
       `${cause} Memory sync is stopped `
@@ -138,6 +163,18 @@ function defaultGit(root, args) {
   return spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
 }
 
+/**
+ * Where per-host state that must outlive a reboot goes. XDG on Linux/macOS, LOCALAPPDATA on
+ * Windows, and `~/.cache` when neither is set — never tmpdir, which is cleared at boot on most
+ * hosts.
+ */
+export function cacheDir() {
+  const base = process.env.XDG_CACHE_HOME
+    || process.env.LOCALAPPDATA
+    || join(homedir(), '.cache');
+  return join(base, 'agentsystem');
+}
+
 function readState(file) {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
 }
@@ -150,11 +187,22 @@ if (isMainModule(import.meta.url)) {
   };
 
   const pullOnly = argv.includes('--pull-only');
+  // Escape hatch for the one false positive the marker scan can produce: a brain node that
+  // legitimately *quotes* conflict-marker text — and the brain now records this very incident, so
+  // that is not hypothetical. Without it, one such node blocks sync on every host permanently, and
+  // the only way out would be editing memory by hand to appease a checker. Off by default: the scan
+  // is right far more often than it is wrong.
+  const ignoreMarkers = argv.includes('--ignore-markers');
   const root = resolve(value('path', join(homedir(), 'agent-memory')));
   // The lock lives outside the brain checkout on purpose: brain-sync.js runs `git add -A`, so a
   // lockfile inside it would be committed and pushed to every host on every sync.
   const lockFile = value('lock', join(tmpdir(), 'agentsystem-brain-sync.lock'));
-  const stateFile = value('state', join(tmpdir(), 'agentsystem-brain-sync-alert.json'));
+  // State, unlike the lock, must survive a reboot. It records "we opened the issue", and it is the
+  // only thing that ever closes it: on a machine where /tmp is cleared at boot (systemd-tmpfiles,
+  // macOS, most containers) a state file in tmpdir means the next clean sync sees no record, never
+  // calls `resolve`, and the human-needed issue stays open forever after the conflict is long fixed.
+  // A stale "memory sync is blocked" issue that nobody can clear trains people to ignore the label.
+  const stateFile = value('state', join(cacheDir(), 'brain-sync-alert.json'));
   const staleMs = Number(value('stale-ms', DEFAULT_STALE_MS)) || DEFAULT_STALE_MS;
   const brainSync = value('brain-sync', join(HERE, 'brain-sync.js'));
   const humanNeeded = value('human-needed', join(HERE, 'human-needed.js'));
@@ -191,7 +239,7 @@ if (isMainModule(import.meta.url)) {
     // Preflight, before brain-sync is invoked at all. A tree left half-merged by an earlier run has
     // its markers committed as ordinary content by `git add -A` and pushed to every host — the
     // failure is silent and exits 0, so it cannot be caught after the fact.
-    const stuck = conflictedFiles(root);
+    const stuck = ignoreMarkers ? [] : conflictedFiles(root);
     if (stuck.length) {
       process.stderr.write(
         `brain-sync-run: ${stuck.length} tracked file(s) still contain merge-conflict markers — `
@@ -203,9 +251,16 @@ if (isMainModule(import.meta.url)) {
       verdict = { outcome: 'conflict', alert: true, exit: 3 };
     } else {
       const args = ['--path', root, ...(pullOnly ? ['--pull-only'] : [])];
-      const r = spawnSync(process.execPath, [brainSync, ...args], { encoding: 'utf8' });
-      const code = r.error ? 2 : (r.status ?? 2);
-      verdict = classify(code);
+      // Bounded by the lock window, not open-ended. A `git push` hung on an unreachable remote
+      // otherwise outlives its own lock: the next trigger sees a stale record, takes over, and two
+      // brain-syncs run in one working tree — the exact overlap the lock exists to prevent, reached
+      // *through* the lock. Timing out first means the holder always releases before it goes stale.
+      const r = spawnSync(process.execPath, [brainSync, ...args], {
+        encoding: 'utf8', timeout: workBudgetMs(staleMs), killSignal: 'SIGKILL',
+      });
+      // A timeout kill has no exit status. It is a broken sync, not a conflict: exit 2, no alert.
+      const code = (r.error || r.signal) ? 2 : (r.status ?? 2);
+      verdict = classify(code, r.stderr);
 
       if (r.stdout) process.stdout.write(r.stdout);
       if (r.stderr) process.stderr.write(r.stderr);
@@ -217,7 +272,7 @@ if (isMainModule(import.meta.url)) {
       } else if (verdict.outcome === 'ok' && readState(stateFile)?.raised) {
         // Only resolve when we know we raised. Calling `resolve` on every clean run would spawn a gh
         // API call every 15 minutes on every host to say nothing.
-        if (runHumanNeeded(['resolve', ALERT_KEY])) {
+        if (runHumanNeeded(['resolve', alertKey()])) {
           try { rmSync(stateFile, { force: true }); } catch { /* next clean run retries */ }
         }
       }

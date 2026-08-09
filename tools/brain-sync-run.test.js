@@ -15,7 +15,9 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { classify, raiseArgs, conflictedFiles, ALERT_KEY } from './brain-sync-run.js';
+import { classify, raiseArgs, conflictedFiles, alertKey, cacheDir, ALERT_KEY } from './brain-sync-run.js';
+
+const KEY = alertKey();
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'brain-sync-run.js');
@@ -24,21 +26,25 @@ const SCRIPT = join(HERE, 'brain-sync-run.js');
  * A stand-in for brain-sync.js / human-needed.js that records its argv and exits with `code`.
  * Recording argv is the point: it is how we prove no conflict-resolution flag is ever forwarded.
  */
-function recorder(dir, name, code) {
+function recorder(dir, name, code, stderr = null) {
   const script = join(dir, `${name}.cjs`);
   const log = join(dir, `${name}.log`);
+  // What it says on stderr matters as much as the code: the wrapper distinguishes "brain-sync said
+  // a human must merge" from "some git command failed" by the message, not by exit 1 alone.
+  const says = stderr !== null ? stderr
+    : (code === 1 ? 'brain-sync: merge conflict needs a human:\n  nodes/x.md\n' : '');
   rmSync(log, { force: true }); // per-run call log; alert state is what persists between runs
   writeFileSync(script, `
     const fs = require('fs');
     fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');
-    if (${code} === 1) process.stderr.write('brain-sync: merge conflict needs a human:\\n  nodes/x.md\\n');
+    process.stderr.write(${JSON.stringify(says)});
     process.exit(${code});
   `);
   return { script, log, calls: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : []) };
 }
 
-function run(dir, { brainSyncExit = 0, humanNeededExit = 0, extra = [] } = {}) {
-  const brain = recorder(dir, 'fake-brain-sync', brainSyncExit);
+function run(dir, { brainSyncExit = 0, brainSyncStderr = null, humanNeededExit = 0, extra = [] } = {}) {
+  const brain = recorder(dir, 'fake-brain-sync', brainSyncExit, brainSyncStderr);
   const human = recorder(dir, 'fake-human-needed', humanNeededExit);
   const r = spawnSync(process.execPath, [
     SCRIPT,
@@ -56,23 +62,57 @@ const scratch = () => mkdtempSync(join(tmpdir(), 'brain-sync-run-'));
 
 // ── exit-code translation ─────────────────────────────────────────────────────
 
+const CONFLICT = 'brain-sync: merge conflict needs a human:\n  nodes/x.md\n';
+
 test('classify maps brain-sync exit codes to runner outcomes', () => {
   assert.equal(classify(0).outcome, 'ok');
-  assert.equal(classify(1).outcome, 'conflict');
+  assert.equal(classify(1, CONFLICT).outcome, 'conflict');
   assert.equal(classify(2).outcome, 'setup');
   assert.equal(classify(137).outcome, 'error');
 });
 
 test('classify: only a conflict is worth waking a human', () => {
-  assert.equal(classify(1).alert, true);
+  assert.equal(classify(1, CONFLICT).alert, true);
   assert.equal(classify(0).alert, false);
   assert.equal(classify(2).alert, false);
+});
+
+// The one that matters: brain-sync die()s with exit 1 on ANY failed git command, so a bare 1 is far
+// more often an offline fetch or expired credentials than a merge conflict. Calling those conflicts
+// is wrong twice over — it opens a "resolve this merge by hand" issue about a network blip, and it
+// returns 3, which the systemd unit declares a success. A host failing to sync every 15 minutes
+// would report healthy.
+test('classify: exit 1 without the conflict message is a plain failure, not a conflict', () => {
+  const offline = classify(1, 'brain-sync: git fetch --quiet origin failed (128)\nCould not resolve host: github.com\n');
+  assert.equal(offline.outcome, 'error');
+  assert.equal(offline.alert, false, 'raised a merge-conflict alert about a failed fetch');
+  assert.equal(offline.exit, 2, 'exit 3 is declared a success by the unit — a broken sync must not use it');
+
+  const noStderr = classify(1);
+  assert.equal(noStderr.alert, false);
+  assert.equal(noStderr.exit, 2);
+});
+
+// Per host, because the blocked working tree is per host. Under one global key the laptop finishing
+// its merge closes the issue while the Mission Control box is still stuck behind its own.
+test('the alert key is scoped to the host', () => {
+  assert.equal(alertKey('mission-control'), 'brain-sync-conflict-mission-control');
+  assert.equal(alertKey('WIN-Laptop_01'), 'brain-sync-conflict-win-laptop-01');
+  assert.notEqual(alertKey('a'), alertKey('b'));
+  assert.match(alertKey('a'), new RegExp(`^${ALERT_KEY}-`));
+});
+
+// State says "this host has an open issue" and is the only thing that ever closes it. tmpdir is
+// cleared at boot on most hosts, which would strand the issue open forever.
+test('alert state lives somewhere that survives a reboot', () => {
+  assert.doesNotMatch(cacheDir(), new RegExp(tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(cacheDir(), /agentsystem$/);
 });
 
 test('raiseArgs builds a human-needed call with the stable key and no resolution advice', () => {
   const args = raiseArgs({ root: '/home/x/agent-memory', host: 'box', detail: 'nodes/x.md' });
   assert.equal(args[0], 'raise');
-  assert.equal(args[1], ALERT_KEY);
+  assert.equal(args[1], alertKey('box'));
   const joined = args.join(' ');
   assert.match(joined, /box/);
   assert.match(joined, /agent-memory/);
@@ -109,7 +149,7 @@ test('a conflict exits 3, raises the alert, and does not retry with a merge stra
   const calls = r.human.calls();
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'raise');
-  assert.equal(calls[0][1], ALERT_KEY);
+  assert.equal(calls[0][1], KEY);
 
   // One brain-sync attempt. A second one would mean the wrapper tried to "help".
   assert.equal(r.brain.calls().length, 1);
@@ -124,7 +164,7 @@ test('a later clean sync resolves the alert exactly once', () => {
   assert.equal(ok.status, 0);
   const resolves = ok.human.calls().filter((c) => c[0] === 'resolve');
   assert.equal(resolves.length, 1);
-  assert.equal(resolves[0][1], ALERT_KEY);
+  assert.equal(resolves[0][1], KEY);
 
   // Nothing left to resolve: the next clean run must not call gh again.
   const quiet = run(dir, { brainSyncExit: 0 });
@@ -136,6 +176,16 @@ test('a setup error (exit 2) is passed through without alerting', () => {
   const r = run(dir, { brainSyncExit: 2 });
   assert.equal(r.status, 2);
   assert.equal(r.human.calls().length, 0);
+});
+
+test('a git failure from brain-sync is exit 2 and raises no conflict issue', () => {
+  const dir = scratch();
+  const r = run(dir, {
+    brainSyncExit: 1,
+    brainSyncStderr: 'brain-sync: git push --quiet origin main failed (128)\nCould not resolve host: github.com\n',
+  });
+  assert.equal(r.status, 2, 'exit 3 would tell systemd this failing sync succeeded');
+  assert.equal(r.human.calls().length, 0, 'opened a merge-conflict issue about a network failure');
 });
 
 test('a held lock skips the run entirely and still exits 0', () => {
@@ -209,7 +259,7 @@ test('a tree with committed conflict markers never reaches brain-sync', () => {
   const calls = r.human.calls();
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'raise');
-  assert.equal(calls[0][1], ALERT_KEY, 'a stuck tree and a failed merge are one outage, so one key');
+  assert.equal(calls[0][1], KEY, 'a stuck tree and a failed merge are one outage, so one key');
   assert.match(calls[0].join(' '), /graph\.json/);
   assert.equal(existsSync(join(dir, 'alert.state')), true);
 });
@@ -227,6 +277,20 @@ test('a clean tracked tree is unaffected by the preflight', () => {
   const r = run(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.brain.calls().length, 1, 'the preflight blocked a healthy repo');
+});
+
+// The scan is right far more often than it is wrong, so it stays on by default — but it can be
+// wrong: a brain node that legitimately quotes conflict-marker text (the brain now records this very
+// incident, so that is not hypothetical) would block sync on every host forever, with no way out
+// except editing memory to appease a checker.
+test('--ignore-markers is the escape hatch for a node that legitimately quotes markers', () => {
+  const dir = scratch();
+  halfMergedRepo(dir);
+  const r = run(dir, { extra: ['--ignore-markers'] });
+
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.brain.calls().length, 1, 'the override did not let the sync through');
+  assert.equal(r.human.calls().length, 0);
 });
 
 test('the lock is released when the preflight stops the run', () => {
