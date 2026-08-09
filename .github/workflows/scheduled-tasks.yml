@@ -32,6 +32,8 @@ on:
     # slot-suffixed file at all.
     - cron: '0 13 * * *'
     - cron: '0 5 * * *'
+    # weekly-agent-review: Saturday 9am UTC
+    - cron: '0 9 * * 6'
   workflow_dispatch:
     inputs:
       job:
@@ -407,3 +409,16 @@ jobs:
         shell: bash
         run: node "${{ github.workspace }}/tools/deploy-hooks.js" --check
         continue-on-error: true
+
+  # Weekly agent performance review — local machine state (routing-log.jsonl, session costs, goal scorecard).
+  weekly-agent-review:
+    if: github.event_name == 'schedule' && github.event.schedule == '0 9 * * 6'
+    runs-on: [self-hosted, Linux]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run weekly agent review (Jarvis)
+        shell: bash
+        run: |
+          set -uo pipefail
+          node "${{ github.workspace }}/tools/session-cost.js" --week
+          node "${{ github.workspace }}/tools/decision-log.js" --agent-review

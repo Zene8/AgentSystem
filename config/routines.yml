@@ -121,7 +121,7 @@
   schedule: "0 9 * * 6"
   task_name: AgentSystem-WeeklyAgentReview
   enforce: hard
-  enabled: false
+  enabled: true
   action: "Weekly agent review (headless Jarvis via `claude --bg`): review routing-log.jsonl misroutes, session costs (node ~/dev/AgentSystem/tools/session-cost.js --week), open blockers, and goal scorecard. Log outcome via decision-log.js."
 
 - id: weekly-brain-review
