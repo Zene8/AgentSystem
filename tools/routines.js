@@ -159,10 +159,11 @@ function cmdList() {
   console.log('Routines:\n');
   for (const r of routines) {
     const bypass = overrides[r.id];
-    // For display purposes, show if the bypass exists, but note session-scoped ones.
-    // Session-scoped bypasses are only checked against the current session at SessionStart;
-    // in cmdList context, pass null as currentSessionId to be fail-closed (won't show as active).
-    const isActive = isOverrideActive(bypass, null);
+    // `list` runs as a CLI command inside the same session that may have just set a session
+    // bypass (same env as `bypass --session`), so use CLAUDE_CODE_SESSION_ID for parity —
+    // otherwise a bypass just set this session would immediately display as "(expired)".
+    // A bypass from any OTHER session (different id, or no id recorded) still fails closed.
+    const isActive = isOverrideActive(bypass, process.env.CLAUDE_CODE_SESSION_ID ?? null);
     const bypassed = bypass ? ` [BYPASSED${bypass.session ? ' session' : ''}${!isActive && bypass.session ? ' (expired)' : ''}]` : '';
     const enabled = r.enabled ? 'enabled' : 'disabled';
     console.log(`  ${r.id}`);
@@ -388,10 +389,11 @@ export function dispatchRoutines({ event, context } = {}) {
 
   return routines.filter(r => {
     if (!r.enabled) return false;
-    // Check if bypass is active. Pass null for currentSessionId: session bypasses are
-    // only enforced at SessionStart (routines-context-inject.js hook), not at PostToolUse.
-    // This is fail-closed: expired session bypasses won't apply here, only permanent bypasses.
-    if (isOverrideActive(overrides[r.id], null)) return false;
+    // dispatchRoutines runs in-process inside the hook's own child process, which inherits the
+    // same CLAUDE_CODE_SESSION_ID as any `bypass --session` CLI call made in this session — use
+    // it so a bypass set THIS session is honored here too. A bypass from a past/other session (or
+    // with no recorded session id) still fails closed via isOverrideActive.
+    if (isOverrideActive(overrides[r.id], process.env.CLAUDE_CODE_SESSION_ID ?? null)) return false;
     if (r.mechanism !== 'hook') return false;
     // Match trigger to event context
     if (event === 'PostToolUse' && r.trigger === 'pr_create') return true;
