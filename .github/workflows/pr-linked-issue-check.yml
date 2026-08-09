@@ -9,7 +9,14 @@ name: PR Linked Issue Check
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    # `edited`, `labeled` and `unlabeled` are here so the check's own documented remedies can
+    # actually clear it. With only [opened, synchronize], a PR opened unlinked stayed red until
+    # someone pushed a commit: editing the body to add `Closes #N` — the fix this workflow's own
+    # comment tells you to make — fired no event, and neither did applying the `spec` label, which
+    # is the only way to claim the exemption. Once this is a required status check that is a merge
+    # deadlock with no non-admin way out, so the trigger has to cover the remedy, not just the
+    # offence.
+    types: [opened, synchronize, edited, labeled, unlabeled]
     branches: [main]
 
 # New push to branch cancels previous runs
