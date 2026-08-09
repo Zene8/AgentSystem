@@ -254,12 +254,28 @@ jobs:
           NAME=actions-watchdog
 
           out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          # Zene8/AgentSystem is PUBLIC, so Actions logs and $GITHUB_STEP_SUMMARY are world-readable.
+          # The bar for anything printed here is therefore "could this EVER carry a credential",
+          # not "do I trust the person who dispatched it". Every emitter below goes through this,
+          # not just `gh auth status`: today no path reaches a token (the unit gets only PATH and
+          # HOME — see install-actions-watchdog.sh, which withholds GH_TOKEN on purpose — and `gh`
+          # answers a bad token with `HTTP 401: Bad credentials`), but that is a guarantee resting
+          # on gh's error-message behaviour rather than on this file. Two of the emitters print
+          # third-party text verbatim: journalctl carries the watchdog's own
+          # `cannot reach GitHub — <gh stderr>`, and the heartbeat's `reason` field newly
+          # interpolates that same gh stderr (#362). One filter is cheaper than re-deriving that
+          # argument the next time either of them changes.
+          # The second rule drops a whole `Token:` line whatever follows it, so an unknown future
+          # token prefix is still caught after the char-class rule misses it.
+          redact() { sed -E 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_-]+/<REDACTED>/g; s/(Token:).*/\1 <REDACTED>/'; }
+
           # Runs a command, captures BOTH streams, and never lets its exit status escape. systemd
           # and journalctl write the interesting part (bus unreachable, unit not loaded) to stderr.
           show() {
             local o
             o="$("$@" 2>&1)"; local rc=$?
-            printf '%s\n' "${o:-<no output>}" | tee -a "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "${o:-<no output>}" | redact | tee -a "$GITHUB_STEP_SUMMARY"
             printf '%s\n' "  (exit $rc)" | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
@@ -324,7 +340,8 @@ jobs:
               out "exists          yes"
               out "mtime/size      $(stat -c '%s bytes, mtime %y' "$HB" 2>/dev/null || echo '<stat unavailable>')"
               out "contents:"
-              cat "$HB" 2>&1 | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
+              # Redacted like everything else: this file's `reason` field now carries gh stderr.
+              cat "$HB" 2>&1 | redact | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
             else
               out "exists          NO — nothing has ever stamped this exact path"
               # Fault (c) discriminator: a heartbeat for ANOTHER host name, or under another root,
@@ -355,10 +372,8 @@ jobs:
             out "gh binary       $(command -v gh)"
             # --show-token is never passed, and the output is filtered anyway: gh prints the token
             # already masked, but a future gh (or a stray GH_TOKEN echo in an error path) must not be
-            # able to put a credential into a workflow log a dispatcher can read.
-            gh auth status 2>&1 \
-              | sed -E 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/<REDACTED>/g; s/(Token:).*/\1 <REDACTED>/' \
-              | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
+            # able to put a credential into a workflow log that is public on this repo.
+            gh auth status 2>&1 | redact | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           out '```'
 
