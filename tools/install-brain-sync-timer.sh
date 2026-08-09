@@ -13,7 +13,8 @@
 #
 #   bash tools/install-brain-sync-timer.sh              # install + start
 #   bash tools/install-brain-sync-timer.sh --dry-run    # print the units, change nothing
-#   bash tools/install-brain-sync-timer.sh --check      # exit 1 if the installed units drifted
+#   bash tools/install-brain-sync-timer.sh --check      # exit 1 if the units drifted or the timer is not running
+#   bash tools/install-brain-sync-timer.sh --check-units # the same, minus the liveness half (tests)
 #   bash tools/install-brain-sync-timer.sh --uninstall
 set -euo pipefail
 
@@ -81,7 +82,7 @@ case "$MODE" in
     exit 0
     ;;
 
-  --check)
+  --check|--check-units)
     # Checked by meaning, not by byte-equality against what this run would generate. Two things in
     # the unit are environment-derived — the absolute repo path and the inherited PATH — so a
     # `diff` passes for the person who installed it and fails for everyone else, including the CI
@@ -117,10 +118,18 @@ case "$MODE" in
     else
       echo "in sync    $tmr ($(grep -m1 '^OnUnitActiveSec=' "$tmr" | cut -d= -f2))"
     fi
-    # Liveness second, and advisory: `systemctl --user` from a service account with no D-Bus
-    # session errors out for reasons that have nothing to do with drift, and a check that cries
-    # wolf gets ignored — which is how a real outage hides.
-    if systemctl --user list-timers "$NAME.timer" --no-pager >/dev/null 2>&1; then
+    # Liveness second: `systemctl --user` from a service account with no D-Bus session errors out
+    # for reasons that have nothing to do with drift, so an unreachable bus is reported and not
+    # counted — a check that cries wolf gets ignored, which is how a real outage hides. When the bus
+    # IS reachable, units-on-disk-but-not-enabled is drift, and the most likely kind: that is the
+    # installed-but-inert shape the whole check exists for.
+    #
+    # --check-units skips this half. It is for callers holding a fabricated unit pair with no
+    # systemd behind it (the tests), where "not running" says nothing. Never use it in the daily
+    # job — a green check on a timer that is not scheduled is the outage reported as health.
+    if [ "$MODE" = '--check-units' ]; then
+      echo "skipped    timer liveness (--check-units)"
+    elif systemctl --user list-timers "$NAME.timer" --no-pager >/dev/null 2>&1; then
       if systemctl --user is-active "$NAME.timer" >/dev/null 2>&1; then
         echo "active     $NAME.timer"
       else

@@ -59,7 +59,7 @@ test('--dry-run keeps the conflict exit code out of systemd failure territory', 
 });
 
 test('--check fails when the timer was never installed', { skip: !hasBash }, () => {
-  const r = run(['--check'], scratch());
+  const r = run(['--check-units'], scratch());
   assert.equal(r.status, 1, 'a host with no timer reported healthy');
   assert.match(r.stdout, /missing/);
 });
@@ -67,7 +67,7 @@ test('--check fails when the timer was never installed', { skip: !hasBash }, () 
 test('--check passes on a healthy install', { skip: !hasBash }, () => {
   const home = scratch();
   installUnits(home);
-  const r = run(['--check'], home);
+  const r = run(['--check-units'], home);
   assert.equal(r.status, 0, `healthy install reported drift:\n${r.stdout}`);
   assert.match(r.stdout, /in sync/);
 });
@@ -77,14 +77,14 @@ test('--check passes even though the unit was written from a different checkout 
   // Byte-comparing the generated unit would fail here, on a host that is entirely fine.
   const home = scratch();
   installUnits(home);
-  const r = run(['--check'], home);
+  const r = run(['--check-units'], home);
   assert.equal(r.status, 0, r.stdout);
 });
 
 test('--check catches a unit pointing at a checkout that moved', { skip: !hasBash }, () => {
   const home = scratch();
   installUnits(home, { execScript: join(scratch(), 'gone', 'brain-sync-run.js') });
-  const r = run(['--check'], home);
+  const r = run(['--check-units'], home);
   assert.equal(r.status, 1, 'a timer running a script that no longer exists reported healthy');
   assert.match(r.stdout, /not there/);
 });
@@ -92,7 +92,7 @@ test('--check catches a unit pointing at a checkout that moved', { skip: !hasBas
 test('--check catches a service that would mark a raised alert as a failure', { skip: !hasBash }, () => {
   const home = scratch();
   installUnits(home, { successLine: '' });
-  const r = run(['--check'], home);
+  const r = run(['--check-units'], home);
   assert.equal(r.status, 1);
   assert.match(r.stdout, /SuccessExitStatus/);
 });
@@ -100,9 +100,23 @@ test('--check catches a service that would mark a raised alert as a failure', { 
 test('--check catches a timer that would fire once and never again', { skip: !hasBash }, () => {
   const home = scratch();
   installUnits(home, { interval: '' });
-  const r = run(['--check'], home);
+  const r = run(['--check-units'], home);
   assert.equal(r.status, 1, 'a one-shot timer looks installed and syncs the host exactly once');
   assert.match(r.stdout, /repeat interval/);
+});
+
+test('plain --check never calls units-on-disk healthy on its own', { skip: !hasBash }, () => {
+  // The unit files here were fabricated, never enabled — the installed-but-inert shape. Whether
+  // systemd can be reached depends on the host (CI runner: yes; Git Bash on Windows: no), so what
+  // is asserted is that --check either reports the timer down or says it could not look, and never
+  // just prints "in sync" and stops. --check-units is the only way to opt out of that half.
+  const home = scratch();
+  installUnits(home);
+  const r = run(['--check'], home);
+  assert.match(r.stdout, /INACTIVE|cannot reach the user systemd bus/);
+  if (/INACTIVE/.test(r.stdout)) {
+    assert.equal(r.status, 1, 'a timer that is not scheduled to run was reported as healthy');
+  }
 });
 
 test('--uninstall leaves no units behind', { skip: !hasBash }, () => {
