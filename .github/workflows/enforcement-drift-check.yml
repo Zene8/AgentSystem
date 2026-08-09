@@ -14,7 +14,7 @@ on:
   schedule:
     # Daily drift check: 03:00 UTC. Verify repo vs deployed state.
     - cron: '0 3 * * *'
-  workflow_dispatch
+  workflow_dispatch:
 
 jobs:
   enforcement-drift-check:
