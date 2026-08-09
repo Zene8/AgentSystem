@@ -4,6 +4,14 @@
 **Status:** Approved, pending implementation
 **Supersedes:** the single-session concurrency cap from #95
 
+> **Interim state (as of #265).** The concurrency half of this spec was partially unblocked
+> ahead of the rearchitecture: `MAX_PER_HARNESS` is no longer hard-coded to `1` but is
+> `MC_MAX_PER_HARNESS` (default 4) with `MC_MAX_BG_SESSIONS` (default 8) capping the total,
+> and `POST /swarm` dispatches a batch. That is still the `--bg` model — configurable caps
+> rather than the resource guard below, and no pty, so the observe and steer problems are
+> untouched. Read the sections below against `webhook-server.js` as it stands after #265;
+> line numbers cited here predate it.
+
 ## Problem
 
 Mission Control can dispatch one agent session per harness and then mostly loses touch with
