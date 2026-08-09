@@ -1,9 +1,15 @@
 # Enforcement Drift Check — isolated workflow to guarantee 03:00 UTC runs.
 #
-# GitHub Actions scheduling with multiple crons in a single workflow has a known
-# quirk where github.event.schedule may not match reliably for all triggers.
-# This job was in scheduled-tasks.yml but never ran (issue #300), so it's isolated
-# here with its own dedicated cron to ensure it fires every day at 03:00 UTC.
+# This job lived in scheduled-tasks.yml gated on `github.event.schedule == '0 3 * * *'`
+# and demonstrably never fired — zero scheduled runs in the history (issue #300). Five
+# sibling jobs in that same file use the identical gating pattern and DO fire, so the
+# cause was NOT determinable from the available evidence; do not repeat the earlier
+# guess that multi-cron workflows mismatch `github.event.schedule`, which was asserted
+# and then retracted for lack of proof.
+#
+# Isolating it here with a single dedicated cron removes the variable entirely rather
+# than explaining it. If the 03:00 UTC run is still missing after this, the cause is
+# upstream of the gating expression and worth reopening #300 with run evidence.
 #
 # Raises enforcement-drift alert on any drift detected (hooks, agents, routines).
 # See config/routines.yml: enforcement-drift-check routine for details.
