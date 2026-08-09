@@ -22,8 +22,12 @@ jobs:
     name: PR must be linked to an issue
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: read
-      issues: write
+      # `issues.createComment` against a PR is authorized by `pull-requests`, not `issues` — the
+      # endpoint is shared but the scope check follows the resource. With only `issues: write` the
+      # comment step 403s "Resource not accessible by integration", so an unlinked PR got a red X
+      # and no explanation. This workflow is `on: pull_request` and never touches an issue, so
+      # `issues:` is dropped rather than widened. Encoded in tests/workflow_permissions.test.js.
+      pull-requests: write
     steps:
       - name: Check for linked issue
         id: check
