@@ -176,6 +176,21 @@ Exit 3 means "outage detected, alert raised" — the unit declares `SuccessExitS
 systemd does not read a working watchdog as a failed one. Alerting still goes through GitHub
 Issues, which is unaffected by `actions/permissions.enabled = false`.
 
+`tools/pr-checks-watchdog.js` rides the **same unit** and answers the other half: is any open PR
+against `main` producing **none** of the required contexts? PR #326 sat there having dispatched not
+one workflow run — its branch conflicted with `main`, so GitHub could not build
+`refs/pull/326/merge`, and **GitHub fires no `pull_request` events for a PR it cannot merge**. Only
+the GitGuardian app ran, because a GitHub App webhook does not need a merge ref. That is the
+#228/#229 class again: an **absent** required check is not a **failing** one, and branch protection
+only makes noise about the failing kind.
+
+The predicate is "none of the required contexts present", not "any missing", because a draft
+legitimately lacks `Security Audit (Sam CSO)` until it is flipped to ready — alerting on partial
+coverage would page on every draft and get muted. A 30-minute grace window keeps a just-opened PR
+quiet. Alert key `pr-missing-required-checks`; `--dry-run` prints the verdict.
+When a PR shows zero checks, check `gh pr view <n> --json mergeable` **first** — `CONFLICTING` is
+the usual answer, and a rebase brings the checks back.
+
 ## Path-Scoped Rules
 
 **DB / schema** (`*.sql`, `prisma/**`, `*.prisma`) — Pym domain. Migrate in dev first. Never
