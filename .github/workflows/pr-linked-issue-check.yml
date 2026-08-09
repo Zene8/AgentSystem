@@ -85,14 +85,19 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const comments = await github.rest.issues.listComments({
+            // per_page: 100 is load-bearing, not a tuning knob. At the default 30 the
+            // prior bot comment falls off page 1 on a busy PR, dedupe misses, and we
+            // post again -- which raises the comment count and makes the miss permanent.
+            // `edited` is a trigger, so an author could drive that loop at zero cost.
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
+              per_page: 100,
             });
 
             // Check if we already commented about the missing link
-            const existing = comments.data.find(c =>
+            const existing = comments.find(c =>
               c.user.login === 'github-actions[bot]' && c.body.includes('PR must be linked to an issue')
             );
 
