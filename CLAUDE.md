@@ -184,10 +184,12 @@ the GitGuardian app ran, because a GitHub App webhook does not need a merge ref.
 #228/#229 class again: an **absent** required check is not a **failing** one, and branch protection
 only makes noise about the failing kind.
 
-The predicate is "none of the required contexts present", not "any missing", because a draft
-legitimately lacks `Security Audit (Sam CSO)` until it is flipped to ready — alerting on partial
-coverage would page on every draft and get muted. A 30-minute grace window keeps a just-opened PR
-quiet. Alert key `pr-missing-required-checks`; `--dry-run` prints the verdict.
+The predicate is "none of the required contexts present", not "any missing": a partially-checked PR
+is already visibly `BLOCKED` and GitHub refuses the merge, so that case is loud and handled — and
+"any missing" would page on every check still in flight, which is indistinguishable from one that
+never dispatched. Note "zero check runs" would **not** have caught #326 either; it had one, from
+GitGuardian. A 30-minute grace window keeps a just-opened PR quiet. Alert key
+`pr-missing-required-checks`; `--dry-run` prints the verdict.
 When a PR shows zero checks, check `gh pr view <n> --json mergeable` **first** — `CONFLICTING` is
 the usual answer, and a rebase brings the checks back.
 

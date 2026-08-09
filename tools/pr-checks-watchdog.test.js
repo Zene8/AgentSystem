@@ -42,11 +42,21 @@ test('a healthy PR with all required checks is quiet', () => {
   assert.equal(decide({ prs: [pr()], requiredContexts: REQUIRED, now: NOW }).unchecked.length, 0);
 });
 
-test('a draft missing only the Sam audit is NOT an alert', () => {
-  // Sam's gate fires on ready-for-review, so every draft legitimately lacks it. Alerting on
-  // partial coverage would page on every draft PR in the repo, and the operator would mute it.
+test('partial coverage is NOT an alert — branch protection already blocks that merge', () => {
+  // A PR missing only some required contexts is visibly BLOCKED and GitHub refuses the merge.
+  // Alerting here would also fire on any check still in flight, which looks identical from the
+  // API to one that never dispatched. Only the total no-show is invisible.
   const v = decide({
-    prs: [pr({ isDraft: true, checkNames: ['Node.js tests', 'PR must be linked to an issue'] })],
+    prs: [pr({ checkNames: ['Node.js tests', 'PR must be linked to an issue'] })],
+    requiredContexts: REQUIRED,
+    now: NOW,
+  });
+  assert.equal(v.unchecked.length, 0);
+});
+
+test('one required context present is enough to stay quiet', () => {
+  const v = decide({
+    prs: [pr({ checkNames: ['Node.js tests', 'GitGuardian Security Checks'] })],
     requiredContexts: REQUIRED,
     now: NOW,
   });

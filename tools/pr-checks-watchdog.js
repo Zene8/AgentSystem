@@ -13,11 +13,15 @@
 // PR it cannot merge. Nothing in the repo noticed. That is the #228/#229 class again: an ABSENT
 // required check is not a FAILING one, and only the failing case is loud.
 //
-// Predicate is "none of the required contexts are present", not "any is missing", because a draft
-// PR legitimately lacks `Security Audit (Sam CSO)` until it is flipped to ready — alerting on
-// partial coverage would page on every draft. A PR missing *some* required check is already
-// visibly BLOCKED by branch protection; the invisible case, and the only one worth an alert, is
-// the total no-show.
+// Predicate is "none of the required contexts are present", not "any is missing". A PR missing
+// *some* required check is already visibly BLOCKED by branch protection and GitHub refuses the
+// merge — that case is loud and handled. The invisible case, and the only one worth an alert, is
+// the total no-show. "Any missing" would also be chronically noisy: which optional checks attach
+// to a PR varies with `paths` filters (`Workflow files must be loadable` runs on #327 but not
+// #328), and a check still in flight looks identical to one that never dispatched.
+//
+// Note "zero check runs at all" would NOT have caught #326 — it had exactly one, from GitGuardian.
+// The predicate has to be about *this repo's required contexts*, not raw check count.
 //
 // Runs off Actions, on the same systemd timer as `actions-watchdog.js`, for the same reason (#197):
 // a repo-wide Actions outage is one of the things that produces this exact symptom, and a detector
