@@ -1,0 +1,11 @@
+# Pin LF for anything a shell interprets, regardless of platform or core.autocrlf.
+#
+# Without this, a Windows checkout with core.autocrlf=true rewrites every shell script in
+# the working tree to CRLF. That breaks two things:
+#   1. deploy-hooks.js --check hashes the (CRLF) working-tree file against the installed
+#      (LF) copy and reports permanent drift, byte-identical or not.
+#   2. `#!/bin/bash\r` is a real runtime failure on the self-hosted Linux runner: the
+#      kernel looks for an interpreter literally named `bash\r`.
+# See #323.
+*.sh text eol=lf
+hooks/** text eol=lf
