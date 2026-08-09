@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
+      issues: write
     steps:
       - name: Check for linked issue
         id: check
@@ -105,13 +106,18 @@ Spec/plan PRs (labeled \`spec\`) are exempt.`,
 
       - name: Fail check if unlinked
         if: steps.check.outputs.linked == 'false' && steps.check.outputs.exempt != 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
-          echo "PR #${{ github.event.pull_request.number }} is not linked to an issue"
-          echo "Branch: ${{ github.event.pull_request.head.ref }}"
+          echo "PR #$PR_NUMBER is not linked to an issue"
+          echo "Branch: $PR_BRANCH"
           echo "Does not match issue-<N>-... pattern and PR body has no close/fix/resolve keyword"
           exit 1
 
       - name: Pass check if linked or exempt
         if: steps.check.outputs.linked == 'true' || steps.check.outputs.exempt == 'true'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
         run: |
-          echo "✓ PR is linked to issue: ${{ steps.check.outputs.reason }}"
+          echo "✓ PR is linked to issue: $REASON"
