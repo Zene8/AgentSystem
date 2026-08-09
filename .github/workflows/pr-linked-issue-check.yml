@@ -92,15 +92,15 @@ jobs:
                 issue_number: context.issue.number,
                 body: `**PR must be linked to an issue.**
 
-Link your PR using ONE of these methods:
-1. **Branch name**: \`issue-<N>-description\` (recommended)
-2. **PR body**: Include \`Closes #N\`, \`Fixes #N\`, or \`Resolves #N\`
+            Link your PR using ONE of these methods:
+            1. **Branch name**: \`issue-<N>-description\` (recommended)
+            2. **PR body**: Include \`Closes #N\`, \`Fixes #N\`, or \`Resolves #N\`
 
-Example:
-- Branch: \`issue-42-add-auth-check\`
-- Or add to PR body: \`Closes #42\`
+            Example:
+            - Branch: \`issue-42-add-auth-check\`
+            - Or add to PR body: \`Closes #42\`
 
-Spec/plan PRs (labeled \`spec\`) are exempt.`,
+            Spec/plan PRs (labeled \`spec\`) are exempt.`,
               });
             }
 
