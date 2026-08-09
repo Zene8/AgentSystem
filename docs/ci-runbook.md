@@ -80,3 +80,16 @@ retired; `friday-audit.yml` is the single engineering reviewer.
 so with no usable runner every PR is unmergeable without an admin override — and an admin
 override merges without the security gate. Fix the runner rather than making a habit of
 `--admin`.
+
+## Linked-issue check (#275)
+
+`pr-linked-issue-check.yml` runs on `ubuntu-latest` for every PR opened or synchronized against
+`main`. It requires each PR to reference an issue, checked in order:
+
+- the branch name matches `issue-<N>-...`, or
+- the PR body contains a close/fix/resolve keyword plus `#N` (`closes #42`, `fixes #42`, etc.)
+
+PRs labelled `spec` are exempt (design/discussion, not merged code). An unlinked PR gets a
+one-time bot comment explaining how to link it, and the check fails (`exit 1`) until it is
+linked or labelled `spec`. It is not currently in the `Required status checks` list above —
+add it there if it should block merges rather than just flag them.
