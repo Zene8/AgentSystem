@@ -193,6 +193,14 @@ privileged commands on the same host that runs `sam-audit.yml`, the hard gate on
 so a free-form string input would be arbitrary remote code execution on the machine that decides
 what gets merged.
 
+**It cannot be dispatched before it is merged.** GitHub only indexes a `workflow_dispatch` workflow
+that exists on the repository's **default branch**; until then `--ref <feature-branch>` returns
+`HTTP 404: workflow runner-maintenance.yml not found on the default branch`, and the file does not
+appear in `gh api repos/:owner/:repo/actions/workflows` at all. `--ref` selects which branch's copy
+*runs*, not whether the workflow exists. So the first `status` run is a post-merge action, and the
+branch-before-merge testing rule cannot apply to a dispatch-only workflow — lint and YAML parse are
+the pre-merge evidence available.
+
 ```bash
 gh workflow run runner-maintenance.yml -f mode=status            # read-only; always run this first
 gh workflow run runner-maintenance.yml -f mode=repair-brain      # only after reading a status run
