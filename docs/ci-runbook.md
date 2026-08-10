@@ -153,6 +153,14 @@ none. Four things about it are deliberate and should survive future edits:
 
 - **Match the marker, not the wording.** The text changed in #295 and is not unique to this step —
   `runner-maintenance.yml` also mentions "Ready to merge".
+- **Anchor the marker match with `startsWith`, never `includes`.** Caught in review on #404. The bot
+  authors other comments on the same PR whose bodies relay diff-derived text — including this
+  workflow's own "audit could not run" body, which interpolates model output. Any PR touching
+  `sam-audit.yml`, its test, or this runbook carries the literal marker string in its diff. With an
+  unanchored match, such a comment can be adopted as "the ping", and because it is *older* the
+  "oldest wins" rule below picks it — so the next approved run PATCHes an outage record away and
+  leaves a green check. Not a merge bypass (`pr-guard.js` gates on a PR *review*, which
+  `updateComment` cannot touch), but a loss of audit trail.
 - **`github.paginate` with `per_page: 100`.** At the default 30 the previous ping falls off page 1
   on a busy PR, the lookup misses, and the step silently degrades to the append bug. Same
   load-bearing reason as the linked-issue gate's dedupe.

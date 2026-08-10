@@ -545,15 +545,27 @@ jobs:
               // per_page: 100 + paginate is load-bearing, not a tuning knob: at the default 30 the
               // previous ping falls off page 1 on a busy PR, the lookup misses, and this silently
               // degrades to the append bug it is fixing.
+              // `startsWith`, not `includes`: the marker is written as the FIRST line, and the bot
+              // authors other comments on this same PR whose bodies relay text derived from the
+              // diff — including this step's own "audit could not run" body, which interpolates
+              // model output. Any PR touching this workflow, its test or the runbook carries the
+              // literal marker string in its diff (this one does), so an `includes` match could
+              // adopt an outage record as "its" ping and quietly PATCH the outage away — it is
+              // older, so "oldest wins" would pick it. Anchoring to the start closes the class.
               const mine = comments.filter(c =>
-                c.user?.login === 'github-actions[bot]' && (c.body || '').includes(MARKER)
+                c.user?.login === 'github-actions[bot]' && (c.body || '').startsWith(MARKER)
               );
               // Oldest wins. Every PR in the #404 evidence already carries two or three of these,
               // so multi-match is the normal case, not an error — update the first one a reader
               // scrolls to and leave the rest. Deleting comments is not this step's business.
               for (const c of mine) if (!existing || c.id < existing.id) existing = c;
             } catch (err) {
-              core.warning(`Could not read existing comments, will post a new ping: ${err.message}`);
+              // A 403 here is a permission regression: systemic, silent and permanent, because the
+              // fallback below still posts and the check still goes green. Anything else is a
+              // transient read failure. Naming which one is the difference between a line a human
+              // must act on and one they can ignore.
+              const kind = err.status === 403 ? 'PERMISSION REGRESSION (403)' : `read failed (${err.status ?? 'no status'})`;
+              core.warning(`Could not read existing comments — ${kind}; posting a new ping instead of editing: ${err.message}`);
             }
 
             // Fail-soft on the write as well. This step only runs after an APPROVED verdict, so an
@@ -567,8 +579,13 @@ jobs:
                 });
                 return;
               } catch (err) {
-                // Typically a 404: the comment was deleted between the read and the write.
-                core.warning(`Could not update ping ${existing.id}, posting a new one: ${err.message}`);
+                // 404 is benign and self-correcting: the comment was deleted between the read and
+                // the write. 403 is not — it means this step lost `pull-requests: write` and will
+                // append forever behind a green check until someone reads this annotation.
+                const kind = err.status === 403
+                  ? 'PERMISSION REGRESSION (403) — `pull-requests: write` no longer covers updateComment'
+                  : err.status === 404 ? 'the ping was deleted (404)' : `update failed (${err.status ?? 'no status'})`;
+                core.warning(`Could not update ping ${existing.id} — ${kind}; posting a new one: ${err.message}`);
               }
             }
 

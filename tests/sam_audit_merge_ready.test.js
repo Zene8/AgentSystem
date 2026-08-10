@@ -268,6 +268,39 @@ test('an unmarked bot comment is left alone', async () => {
   assert.equal(posted.length, 1);
 });
 
+test('a bot comment that merely QUOTES the marker is not adopted as the ping', async () => {
+  // Sam's finding on #406. The marker is matched with startsWith, not includes, because the bot
+  // authors other comments here whose bodies relay diff-derived text — and any PR touching this
+  // workflow, this test or the runbook carries the literal marker in its diff. The dangerous shape
+  // is this step's own "audit could not run" body, which interpolates model output: it is OLDER, so
+  // an includes-match plus "oldest wins" would PATCH the outage record away with a green verdict.
+  const outageRecord = {
+    id: 800,
+    user: BOT,
+    body: '⚠️ **Sam (CSO) — Audit could not run**\n\nthe diff adds `<!-- audit-gate -->` to the body',
+  };
+  const { posted, patched } = await post({
+    checkRuns: [run_('test', 29, 'success')],
+    comments: [outageRecord, comment_(900)],
+  });
+  assert.equal(posted.length, 0, 'the genuine ping at 900 was available to edit');
+  assert.equal(
+    patched[0].comment_id, 900,
+    'the outage record at 800 is older and would win "oldest wins" — it must not match at all'
+  );
+});
+
+test('the marker must be matched anchored, not anywhere in the body', () => {
+  // Guards the fix rather than the symptom: a future edit relaxing this back to `includes`
+  // reopens the whole class, and the failure is invisible (a real comment silently overwritten).
+  const src = pingScriptSource();
+  assert.match(src, /startsWith\(MARKER\)/, 'the marker match must be anchored to the body start');
+  assert.equal(
+    /includes\(MARKER\)/.test(src), false,
+    'an unanchored includes(MARKER) match can adopt any bot comment quoting the marker'
+  );
+});
+
 test('a failed lookup falls back to posting, and does not fail the audit', async () => {
   // This step runs AFTER an approved verdict. An exception here turns the required check
   // `Security Audit (Sam CSO)` red on a PR Sam actually passed — worse than a duplicate comment.
@@ -288,6 +321,37 @@ test('a ping deleted between the lookup and the edit degrades to posting', async
   });
   assert.equal(posted.length, 1, 'a failed PATCH must still leave the verdict on the PR');
   assert.ok(warnings.some(w => /404/.test(w)));
+});
+
+test('a 403 on the update is named as a permission regression, not a generic failure', async () => {
+  // The one failure mode the fail-soft design can hide: losing `pull-requests: write` degrades to
+  // appending behind a still-green check. It must not read like the benign 404 race, because a
+  // human has to act on it. This is the annotation that makes the blind spot visible.
+  const err = Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+  const { posted, warnings } = await post({
+    checkRuns: [run_('test', 30, 'success')],
+    comments: [comment_(1000)],
+    patchThrows: err,
+  });
+  assert.equal(posted.length, 1, 'the verdict still reaches the PR');
+  assert.ok(
+    warnings.some(w => /PERMISSION REGRESSION \(403\)/.test(w)),
+    `a 403 must be labelled a permission regression, got: ${JSON.stringify(warnings)}`
+  );
+});
+
+test('a 404 on the update is NOT labelled a permission regression', async () => {
+  const err = Object.assign(new Error('Not Found'), { status: 404 });
+  const { warnings } = await post({
+    checkRuns: [run_('test', 31, 'success')],
+    comments: [comment_(1100)],
+    patchThrows: err,
+  });
+  assert.ok(warnings.some(w => /deleted \(404\)/.test(w)));
+  assert.equal(
+    warnings.some(w => /PERMISSION REGRESSION/.test(w)), false,
+    'crying permission regression on a benign race trains people to ignore the annotation'
+  );
 });
 
 test('the sticky path applies to the unreadable-rollup body too', async () => {
