@@ -138,6 +138,42 @@ excluding its own in-progress run — and posts one of: ready to merge, N checks
 N checks still running (named), or, if the rollup cannot be read, an explicit statement that it
 does not know. Sam's approval is reported as covering the security audit only.
 
+### It is ONE comment, edited in place (#404)
+
+The step is triggered by `synchronize` as well as `opened`/`ready_for_review`, and its body depends
+on a check rollup that is still moving while it runs — so it necessarily runs several times per PR
+and would say something different each time. It used to end in a bare `issues.createComment`, which
+appended a fresh ping per run: PR #400 got one at 08:25 ("2 other check(s) are still running") and
+another at 08:33 ("Ready to merge"), PR #370 got three inside four minutes. The tell in the API is
+`created_at == updated_at` on every one of them — no comment was ever patched.
+
+It is now an upsert keyed on a hidden `<!-- audit-gate -->` marker on the body's first line: find
+the bot-authored comment carrying the marker, `updateComment` it, `createComment` only if there is
+none. Four things about it are deliberate and should survive future edits:
+
+- **Match the marker, not the wording.** The text changed in #295 and is not unique to this step —
+  `runner-maintenance.yml` also mentions "Ready to merge".
+- **`github.paginate` with `per_page: 100`.** At the default 30 the previous ping falls off page 1
+  on a busy PR, the lookup misses, and the step silently degrades to the append bug. Same
+  load-bearing reason as the linked-issue gate's dedupe.
+- **Both API calls are fail-soft and fall back to posting.** The step runs only after an APPROVED
+  verdict, so a throw here turns the required check `Security Audit (Sam CSO)` red on a PR Sam
+  actually passed. A duplicate comment is a nuisance; a red gate on a clean PR blocks the merge
+  path for everyone. Failures are surfaced with `core.warning`, never swallowed.
+- **The upsert sits outside the rollup `try`.** A failed comment-list read says nothing about the
+  check rollup, and folding it into that handler would rewrite an accurate body into "could not
+  read the check rollup" — reintroducing the #295 defect of reporting something it never checked.
+
+When several marked pings already exist (every PR above), the **oldest** is updated and the rest are
+left alone — this step does not delete comments. No permission change was needed:
+`issues.updateComment` against a PR is authorized by `pull-requests: write`, the same scope
+`createComment` already relied on (see the note in `pr-linked-issue-check.yml`).
+
+Verifying a change here means two pushes to a scratch PR and then
+`gh api repos/Zene8/AgentSystem/issues/<n>/comments`: the proof is ONE ping whose `updated_at` has
+advanced past its `created_at`. A count of one alone proves nothing — the second run may simply not
+have fired.
+
 ## Workflow lint (#293)
 
 `workflow-lint.yml` fails when a file in `.github/workflows/` is unloadable or invalid.
