@@ -11,6 +11,7 @@ import {
   recomputeComposite,
   isBrainDir,
 } from './graph/graph-lib.js';
+import { isMainModule } from './is-main.js';
 
 function printHelp() {
   console.log(`
@@ -272,4 +273,4 @@ function main() {
   console.log(`decay pass: ${processed} brain(s) processed, ${archived} edge(s) archived, ${active} edge(s) active`);
 }
 
-main();
+if (isMainModule(import.meta.url)) main();
