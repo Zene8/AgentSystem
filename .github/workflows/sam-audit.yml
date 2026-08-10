@@ -440,6 +440,14 @@ jobs:
             // must stay in step with the `name:` on the job above.
             const SELF = 'Security Audit (Sam CSO)';
 
+            // #404: this step fires on every check-suite state change, so the ping must be ONE
+            // comment edited in place, not a new one per settling of the check list. Measured on
+            // PR #400 (pings at 08:25 and 08:33) and PR #370 (three inside four minutes), each
+            // with `created_at == updated_at` — nothing was ever patched. The marker is a hidden
+            // HTML comment so the next run can find its own previous ping without matching on
+            // wording, which changes (it changed in #295) and is not unique to this step.
+            const MARKER = '<!-- audit-gate -->';
+
             const approval = '✅ **Sam (CSO) approved** — the security audit passed.';
             let body;
 
@@ -519,6 +527,49 @@ jobs:
                 'comment says nothing about the other checks. Read the check list yourself before',
                 'merging — `/merge` will re-verify it and refuse if anything is red.',
               ].join('\n');
+            }
+
+            // The marker leads the body so it is present on every branch above, including the
+            // degraded one from the catch — that path posts too, and an upsert that skipped it
+            // would append forever in exactly the case nobody is watching.
+            body = `${MARKER}\n${body}`;
+
+            // Upsert. Deliberately OUTSIDE the try above: a failure reading the comment list says
+            // nothing about the check rollup, and folding it in there would rewrite an accurate
+            // body into "could not read the check rollup".
+            let existing = null;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: prNumber, per_page: 100,
+              });
+              // per_page: 100 + paginate is load-bearing, not a tuning knob: at the default 30 the
+              // previous ping falls off page 1 on a busy PR, the lookup misses, and this silently
+              // degrades to the append bug it is fixing.
+              const mine = comments.filter(c =>
+                c.user?.login === 'github-actions[bot]' && (c.body || '').includes(MARKER)
+              );
+              // Oldest wins. Every PR in the #404 evidence already carries two or three of these,
+              // so multi-match is the normal case, not an error — update the first one a reader
+              // scrolls to and leave the rest. Deleting comments is not this step's business.
+              for (const c of mine) if (!existing || c.id < existing.id) existing = c;
+            } catch (err) {
+              core.warning(`Could not read existing comments, will post a new ping: ${err.message}`);
+            }
+
+            // Fail-soft on the write as well. This step only runs after an APPROVED verdict, so an
+            // exception here turns the required check red on a PR Sam actually passed — a strictly
+            // worse outcome than a duplicate comment. Both fallbacks land on createComment, which
+            // is the pre-#404 behavior: degraded, never silent, never red.
+            if (existing) {
+              try {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: existing.id, body,
+                });
+                return;
+              } catch (err) {
+                // Typically a 404: the comment was deleted between the read and the write.
+                core.warning(`Could not update ping ${existing.id}, posting a new one: ${err.message}`);
+              }
             }
 
             await github.rest.issues.createComment({
