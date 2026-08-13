@@ -17,7 +17,15 @@ Hooks do nothing until **copied** to `~/.claude/hooks/` AND **registered** under
 - `node tools/deploy-hooks.js` — deploy + register + drop stale registrations, idempotent
 - `node tools/deploy-hooks.js --check` — exit 1 on drift, missing **or stale** registration
 
-Run after any `hooks/` change. Manifest is `HOOK_REGISTRY` in `tools/deploy-hooks.js` — add new
+Run after any `hooks/` change — though **SessionStart now runs it for you** once that change is on
+`main`: the start phase of `hooks/continuous-sync-hook.js` deploys whenever `tools/repo-sync.js`
+reports it pulled, i.e. on a clean `main` checkout only (#396). Before that, a merged `hooks/`
+change was installed-but-inert on every host until someone remembered the command, and the daily
+drift check raised a `human-needed` alert for a condition that healed itself at the next session.
+It is not a substitute for running it by hand on a feature branch, where the pull — and so the
+deploy — is deliberately skipped.
+
+Manifest is `HOOK_REGISTRY` in `tools/deploy-hooks.js` — add new
 hooks there. Registration was once PowerShell-only, so on Linux the whole pipeline was
 installed-but-inert; `--check` is what stops that recurring.
 
