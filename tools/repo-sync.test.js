@@ -185,6 +185,29 @@ test('three consecutive skips while behind raise one per-host alert', () => {
   assert.equal(git(s.clone, 'status', '--porcelain').includes('a.txt'), true, 'local edit was destroyed');
 });
 
+test('a host that stays behind re-raises, so closing the issue cannot latch it silent', () => {
+  // The regression guard on the fix to a permanent `raised` latch. human-needed.js's raise() only
+  // searches OPEN alerts, so a human who closes this alert without clearing the tree would, under a
+  // latch, get silence from a host still falling behind — #423 all over again, one level up.
+  const s = scenario();
+  const stub = alertStub(s.root);
+  const state = join(s.root, 'skip-state.json');
+  writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
+  advanceOrigin(s);
+
+  const once = () => run(s.clone, '--state', state, '--human-needed', stub.script);
+
+  once(); once(); once();
+  assert.equal(stub.lines().length, 1, 'first alert');
+  once(); once();
+  assert.equal(stub.lines().length, 1, 'hammered human-needed between multiples of N');
+  once(); // the 6th consecutive skip — still stuck, so say so again
+  assert.equal(stub.lines().length, 2, 'went silent forever after the first alert');
+  assert.deepEqual(JSON.parse(stub.lines()[1]).slice(0, 1), ['raise']);
+
+  assert.equal(git(s.clone, 'status', '--porcelain').includes('a.txt'), true, 'local edit was destroyed');
+});
+
 test('a successful sync clears the skip counter and resolves the alert', () => {
   const s = scenario();
   const stub = alertStub(s.root);

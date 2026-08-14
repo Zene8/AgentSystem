@@ -177,7 +177,14 @@ export function noteSkip(file, root) {
   const counts = readCounts(file);
   const entry = counts[root] || { count: 0, raised: false };
   entry.count += 1;
-  const shouldRaise = entry.count >= ALERT_AFTER_SKIPS && !entry.raised;
+  // Every Nth skip, not "the Nth skip and never again". A permanent `raised` latch looks like it
+  // spares human-needed.js the traffic, but it hands back the #423 failure one level up: a human
+  // who CLOSES the alert without clearing the tree — triaged, misread, or fixed on the wrong host —
+  // latches this host silent forever while it keeps falling further behind. raise() only searches
+  // OPEN alerts, so a closed one is never found and never re-opened by anything else.
+  // Re-raising on a multiple of N keeps the anti-hammer property that motivated the latch (at most
+  // one call per N session starts) and human-needed.js's own 20h ping window bounds it again.
+  const shouldRaise = entry.count >= ALERT_AFTER_SKIPS && entry.count % ALERT_AFTER_SKIPS === 0;
   if (shouldRaise) entry.raised = true;
   counts[root] = entry;
   writeCounts(file, counts);
