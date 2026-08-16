@@ -16,7 +16,8 @@
 //                                              text (a node that legitimately quotes markers).
 //                                              Never bypasses an actually-unfinished merge.
 //
-// Exit codes: 0 synced (or nothing to do), 1 conflict needing a human, 2 usage/setup error.
+// Exit codes: 0 synced (or nothing to do), 1 conflict or corruption needing a human, 2 usage/setup
+// error.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -57,13 +58,37 @@ for (let i = 0; i < args.length; i++) {
 function die(msg, code) { process.stderr.write(`brain-sync: ${msg}\n`); process.exit(code); }
 function log(msg) { process.stdout.write(`${msg}\n`); }
 
+// Known git object-database corruption signatures, matched against a failed command's stderr.
+// ponytail: a fixed pattern list, not authoritative like `git fsck` -- extend the regex (or switch
+// to a preflight `git fsck --connectivity-only`) if a corruption mode shows up that doesn't match.
+const CORRUPTION_PATTERN =
+  /(fatal: bad object|error: object file .* is empty|fatal: loose object .* is corrupt|error: bad sha1 file|fatal: unable to read \S+ object)/;
+
 // Every git call is checked. A sync tool that ignores a failed pull and pushes anyway is how you
 // get a force-push argument with yourself later.
 function git(gitArgs, { allowFail = false } = {}) {
   const r = spawnSync('git', ['-C', opt.root, ...gitArgs], { encoding: 'utf8' });
   if (r.error) die(`cannot run git: ${r.error.message}`, 2);
   if (r.status !== 0 && !allowFail) {
-    die(`git ${gitArgs.join(' ')} failed (${r.status})\n${(r.stderr || r.stdout).trim()}`, 1);
+    const stderr = (r.stderr || r.stdout).trim();
+    // A git command can fail for many honest reasons -- offline, bad creds, a non-fast-forward push
+    // -- and the generic die() below is right for those. It can also fail because the object
+    // database itself is damaged, which git reports in its own distinctive words. That gets a
+    // distinct sentinel phrase, the same shape as the #348 merge-conflict guard's `merge conflict
+    // needs a human`: there is no repair this script can attempt, so brain-sync-run.js must alert a
+    // human rather than filing it next to an offline fetch. "agent-memory git object database is
+    // corrupt" verbatim: brain-sync-run.js's exported CORRUPT_MARK keys off this exact phrase, and
+    // it is not `import`ed from here because this file exports nothing at module level --
+    // CORRUPTION_PATTERN above is local to main(), same as everything else in this script.
+    if (CORRUPTION_PATTERN.test(stderr)) {
+      die(`agent-memory git object database is corrupt at ${opt.root} — ` +
+          `\`git ${gitArgs.join(' ')}\` failed reading the object database itself, not from a ` +
+          `merge conflict or a transient error:\n${stderr}\n\n` +
+          `There is no local repair this script can attempt. Resolve with \`git fsck\` and a ` +
+          `human. There is no override flag for this -- unlike a stuck merge, a damaged object ` +
+          `database has no "the operator has decided it's fine" case.\n`, 1);
+    }
+    die(`git ${gitArgs.join(' ')} failed (${r.status})\n${stderr}`, 1);
   }
   return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }

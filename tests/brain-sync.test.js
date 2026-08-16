@@ -257,3 +257,43 @@ test('an unknown flag exits 2 rather than guessing', () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /unknown option/);
 });
+
+// ── the corrupt-object-database guard ────────────────────────────────────────
+//
+// A damaged object database (a zeroed-out loose object) makes plain git commands fail with git's
+// own distinctive error text -- "object file ... is empty", "fatal: bad object" -- and until now
+// brain-sync.js reported that identically to an offline fetch or a stale token: exit 1, a generic
+// message. brain-sync-run.js's classify() then filed it as a non-alerting error. Real-world blast
+// radius: #429/#430 -- weekly-memory-decay and weekly-trust-scores both died in 9s on this exact
+// `fatal: bad object HEAD`, and nothing in the chain said the brain repo was corrupt.
+
+/** Corrupt a real git object the way production actually broke: truncate a loose object to empty. */
+function corruptHead(repo) {
+  const head = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  const objPath = path.join(repo, '.git', 'objects', head.slice(0, 2), head.slice(2));
+  fs.chmodSync(objPath, 0o644); // git writes loose objects read-only
+  fs.writeFileSync(objPath, '');
+  return objPath;
+}
+
+test('a corrupt object database is reported distinctly, not as a generic failure or a conflict', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    corruptHead(a);
+    const r = sync(a);
+    assert.equal(r.code, 1, 'a damaged object database must not be reported as healthy');
+    assert.match(r.err, /agent-memory git object database is corrupt/);
+    assert.doesNotMatch(r.err, /merge conflict needs a human/,
+      'corruption must not be conflated with the #348 merge-conflict guard');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('--ignore-markers does not bypass the corruption guard', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    corruptHead(a);
+    const r = sync(a, ['--ignore-markers']);
+    assert.equal(r.code, 1, 'there is no operator override for a damaged object database');
+    assert.match(r.err, /agent-memory git object database is corrupt/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
