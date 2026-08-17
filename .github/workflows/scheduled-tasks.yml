@@ -83,6 +83,10 @@ jobs:
     # still defaults to daily-triage, so a bare `gh workflow run scheduled-tasks.yml` behaves
     # exactly as it always did.
     if: (github.event_name == 'schedule' && (github.event.schedule == '0 13 * * *' || github.event.schedule == '0 5 * * *')) || (github.event_name == 'workflow_dispatch' && inputs.job == 'daily-triage')
+    # self-hosted: needs Beeper Desktop on localhost:23373, this host's interactively-authenticated
+    # Notion/Gmail/Zoho/Calendar/Drive MCP connectors under ~/.claude, and the private
+    # gitignored daily-triage skill installed only on this host — none of it exists on a fresh
+    # hosted VM.
     runs-on: [self-hosted, Linux]
     # Generous: 10 items x up to 30min each, batched 4 at a time, plus the gather pass.
     timeout-minutes: 180
@@ -389,6 +393,8 @@ jobs:
   # memory-maintenance.js operates on the local ~/agent-memory brain — local machine state.
   weekly-brain-consolidation:
     if: (github.event_name == 'schedule' && github.event.schedule == '0 8 * * 1') || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-brain-consolidation')
+    # self-hosted: needs ~/agent-memory host checkout — memory-maintenance.js --reflect and
+    # backfill-salience.js both read/write ~/agent-memory/nexus/personal-brain directly.
     runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -421,6 +427,9 @@ jobs:
   # report success without pruning anything.
   weekly-memory-decay:
     if: (github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-memory-decay')
+    # self-hosted: needs ~/agent-memory host checkout — memory-decay.js --all discovers and
+    # decays every brain under ~/agent-memory/nexus/, then brain-sync.js pushes from that same
+    # checkout.
     runs-on: [self-hosted, Linux]
     permissions:
       issues: write
@@ -474,6 +483,10 @@ jobs:
   #     reading "No run data yet." — while hooks/memory-router.js routed on that stub.
   weekly-trust-scores:
     if: (github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-trust-scores')
+    # self-hosted: needs ~/agent-memory host checkout — compute-trust-scores.js reads
+    # ~/agent-memory/nexus/run-log/* and writes ~/agent-memory/nexus/trust-scores.md, then
+    # brain-sync.js pushes from that same checkout. #154 named this job "light"; it is not
+    # portable — a hosted runner has no run-log to compute from.
     runs-on: [self-hosted, Linux]
     permissions:
       issues: write
@@ -536,6 +549,10 @@ jobs:
   # caveman-cache-fix, deploy-hooks --check) — none of these paths exist on a hosted runner.
   weekly-hygiene:
     if: (github.event_name == 'schedule' && github.event.schedule == '0 0 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-hygiene')
+    # self-hosted: needs both ~/agent-memory (rotate-logs.js, log-rotate.js operate on
+    # ~/agent-memory/nexus/*.jsonl) and ~/.claude (claude-json-hygiene.js, caveman-cache-fix.js,
+    # deploy-hooks.js --check all read/write under ~/.claude) — host-only paths verified directly
+    # in each tool, not assumed. #154 named this job "light"; it is not portable.
     runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -574,6 +591,10 @@ jobs:
   # invariant nothing creates or verifies.
   weekly-agent-review:
     if: (github.event_name == 'schedule' && github.event.schedule == '0 9 * * 6') || (github.event_name == 'workflow_dispatch' && inputs.job == 'weekly-agent-review')
+    # self-hosted: needs ~/agent-memory host checkout (routing-report.js reads
+    # ~/agent-memory/nexus/routing-log.jsonl, session-cost.js reads session-log.jsonl there,
+    # the review writes its decision record via decision-log.js into the same brain) and the
+    # `claude` CLI installed/authenticated on this host to run the Jarvis review itself.
     runs-on: [self-hosted, Linux]
     timeout-minutes: 60
     # #337: same reasoning as daily-triage's concurrency block above — queue a manual dispatch
