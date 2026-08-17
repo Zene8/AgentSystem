@@ -28,6 +28,50 @@ import { isMainModule } from './is-main.js';
 
 const __filename = fileURLToPath(import.meta.url);
 
+// Known git object-database corruption signatures, matched against a failed command's stderr.
+// ponytail: a fixed pattern list, not authoritative like `git fsck` -- extend the regex (or switch
+// to a preflight `git fsck --connectivity-only`) if a corruption mode shows up that doesn't match.
+const CORRUPTION_PATTERN =
+  /(fatal: bad object|error: object file .* is empty|fatal: loose object .* is corrupt|error: bad sha1 file|fatal: unable to read \S+ object)/;
+
+/**
+ * The sentinel phrases. Both are matched verbatim by tools/brain-sync-run.js, which imports them
+ * from here rather than hand-copying the literals. They must stay **disjoint substrings**: that file
+ * classifies by `String(stderr).includes(...)`, so if the remote phrase contained the local one, a
+ * damaged *origin* would be diagnosed as a damaged local checkout and the alert would tell a person
+ * to throw the local copy away. Neither is a substring of the other, and neither contains the
+ * merge-conflict phrase `merge conflict needs a human`.
+ */
+export const CORRUPT_MARK = 'agent-memory git object database is corrupt';
+export const REMOTE_CORRUPT_MARK = 'agent-memory remote object database is corrupt';
+
+/**
+ * Which side of the wire the corruption is on, or null when this stderr is not corruption at all.
+ *
+ * Git prefixes everything the *server* said with `remote: `. That distinction is the whole point:
+ * the same "object file ... is empty" text can come from this host's `.git` (local damage) or be
+ * relayed from origin through `git fetch`/`git push` (the remote's damage). Diagnosing the second
+ * as the first is not a cosmetic mislabel -- the local alert body says to `mv` the checkout aside
+ * and re-clone from origin, which would clone *from the broken side* and destroy the last healthy
+ * copy along with any commit it holds that never reached origin.
+ *
+ * Local wins when both match: if this host's own object database is damaged, that is the problem in
+ * front of the operator, whatever the server also said.
+ */
+export function classifyCorruption(raw) {
+  const text = String(raw || '');
+  if (!text) return null;
+  const isRemote = (l) => /^\s*remote:/.test(l);
+  const lines = text.split('\n');
+  if (CORRUPTION_PATTERN.test(lines.filter((l) => !isRemote(l)).join('\n'))) {
+    return { side: 'local', text };
+  }
+  if (CORRUPTION_PATTERN.test(lines.filter(isRemote).join('\n'))) {
+    return { side: 'remote', text };
+  }
+  return null;
+}
+
 function main() {
 const args = process.argv.slice(2);
 const opt = {
@@ -58,37 +102,48 @@ for (let i = 0; i < args.length; i++) {
 function die(msg, code) { process.stderr.write(`brain-sync: ${msg}\n`); process.exit(code); }
 function log(msg) { process.stdout.write(`${msg}\n`); }
 
-// Known git object-database corruption signatures, matched against a failed command's stderr.
-// ponytail: a fixed pattern list, not authoritative like `git fsck` -- extend the regex (or switch
-// to a preflight `git fsck --connectivity-only`) if a corruption mode shows up that doesn't match.
-const CORRUPTION_PATTERN =
-  /(fatal: bad object|error: object file .* is empty|fatal: loose object .* is corrupt|error: bad sha1 file|fatal: unable to read \S+ object)/;
+// A git command can fail for many honest reasons -- offline, bad creds, a non-fast-forward push --
+// and git()'s generic die() is right for those. It can also fail because an object database is
+// damaged, which git reports in its own distinctive words. That gets a distinct sentinel phrase, the
+// same shape as the #348 merge-conflict guard's `merge conflict needs a human`: there is no repair
+// this script can attempt, so brain-sync-run.js must alert a human rather than filing it next to an
+// offline fetch. The phrases are CORRUPT_MARK / REMOTE_CORRUPT_MARK above, which brain-sync-run.js
+// imports rather than re-typing.
+function dieCorrupt(gitArgs, corrupt, root, die) {
+  const cmd = `\`git ${gitArgs.join(' ')}\``;
+  if (corrupt.side === 'remote') {
+    die(`${REMOTE_CORRUPT_MARK} — ${cmd} was refused by origin, which reported damage in its own `
+      + `object database (every line below prefixed \`remote: \` came from the server, not from `
+      + `${root}):\n${corrupt.text}\n\n`
+      + `The checkout at ${root} is NOT known to be damaged and must not be discarded: it may hold `
+      + `commits that never reached the broken origin, and re-cloning would pull from the broken `
+      + `side. Leave it alone, keep it as the healthy copy, and get origin repaired (or repointed `
+      + `at a healthy mirror) by a human.\n`, 1);
+  }
+  die(`${CORRUPT_MARK} at ${root} — ${cmd} failed reading the object database itself, not from a `
+    + `merge conflict or a transient error:\n${corrupt.text}\n\n`
+    + `There is no local repair this script can attempt. Resolve with \`git fsck\` and a human. `
+    + `There is no override flag for this -- unlike a stuck merge, a damaged object database has no `
+    + `"the operator has decided it's fine" case.\n`, 1);
+}
 
 // Every git call is checked. A sync tool that ignores a failed pull and pushes anyway is how you
 // get a force-push argument with yourself later.
 function git(gitArgs, { allowFail = false } = {}) {
   const r = spawnSync('git', ['-C', opt.root, ...gitArgs], { encoding: 'utf8' });
   if (r.error) die(`cannot run git: ${r.error.message}`, 2);
-  if (r.status !== 0 && !allowFail) {
-    const stderr = (r.stderr || r.stdout).trim();
-    // A git command can fail for many honest reasons -- offline, bad creds, a non-fast-forward push
-    // -- and the generic die() below is right for those. It can also fail because the object
-    // database itself is damaged, which git reports in its own distinctive words. That gets a
-    // distinct sentinel phrase, the same shape as the #348 merge-conflict guard's `merge conflict
-    // needs a human`: there is no repair this script can attempt, so brain-sync-run.js must alert a
-    // human rather than filing it next to an offline fetch. "agent-memory git object database is
-    // corrupt" verbatim: brain-sync-run.js's exported CORRUPT_MARK keys off this exact phrase, and
-    // it is not `import`ed from here because this file exports nothing at module level --
-    // CORRUPTION_PATTERN above is local to main(), same as everything else in this script.
-    if (CORRUPTION_PATTERN.test(stderr)) {
-      die(`agent-memory git object database is corrupt at ${opt.root} — ` +
-          `\`git ${gitArgs.join(' ')}\` failed reading the object database itself, not from a ` +
-          `merge conflict or a transient error:\n${stderr}\n\n` +
-          `There is no local repair this script can attempt. Resolve with \`git fsck\` and a ` +
-          `human. There is no override flag for this -- unlike a stuck merge, a damaged object ` +
-          `database has no "the operator has decided it's fine" case.\n`, 1);
-    }
-    die(`git ${gitArgs.join(' ')} failed (${r.status})\n${stderr}`, 1);
+  if (r.status !== 0) {
+    const stderr = (r.stderr || r.stdout || '').trim();
+    // Deliberately OUTSIDE the `!allowFail` branch, and this is the bug the guard shipped with:
+    // the one call that touches the most of the object database -- the merge in `git pull` -- is
+    // `allowFail: true`, because a merge conflict is an expected outcome there. Object damage that
+    // `git status` never reads (a bad object behind the merge base, a corrupt pack) therefore
+    // surfaced only as a non-zero pull with no unmerged paths, fell through to the conflict branch,
+    // and raised a "resolve this merge by hand" alert about a merge that does not exist. Corruption
+    // is never an expected outcome of any call here, so allowFail must not mean "ignore it".
+    const corrupt = classifyCorruption(stderr);
+    if (corrupt) dieCorrupt(gitArgs, corrupt, opt.root, die);
+    if (!allowFail) die(`git ${gitArgs.join(' ')} failed (${r.status})\n${stderr}`, 1);
   }
   return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }

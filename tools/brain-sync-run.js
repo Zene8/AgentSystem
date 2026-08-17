@@ -45,6 +45,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './is-main.js';
 import { acquireLock, releaseLock, DEFAULT_STALE_MS, workBudgetMs } from './sync-lock.js';
+import { CORRUPT_MARK, REMOTE_CORRUPT_MARK } from './brain-sync.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -73,15 +74,14 @@ export function alertKey(host = hostname(), base = ALERT_KEY) {
 const CONFLICT_MARK = 'merge conflict needs a human';
 
 /**
- * The exact phrase brain-sync.js prints when a git command failed because the object database
- * itself is damaged (#429/#430: weekly-memory-decay and weekly-trust-scores both died in 9s on
- * `fatal: bad object HEAD`, and nothing downstream said the brain repo was corrupt). Exported,
- * unlike CONFLICT_MARK, so a test can assert against the one literal this file matches on rather
- * than a second hand-copied string. It cannot instead be imported *from* brain-sync.js: that file
- * exports nothing at module level (its CORRUPTION_PATTERN is local to main()), so there is nothing
- * there for this file to import.
+ * The phrases brain-sync.js prints when a git command failed because an object database is damaged
+ * (#429/#430: weekly-memory-decay and weekly-trust-scores both died in 9s on `fatal: bad object
+ * HEAD`, and nothing downstream said the brain repo was corrupt). Imported from brain-sync.js and
+ * re-exported here, so there is exactly one literal per phrase in the repo -- a second hand-copied
+ * string is a silent classifier failure the day someone reworders one side. They are disjoint
+ * substrings by construction, which is what lets `includes()` below tell them apart.
  */
-export const CORRUPT_MARK = 'agent-memory git object database is corrupt';
+export { CORRUPT_MARK, REMOTE_CORRUPT_MARK };
 
 /**
  * What a brain-sync exit code means to us.
@@ -91,14 +91,21 @@ export const CORRUPT_MARK = 'agent-memory git object database is corrupt';
  * does two bad things at once: it opens a "resolve this merge by hand" issue about a network blip,
  * and it returns 3, which the unit declares a success. A sync that is failing every 15 minutes
  * would report healthy while crying wolf. So the conflict verdict requires brain-sync to have
- * actually said so. Corruption gets the same treatment, checked first since it is the more specific
- * match: a corrupt object database makes git fail in its own distinctive words, never the conflict
- * phrase, so the two checks cannot both fire for one failure.
+ * actually said so. Corruption gets the same treatment, and is checked first because it is the more
+ * specific match: brain-sync.js exits on corruption before it can reach either conflict branch, so
+ * a corruption stderr never carries the conflict phrase.
+ *
+ * `side` says whose object database is damaged -- this host's, or origin's as relayed through
+ * `remote: ` lines. Same outcome and same exit code; entirely different instructions to the human,
+ * so the two must not collapse into one verdict here.
  */
 export function classify(code, stderr = '') {
   if (code === 0) return { outcome: 'ok', alert: false, exit: 0 };
+  if (code === 1 && String(stderr).includes(REMOTE_CORRUPT_MARK)) {
+    return { outcome: 'corrupt', side: 'remote', alert: true, exit: 3 };
+  }
   if (code === 1 && String(stderr).includes(CORRUPT_MARK)) {
-    return { outcome: 'corrupt', alert: true, exit: 3 };
+    return { outcome: 'corrupt', side: 'local', alert: true, exit: 3 };
   }
   if (code === 1 && String(stderr).includes(CONFLICT_MARK)) {
     return { outcome: 'conflict', alert: true, exit: 3 };
@@ -113,7 +120,37 @@ export function classify(code, stderr = '') {
  * offers no merge strategy: the whole point of stopping here is that only a person can decide which
  * side of a memory node is right.
  */
-export function raiseArgs({ root, host = hostname(), detail, kind = 'merge' }) {
+export function raiseArgs({ root, host = hostname(), detail, kind = 'merge', side = 'local' }) {
+  // Damage on origin, not here. This body must never suggest re-cloning: that clones from the
+  // broken side, and it discards a local checkout that is both healthy and possibly ahead of origin
+  // -- the one copy of any commit that never got pushed. It is deliberately the read-only half of
+  // the local body: diagnose, preserve, escalate.
+  if (kind === 'corrupt' && side === 'remote') {
+    return [
+      'raise', alertKey(host, CORRUPT_ALERT_KEY),
+      '--title', `Agent memory REMOTE git repository is corrupt (seen from ${host})`,
+      '--why',
+        `tools/brain-sync.js in ${root} on ${host} was refused by origin, which reported damage in `
+        + `**its own** object database -- the failing lines came back prefixed \`remote: \`. The `
+        + `checkout on ${host} is not known to be damaged. Nothing was synced in either direction, `
+        + `so every host is now diverging from a broken origin.\n\n`
+        + `Git's own error:\n${detail || '(see brain-sync.js output)'}`,
+      '--action',
+        `Do NOT re-clone and do NOT delete the checkout on ${host}. It is a healthy full copy, it `
+        + `may hold commits that never reached the damaged origin, and a fresh clone would pull `
+        + `from the broken side.\n\n`
+        + `On ${host}, confirm the local side is fine and see what it holds that origin does not:\n`
+        + '```bash\n'
+        + `cd ${root}\n`
+        + 'git fsck --full                    # expected: clean, the damage is not here\n'
+        + 'git log --oneline origin/HEAD..HEAD  # local commits origin has never seen\n'
+        + '```\n\n'
+        + 'Then repair origin, which only a human can do: restore the server-side repo from backup, '
+        + 'or (for a hosted remote) open a support ticket. If origin has to be rebuilt, push this '
+        + 'healthy checkout into the replacement rather than cloning the broken one.\n'
+        + `Then confirm: node ~/dev/AgentSystem/tools/brain-sync.js --status\n`,
+    ];
+  }
   // Corrupt is its own shape, not another flavor of "conflict": there is no merge to resolve, no
   // markers to remove, and offering "commit" or "git status" as next steps would be actively wrong.
   if (kind === 'corrupt') {
@@ -121,8 +158,10 @@ export function raiseArgs({ root, host = hostname(), detail, kind = 'merge' }) {
       'raise', alertKey(host, CORRUPT_ALERT_KEY),
       '--title', `Agent memory git repository is corrupt on ${host}`,
       '--why',
-        `tools/brain-sync.js in ${root} on ${host} could not even run \`git status\` -- the object `
-        + `database itself is damaged. Nothing was synced in either direction: no pull, no push, no `
+        `tools/brain-sync.js in ${root} on ${host} hit a git failure that names the object database `
+        + `itself as damaged (it can surface on \`git status\`, or later on the merge inside \`git `
+        + `pull\` when the damage is behind the merge base rather than at HEAD). Nothing was synced `
+        + `in either direction: no pull, no push, no `
         + `commit. This is not a merge conflict and brain-sync.js makes no attempt to repair it -- `
         + `only a human with \`git fsck\` and, most likely, a fresh clone from a healthy peer can.\n\n`
         + `Git's own error:\n${detail || '(see brain-sync.js output)'}`,
@@ -353,7 +392,9 @@ if (isMainModule(import.meta.url)) {
         // No conflictDetail() here: that helper parses CONFLICT_MARK's paths-list shape, which
         // corruption's stderr does not have. raiseArgs's own '(see brain-sync.js output)' fallback
         // is the right default, so pass brain-sync's raw stderr as-is.
-        runHumanNeeded(raiseArgs({ root, host: hostname(), kind: 'corrupt', detail: r.stderr }));
+        runHumanNeeded(raiseArgs({
+          root, host: hostname(), kind: 'corrupt', side: verdict.side, detail: r.stderr,
+        }));
         markRaised(corruptStateFile);
       } else if (verdict.alert) {
         const detail = conflictDetail(r.stderr);

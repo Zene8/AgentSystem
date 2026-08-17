@@ -16,7 +16,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import {
-  classify, raiseArgs, conflictedFiles, alertKey, cacheDir, ALERT_KEY, CORRUPT_ALERT_KEY, CORRUPT_MARK,
+  classify, raiseArgs, conflictedFiles, alertKey, cacheDir, ALERT_KEY, CORRUPT_ALERT_KEY,
+  CORRUPT_MARK, REMOTE_CORRUPT_MARK,
 } from './brain-sync-run.js';
 
 const KEY = alertKey();
@@ -219,6 +220,53 @@ test('a later clean sync resolves the corrupt alert exactly once, and never the 
   // Nothing left to resolve: the next clean run must not call gh again for either key.
   const quiet = run(dir, { brainSyncExit: 0 });
   assert.equal(quiet.human.calls().length, 0, 'resolved an alert that was already resolved');
+});
+
+// Finding 2. The same "object file … is empty" text arrives either from this host's `.git` or
+// relayed from origin as `remote: ` lines. Collapsing the two is not a cosmetic mislabel: the local
+// alert body says to `mv` the checkout aside and `git clone <brain-remote>` — which clones FROM the
+// broken side and destroys the last healthy copy, including any commit on it that never reached
+// origin. `~/agent-memory` is user data; that is the discarding-unpushed-work failure mode.
+const REMOTE_CORRUPT = `brain-sync: ${REMOTE_CORRUPT_MARK} — \`git fetch --quiet origin\` was `
+  + `refused by origin:\nremote: error: object file ./objects/a0/659570 is empty\n`
+  + `remote: fatal: unable to read blob object a0659570\nfatal: protocol error: bad pack header\n`;
+
+test('classify: corruption on origin is its own side, still exit 3 and still alerting', () => {
+  const r = classify(1, REMOTE_CORRUPT);
+  assert.equal(r.outcome, 'corrupt');
+  assert.equal(r.side, 'remote');
+  assert.equal(r.alert, true);
+  assert.equal(r.exit, 3, 'no new exit code — the systemd unit declares SuccessExitStatus=0 3');
+  assert.equal(classify(1, `brain-sync: ${CORRUPT_MARK} at /x\nfatal: bad object HEAD\n`).side, 'local');
+});
+
+test('a corrupt REMOTE never produces local-reclone guidance', () => {
+  const dir = scratch();
+  const r = run(dir, { brainSyncExit: 1, brainSyncStderr: REMOTE_CORRUPT });
+  assert.equal(r.status, 3, `expected 3 (corrupt, alert raised), got ${r.status}: ${r.stderr}`);
+
+  const raise = r.human.calls().find((c) => c[0] === 'raise');
+  assert.ok(raise, 'a damaged origin must still wake a human');
+  assert.equal(raise[1], CORRUPT_KEY, 'still the corruption key, not the conflict key');
+  const body = raise.join('\n');
+
+  assert.doesNotMatch(body, /git clone/,
+    'told the operator to clone from the origin that just reported its own object database damaged');
+  assert.doesNotMatch(body, /\bmv \S/,
+    'told the operator to move aside a checkout that is the last known-healthy copy');
+  assert.doesNotMatch(body, /\bgit gc\b|\bgit prune\b|\bgit repack\b|--force\b/,
+    'a remote fault must not suggest local surgery');
+  assert.match(body, /remote/i, 'the alert must say which side is damaged');
+
+  // And the local case still gives the local instructions — this fix must not blunt that.
+  const dir2 = scratch();
+  const local = run(dir2, {
+    brainSyncExit: 1,
+    brainSyncStderr: `brain-sync: ${CORRUPT_MARK} at ${dir2}\nfatal: bad object HEAD\n`,
+  });
+  const localBody = local.human.calls().find((c) => c[0] === 'raise').join('\n');
+  assert.match(localBody, /git fsck/);
+  assert.match(localBody, /git clone/, 'the local-damage body still offers the re-clone recovery');
 });
 
 test('a setup error (exit 2) is passed through without alerting', () => {
