@@ -485,18 +485,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Compute trust scores
         shell: bash
-        # --allow-empty is safe here and is NOT a return to the false green this job used to
-        # print. The tool still refuses when trust-scores.md already holds real data, so the flag
-        # can only ever produce an honest "no dispatches recorded" report on a host that has
-        # never had one — it cannot overwrite a real report with a stub.
-        #
-        # Why it is needed: run-log is written only by the `dispatch` job in agent-dispatch.yml,
-        # which is triggered by a human typing `/agent`, `/merge` or `/close`. Every successful
-        # agent-dispatch run to date is the `ambient-sam-review` job with `dispatch` SKIPPED, so
-        # the directory has never existed on any host. Without this flag the weekly job goes red
-        # forever over a state that is entirely normal, and a permanently-red weekly alert is one
-        # nobody reads by week three.
-        run: node "${{ github.workspace }}/tools/compute-trust-scores.js" --allow-empty
+        # #405: --allow-empty used to be passed unconditionally, which meant a missing run-log
+        # could never make this job go red — exactly the bootstrap-only escape hatch
+        # compute-trust-scores.js documents (see its comments near "bootstrap escape hatch")
+        # turned into a permanent one. The host has dispatched agents since, so run-log now
+        # exists; a future host with genuinely no run-log yet should go red so the gap is loud,
+        # not silently stubbed forever.
+        run: node "${{ github.workspace }}/tools/compute-trust-scores.js"
       # #168: feed real routing-accuracy data into trust-scores.md weekly so the router
       # (memory-router.js) reads live numbers instead of a stale/empty stub.
       - name: Append routing accuracy to trust-scores.md
@@ -534,7 +529,7 @@ jobs:
           node "${{ github.workspace }}/tools/human-needed.js" raise "$ALERT_KEY" \
             --title "[CI]: the weekly trust-score computation is failing" \
             --why "The Sunday trust-score job failed on \`$(hostname)\`. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). This job previously reported success while writing nothing, so a failure here is the check working." \
-            --action "Read the run log. \`no run-log data\` means ~/agent-memory/nexus/run-log/ is missing or empty — agent-dispatch.yml writes it, so check whether any agent has been dispatched on this host. The job already passes --allow-empty, so a missing run-log alone no longer fails it; if it failed anyway, trust-scores.md holds real data that the tool refused to replace with a stub — that is a genuine regression in run-log, not a first-run state. A push failure means the ~/agent-memory checkout needs attention: \`node tools/brain-sync.js --status\`. Re-run with \`gh workflow run scheduled-tasks.yml -f job=weekly-trust-scores\`; this issue closes itself on the next successful run." \
+            --action "Read the run log. \`no run-log data\` means ~/agent-memory/nexus/run-log/ is missing or empty — agent-dispatch.yml writes it, so check whether any agent has been dispatched on this host recently. As of #405 this job no longer passes --allow-empty, so a missing run-log now fails it on purpose (see tools/compute-trust-scores.js); if this host has genuinely never dispatched an agent, re-run manually with --allow-empty rather than re-adding the flag here permanently. A push failure means the ~/agent-memory checkout needs attention: \`node tools/brain-sync.js --status\`. Re-run with \`gh workflow run scheduled-tasks.yml -f job=weekly-trust-scores\`; this issue closes itself on the next successful run." \
             || echo "::warning::could not raise the human-needed alert"
 
   # Operates on ~/.claude and ~/agent-memory directly (rotate-logs, claude-json-hygiene,

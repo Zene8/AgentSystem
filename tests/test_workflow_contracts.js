@@ -165,3 +165,22 @@ test('daily-triage can push a branch and open the PR it is specified to produce'
     );
   }
 });
+
+test('weekly-trust-scores does not pass --allow-empty, so a missing run-log fails the job (#405)', () => {
+  // compute-trust-scores.js documents --allow-empty as a bootstrap-only escape hatch (it exits 1
+  // on missing input specifically so an inert trust-score pass is loud). The workflow passed the
+  // flag unconditionally, which permanently re-disabled that signal: an empty report could never
+  // make weekly-trust-scores go red, forever, on every host — the same class of defect as #314's
+  // weekly-memory-decay silent skip. The host has dispatched agents by now, so run-log exists and
+  // the escape hatch is no longer needed here.
+  const src = read('scheduled-tasks.yml');
+  const job = src.slice(src.indexOf('\n  weekly-trust-scores:'), src.indexOf('\n  weekly-hygiene:'));
+  const computeStep = job.slice(job.indexOf('Compute trust scores'));
+  const runLine = computeStep.match(/^\s*run:\s*node .*compute-trust-scores\.js.*$/m);
+  assert.ok(runLine, 'weekly-trust-scores has no compute-trust-scores.js run: line — parse is stale');
+  assert.ok(
+    !runLine[0].includes('--allow-empty'),
+    'weekly-trust-scores passes --allow-empty unconditionally, so a missing run-log can never fail ' +
+      'this job — it stays green forever even if agent-dispatch.yml stops writing run-log (#405).'
+  );
+});
