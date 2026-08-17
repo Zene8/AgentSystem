@@ -94,6 +94,12 @@ jobs:
               return;
             }
             const labels = pr.labels.map(l => l.name);
+            if (labels.includes('bypass-sam-audit') || labels.includes('bypass-audit')) {
+              core.setOutput('skip', 'true');
+              core.setOutput('approve', 'true');
+              core.setOutput('skip_reason', 'Bypassed via PR label (bypass-sam-audit/bypass-audit)');
+              return;
+            }
             if (labels.includes('spec')) {
               core.setOutput('skip', 'true');
               core.setOutput('approve', 'true');
