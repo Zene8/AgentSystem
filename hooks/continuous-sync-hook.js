@@ -2,7 +2,8 @@
 // continuous-sync-hook.js — the session half of continuous sync (#341).
 //
 // Registered twice in HOOK_REGISTRY, with the phase in the command string:
-//   SessionStart --phase=start  ->  brain-sync --pull-only, then repo-sync (fast-forward main)
+//   SessionStart --phase=start  ->  brain-sync --pull-only, then repo-sync (fast-forward main),
+//                                   then deploy-hooks if repo-sync says it pulled (#396)
 //   SessionEnd   --phase=end    ->  brain-sync (commit + push)
 //
 // Two-phase, exactly like session-auto-rename-hook.js and for the same reason: the hook's
@@ -78,6 +79,29 @@ function workerPlan(phase, toolsDir) {
   return [];
 }
 
+/**
+ * A step unlocked by what an earlier step reported. One case only (#396): the pull can land a
+ * `hooks/**` change, and a hook is inert until deploy-hooks.js copies it into ~/.claude and
+ * registers it — so between a merge and someone remembering that command, every host runs the old
+ * hook. The daily drift check saw that as drift and raised a human-needed alert for a condition
+ * that repaired itself at the next session start.
+ *
+ * Gated on repo-sync reporting `pulled`, which it only prints when the checkout is on a clean
+ * `main` and the fast-forward succeeded. That is deliberately the same gate as the pull itself:
+ * deploying from a dirty tree or a feature branch would install someone's WIP hooks system-wide
+ * (and #362 is a live case of the canonical checkout sitting on a stale branch). "Pulled" includes
+ * "already up to date", so pre-existing drift is repaired too, not just drift that arrived today.
+ * Everything else is silent: no pull line, no deploy, nothing logged beyond the pull's own entry.
+ *
+ * @returns {{script: string, args: string[]}|null}
+ */
+function followUp(name, stdout, toolsDir) {
+  if (name === 'repo-sync.js' && /^repo-sync: pulled\b/m.test(stdout || '')) {
+    return { script: path.join(toolsDir, 'deploy-hooks.js'), args: [] };
+  }
+  return null;
+}
+
 function log(message) {
   const line = `${new Date().toISOString()} ${message}\n`;
   try {
@@ -95,7 +119,9 @@ function runWorker(phase) {
   const plan = workerPlan(phase, toolsDir);
   if (!plan.length) { log(`${phase}: nothing to run (tools dir ${toolsDir || 'not found'})`); return; }
 
-  for (const step of plan) {
+  const queue = [...plan];
+  while (queue.length) {
+    const step = queue.shift();
     const name = path.basename(step.script);
     const r = spawnSync(process.execPath, [step.script, ...step.args], {
       encoding: 'utf8',
@@ -108,6 +134,8 @@ function runWorker(phase) {
     log(`${phase}: ${name} ${step.args.join(' ')} -> ${code}${said ? ` — ${said}` : ''}`);
     // No early return. brain-sync failing (a conflict, say — already alerted by brain-sync-run)
     // has nothing to do with whether the code checkout can fast-forward.
+    const next = followUp(name, r.stdout, toolsDir);
+    if (next) queue.push(next);
   }
 }
 
@@ -147,4 +175,4 @@ if (require.main === module) {
   process.exit(0);
 }
 
-module.exports = { workerPlan, findToolsDir, PHASES, CHILD_ENV_GUARD };
+module.exports = { workerPlan, followUp, findToolsDir, PHASES, CHILD_ENV_GUARD };
