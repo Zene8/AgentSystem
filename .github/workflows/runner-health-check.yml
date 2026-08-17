@@ -59,8 +59,7 @@ jobs:
           detail=""
 
           if [ -n "$RUNNER_ADMIN_TOKEN" ]; then
-            runners_json=$(GH_TOKEN="$RUNNER_ADMIN_TOKEN" gh api "repos/${{ github.repository }}/actions/runners" 2>/tmp/runners_err)
-            if [ $? -eq 0 ]; then
+            if runners_json=$(GH_TOKEN="$RUNNER_ADMIN_TOKEN" gh api "repos/${{ github.repository }}/actions/runners" 2>/tmp/runners_err); then
               method="direct"
               # A runner counts only if it is online AND carries every required label.
               # The previous version counted any online runner, so a Windows-labelled
@@ -116,10 +115,12 @@ jobs:
             fi
           fi
 
-          echo "method=$method"   >> "$GITHUB_OUTPUT"
-          echo "state=$state"     >> "$GITHUB_OUTPUT"
-          echo "down=$([ "$state" = down ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "detail=$detail"   >> "$GITHUB_OUTPUT"
+          {
+            echo "method=$method"
+            echo "state=$state"
+            echo "down=$([ "$state" = down ] && echo true || echo false)"
+            echo "detail=$detail"
+          } >> "$GITHUB_OUTPUT"
           echo "Runner health check: method=$method state=$state — $detail"
           if [ "$state" = unknown ]; then
             echo "::warning::Runner health could not be confirmed ($detail). Set the RUNNER_ADMIN_TOKEN secret (fine-grained PAT, Administration: Read-only) for direct detection."

@@ -83,15 +83,16 @@ jobs:
           tar -xzf "$tarball" actionlint
           ./actionlint --version
 
-      # Layer 1: schema, expressions, and YAML syntax.
+      # Layer 1: schema, expressions, YAML syntax, and the `run:` shell bodies.
       #
-      # shellcheck integration is off (`-shellcheck=`). It is preinstalled on ubuntu runners, so
-      # leaving it on would fold a pile of pre-existing SC2086/SC2001 style findings in unrelated
-      # workflows into this gate, and the gate would land red for reasons that have nothing to do
-      # with loadability. Those findings are real and tracked separately; turning shellcheck on
-      # is a follow-up once they are cleared, not a silent scope expansion here.
+      # All four analysers are on. The shellcheck and pyflakes analysers used to be disabled by
+      # passing each one an empty command, so the gate would land green over a pile of pre-existing
+      # findings; that made two of the four inert with nothing in CI saying so (#319). The findings that
+      # blocked it — SC2086/SC2001 in ci-failure-notify.yml, SC2129/SC2015/SC2086 in
+      # agent-dispatch.yml — are now fixed. Do not re-add the flags:
+      # tests/workflow_lint_analysers.test.js fails if they come back.
       - name: actionlint
-        run: ./actionlint -no-color -oneline -shellcheck= -pyflakes=
+        run: ./actionlint -no-color -oneline
 
       # Layer 2: the JavaScript inside every `script:` block.
       - name: 'Validate embedded script: bodies'

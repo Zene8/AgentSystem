@@ -131,9 +131,11 @@ jobs:
             for c in "$@"; do [ -x "$c" ] && { echo "$c"; return; }; done
             command -v "$name" 2>/dev/null || true
           }
-          echo "gh_path=$(resolve gh "$HOME/.local/bin/gh" /usr/local/bin/gh /usr/bin/gh)" >> "$GITHUB_OUTPUT"
-          echo "claude_path=$(resolve claude "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude)" >> "$GITHUB_OUTPUT"
-          echo "node_path=$(resolve node "$HOME/.local/bin/node" /usr/local/bin/node /usr/bin/node)" >> "$GITHUB_OUTPUT"
+          {
+            echo "gh_path=$(resolve gh "$HOME/.local/bin/gh" /usr/local/bin/gh /usr/bin/gh)"
+            echo "claude_path=$(resolve claude "$HOME/.local/bin/claude" /usr/local/bin/claude /usr/bin/claude)"
+            echo "node_path=$(resolve node "$HOME/.local/bin/node" /usr/local/bin/node /usr/bin/node)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Gate /merge on pr-guard (hard security gate — #112)
         id: guard
@@ -305,7 +307,11 @@ jobs:
           logDir="$HOME/agent-memory/nexus/run-log"
           date="$(date +%Y-%m-%d)"
           logFile="$logDir/$date-issue-$ISSUE_NUM.json"
-          [ -f "$logFile" ] && "$NODE" tools/done-check.js "$logFile" || true
+          # `if`, not `A && B || true`: SC2015 — with the one-liner, a non-zero done-check is
+          # indistinguishable from a missing log file, and both silently pass.
+          if [ -f "$logFile" ]; then
+            "$NODE" tools/done-check.js "$logFile" || true
+          fi
 
       - name: Post failure detail
         if: steps.run_claude.outputs.exit_code != '0'
@@ -471,7 +477,7 @@ jobs:
           unsafe="$(printf '%s\n' "$files" | grep -vE '^docs/|\.md$|^tests/|\.test\.js$' || true)"
           if [ -n "$unsafe" ]; then
             echo 'UNSAFE files detected -- skipping auto-merge:'
-            printf '  %s\n' $unsafe
+            while IFS= read -r unsafe_path; do printf '  %s\n' "$unsafe_path"; done <<< "$unsafe"
             echo 'safe=false' >> "$GITHUB_OUTPUT"
           else
             echo 'All files in safe paths -- proceeding with auto-merge'
