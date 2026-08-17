@@ -67,7 +67,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          # Query GraphQL for review threads
+          # Query GraphQL for review threads.
+          # shellcheck disable=SC2016  # $owner/$repo/$pr_number are GraphQL variables, not shell
           resolved_count=$(gh api graphql -f owner="${REPO%/*}" -f repo="${REPO#*/}" -F pr_number="$PR_NUMBER" -f query='
             query($owner: String!, $repo: String!, $pr_number: Int!) {
               repository(owner: $owner, name: $repo) {
@@ -82,6 +83,7 @@ jobs:
             }
           ' --jq '.data.repository.pullRequest.reviewThreads.nodes | length' 2>/dev/null || echo "0")
 
+          # shellcheck disable=SC2016  # same: GraphQL variables
           unresolved_count=$(gh api graphql -f owner="${REPO%/*}" -f repo="${REPO#*/}" -F pr_number="$PR_NUMBER" -f query='
             query($owner: String!, $repo: String!, $pr_number: Int!) {
               repository(owner: $owner, name: $repo) {
@@ -100,9 +102,9 @@ jobs:
           echo "Unresolved threads: $unresolved_count"
 
           if [ "$unresolved_count" -eq 0 ] && [ "$resolved_count" -gt 0 ]; then
-            echo "all_resolved=true" >> $GITHUB_OUTPUT
+            echo "all_resolved=true" >> "$GITHUB_OUTPUT"
           else
-            echo "all_resolved=false" >> $GITHUB_OUTPUT
+            echo "all_resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Remove label if all resolved

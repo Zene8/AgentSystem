@@ -161,9 +161,11 @@ jobs:
           echo "Resolved gh: $GH_PATH"
           echo "Resolved claude: $CLAUDE_PATH"
           echo "Resolved node: $NODE_PATH"
-          echo "gh_path=$GH_PATH" >> "$GITHUB_OUTPUT"
-          echo "claude_path=$CLAUDE_PATH" >> "$GITHUB_OUTPUT"
-          echo "node_path=$NODE_PATH" >> "$GITHUB_OUTPUT"
+          {
+            echo "gh_path=$GH_PATH"
+            echo "claude_path=$CLAUDE_PATH"
+            echo "node_path=$NODE_PATH"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Get PR diff
         if: steps.precheck.outputs.skip != 'true'
