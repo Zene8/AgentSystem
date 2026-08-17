@@ -52,6 +52,17 @@ function buildManifest() {
   if (existsSync(hooksPkg)) {
     manifest.push({ src: hooksPkg, dest: join(CLAUDE_HOME, 'hooks', 'package.json') });
   }
+  // Shared modules the hooks require(). Deploying only hooks/*.js left
+  // routines-context-inject.js crashing at every SessionStart on a missing
+  // ./lib/override-state.cjs, while --check still reported the hook itself "same":
+  // a file-hash check cannot see a dependency that was never copied.
+  const libDir = join(hooksDir, 'lib');
+  if (existsSync(libDir)) {
+    for (const f of readdirSync(libDir)) {
+      if (f.includes('.test.')) continue;
+      manifest.push({ src: join(libDir, f), dest: join(CLAUDE_HOME, 'hooks', 'lib', f) });
+    }
+  }
   const shDir = join(hooksDir, 'claude-hooks');
   if (existsSync(shDir)) {
     for (const f of readdirSync(shDir)) {
