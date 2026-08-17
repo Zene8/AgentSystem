@@ -128,6 +128,26 @@ jobs:
             echo "PASSED: actions-watchdog heartbeat is fresh"
           fi
 
+          echo "=== Checking the canon checkout is not behind origin/main (#423) ==="
+          # --path is $HOME/dev/AgentSystem and NOT ${{ github.workspace }}, deliberately. The
+          # workspace is re-checked-out at origin/main on every run, so asserting against it would
+          # pass vacuously forever. Canon is the tree the installed hooks, skills and systemd units
+          # actually execute out of — and the tree tools/repo-sync.js refuses to pull, in silence,
+          # whenever it is dirty. That is exactly how canon sat 7 commits behind for over a week
+          # while THIS job went red every day reporting the downstream hook drift instead (#423),
+          # and how a unit ran hourly out of a long-merged branch in #362. The TOOL still comes from
+          # the workspace, like every other check here, so a stale canon cannot hide its own drift
+          # with a stale copy of the checker.
+          # Read-only: it never pulls. A pull rewrites the tree under whatever session holds those
+          # edits open, which is the one thing repo-sync.js exists to refuse.
+          if ! "${{ steps.tools.outputs.node_path }}" "${{ github.workspace }}/tools/repo-sync.js" --check-canon --path "$HOME/dev/AgentSystem"; then
+            echo "FAILED: canon checkout is behind origin/main"
+            driftFound=1
+            results="${results}• Canon checkout \$HOME/dev/AgentSystem is BEHIND origin/main — every other drift line above may be a symptom of this, not a separate fault: hooks, agents and skills are deployed out of that tree. Needs a human at the console (#423)\n"
+          else
+            echo "PASSED: canon checkout is in sync (or absent on this host)"
+          fi
+
           echo "=== Checking routing telemetry for blind (zero-join) output (#351) ==="
           # Zero output on a quiet week is fine; --check only fails when the log EXISTS and
           # has content that parses/joins to nothing — see tools/routing-report.js checkRoutingLog().
@@ -188,7 +208,22 @@ jobs:
           node tools/routines.js verify
           bash tools/install-brain-sync-timer.sh --check
           node tools/install-skills.js --check
+          node tools/repo-sync.js --check-canon --path \$HOME/dev/AgentSystem
           \`\`\`
+
+          **Check the canon line FIRST.** If \$HOME/dev/AgentSystem is behind origin/main, every
+          other line above is very likely a symptom of it — hooks, agents and skills were deployed
+          out of that stale tree, so their --check tools compare a fresh workspace against old
+          installs and report drift that does not exist in the repo (#423). repo-sync.js skips the
+          session-start pull of a dirty tree in silence and by design, so nothing repairs this
+          unattended. On that host, with no Claude session running:
+          \`\`\`bash
+          cd \$HOME/dev/AgentSystem
+          git status   # decide keep or discard before stashing
+          git stash && git pull --ff-only origin main && git stash pop
+          node tools/deploy-hooks.js
+          \`\`\`
+          Never auto-stash or auto-pull this from a script: it rewrites the tree under live sessions.
 
           Then fix the drift and push. Common causes:
           • Hooks edited in ~/.claude/hooks/ but not committed to repo or not deployed

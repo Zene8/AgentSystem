@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +51,30 @@ function advanceOrigin(s, text = 'two\n') {
   git(s.seed, 'push', '--quiet', 'origin', 'main');
 }
 
-const run = (path, ...extra) => execFileSync(process.execPath, [SCRIPT, '--path', path, ...extra], { encoding: 'utf8' });
+/**
+ * Every skip on `main` now writes a consecutive-skip counter, so each test gets its own state file.
+ * Without this the suite would bump the real per-host counter under cacheDir() and could raise a
+ * live human-needed alert from `npm test`.
+ */
+const run = (path, ...extra) => execFileSync(process.execPath, [
+  SCRIPT, '--path', path,
+  ...(extra.includes('--state') ? [] : ['--state', `${path}.skip-state.json`]),
+  ...extra,
+], { encoding: 'utf8' });
+
+/**
+ * A stand-in for tools/human-needed.js that records its argv instead of talking to GitHub.
+ * `.mjs`, not `.js`: the temp dir is outside this repo, so it inherits no `"type": "module"`.
+ */
+function alertStub(dir) {
+  const log = join(dir, 'alerts.log');
+  const script = join(dir, 'fake-human-needed.mjs');
+  // JSON per line: the --why/--action bodies are multi-line, so a raw argv join would make one
+  // invocation look like nine.
+  writeFileSync(script, `import { appendFileSync } from 'node:fs';\n`
+    + `appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');\n`);
+  return { script, log, lines: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : []) };
+}
 
 // ── the decision, in isolation ────────────────────────────────────────────────
 
@@ -93,16 +116,138 @@ test('fast-forwards a clean main', () => {
   assert.match(out, /pulled/);
 });
 
-test('a dirty tree is left completely alone, and says nothing', () => {
+// This test used to assert `out === ''` — silence on every skip was the stated contract, and that
+// contract WAS the bug (#423): the Mission Control canon sat 7 commits behind origin/main with two
+// uncommitted files and nothing anywhere said so, so a week of red enforcement-drift-check runs
+// reported downstream *hook* drift instead of the stale tree underneath it. The refusal to pull is
+// still correct and the two assertions below it are unchanged — what changed is that the refusal is
+// now audible when, and only when, it is actually costing the host commits.
+test('a dirty tree is left completely alone, and says so when it is behind', () => {
   const s = scenario();
   const before = git(s.clone, 'rev-parse', 'HEAD');
   writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
   advanceOrigin(s);
 
   const out = run(s.clone);
-  assert.equal(out, '', `expected silence on skip, got: ${out}`);
+  assert.match(out, /uncommitted/, `skip reason missing from: ${out}`);
+  assert.match(out, /1 commit/, `behind-count missing from: ${out}`);
+  assert.match(out, /origin\/main/, `remote ref missing from: ${out}`);
+  assert.equal(out.trim().split('\n').length, 1, `expected exactly one line, got: ${out}`);
+
   assert.equal(git(s.clone, 'rev-parse', 'HEAD'), before, 'pulled under a dirty tree');
   assert.match(git(s.clone, 'status', '--porcelain'), /a\.txt/, 'local edit was destroyed');
+});
+
+// The common case on every host at every session start. If this ever prints, the warning becomes
+// per-session noise and stops being read — which is the same failure as printing nothing.
+test('a dirty tree that is already up to date stays silent', () => {
+  const s = scenario();
+  writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
+
+  const out = run(s.clone);
+  assert.equal(out, '', `expected silence when not behind, got: ${out}`);
+});
+
+// The regression guard for the trap that would have shipped a no-op: `git rev-list --count
+// HEAD..origin/main` reads the LOCAL remote-tracking ref, and the scenario helpers never fetch, so
+// an implementation that skips the fetch reports behind=0 here forever and looks fixed.
+test('the behind-count comes from a fresh fetch, not the stale tracking ref', () => {
+  const s = scenario();
+  writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
+  advanceOrigin(s);
+  assert.equal(git(s.clone, 'rev-list', '--count', 'HEAD..origin/main'), '0', 'fixture assumption broken');
+
+  assert.match(run(s.clone), /1 commit/);
+});
+
+test('three consecutive skips while behind raise one per-host alert', () => {
+  const s = scenario();
+  const stub = alertStub(s.root);
+  const state = join(s.root, 'skip-state.json');
+  writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
+  advanceOrigin(s);
+
+  const once = () => run(s.clone, '--state', state, '--human-needed', stub.script);
+
+  once();
+  assert.deepEqual(stub.lines(), [], 'alerted on the first skip — an ordinary mid-edit state');
+  once();
+  assert.deepEqual(stub.lines(), [], 'alerted on the second skip');
+  once();
+  assert.equal(stub.lines().length, 1, `expected exactly one raise, got: ${stub.lines().join('\n')}`);
+  assert.deepEqual(JSON.parse(stub.lines()[0]).slice(0, 1), ["raise"]);
+  assert.match(JSON.parse(stub.lines()[0])[1], /^repo-sync-behind-[a-z0-9]/);
+
+  // A fourth skip must not re-invoke: human-needed de-duplicates, but only if we stop hammering it.
+  once();
+  assert.equal(stub.lines().length, 1, 'raised again after the alert was already open');
+
+  assert.equal(git(s.clone, 'status', '--porcelain').includes('a.txt'), true, 'local edit was destroyed');
+});
+
+test('a host that stays behind re-raises, so closing the issue cannot latch it silent', () => {
+  // The regression guard on the fix to a permanent `raised` latch. human-needed.js's raise() only
+  // searches OPEN alerts, so a human who closes this alert without clearing the tree would, under a
+  // latch, get silence from a host still falling behind — #423 all over again, one level up.
+  const s = scenario();
+  const stub = alertStub(s.root);
+  const state = join(s.root, 'skip-state.json');
+  writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
+  advanceOrigin(s);
+
+  const once = () => run(s.clone, '--state', state, '--human-needed', stub.script);
+
+  once(); once(); once();
+  assert.equal(stub.lines().length, 1, 'first alert');
+  once(); once();
+  assert.equal(stub.lines().length, 1, 'hammered human-needed between multiples of N');
+  once(); // the 6th consecutive skip — still stuck, so say so again
+  assert.equal(stub.lines().length, 2, 'went silent forever after the first alert');
+  assert.deepEqual(JSON.parse(stub.lines()[1]).slice(0, 1), ['raise']);
+
+  assert.equal(git(s.clone, 'status', '--porcelain').includes('a.txt'), true, 'local edit was destroyed');
+});
+
+test('a successful sync clears the skip counter and resolves the alert', () => {
+  const s = scenario();
+  const stub = alertStub(s.root);
+  const state = join(s.root, 'skip-state.json');
+  writeFileSync(join(s.clone, 'a.txt'), 'local edit\n');
+  advanceOrigin(s);
+
+  const once = (...extra) => run(s.clone, '--state', state, '--human-needed', stub.script, ...extra);
+  once(); once(); once();
+  assert.equal(stub.lines().length, 1);
+
+  git(s.clone, 'checkout', '--', 'a.txt'); // the human cleared their edit
+  assert.match(once(), /pulled/);
+  assert.equal(JSON.parse(readFileSync(state, 'utf8'))[s.clone], undefined, 'counter survived a sync');
+  assert.equal(stub.lines().length, 2);
+  assert.deepEqual(JSON.parse(stub.lines()[1]).slice(0, 1), ["resolve"]);
+  assert.match(JSON.parse(stub.lines()[1])[1], /^repo-sync-behind-[a-z0-9]/);
+});
+
+// ── --check-canon, the assertion enforcement-drift-check runs ─────────────────
+
+test('--check-canon exits 1 when the checkout is behind origin/main', () => {
+  const s = scenario();
+  advanceOrigin(s);
+  assert.throws(() => run(s.clone, '--check-canon'), (e) => {
+    assert.equal(e.status, 1);
+    assert.match(String(e.stdout), /1 commit/);
+    return true;
+  });
+});
+
+test('--check-canon exits 0 on a checkout that is in sync', () => {
+  const s = scenario();
+  assert.match(run(s.clone, '--check-canon'), /in sync/);
+});
+
+// Same reasoning as the bare-~/.claude no-install case: a host that never had canon is not drifting.
+test('--check-canon on a path that is not a checkout is a clean skip', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'repo-sync-nocanon-'));
+  assert.match(run(join(dir, 'nope'), '--check-canon'), /no checkout/);
 });
 
 test('a feature branch is never touched', () => {
