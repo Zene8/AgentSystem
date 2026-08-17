@@ -589,9 +589,21 @@ jobs:
               }
             }
 
-            await github.rest.issues.createComment({
-              owner, repo, issue_number: prNumber, body,
-            });
+            try {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: prNumber, body,
+              });
+            } catch (err) {
+              // Same fail-soft contract as the updateComment attempt above: this is the terminal
+              // fallback (no existing marked comment, or the lookup above itself failed), so there
+              // is nowhere left to fall back to. A 403 here is `pull-requests: write` gone entirely;
+              // anything else is transient (rate limit, network blip). Either way, warn and let the
+              // step succeed rather than reddening the required check on a PR Sam already approved.
+              const kind = err.status === 403
+                ? 'PERMISSION REGRESSION (403) — `pull-requests: write` missing entirely'
+                : `create failed (${err.status ?? 'no status'})`;
+              core.warning(`Could not post audit ping — ${kind}; Sam approved but no comment was left: ${err.message}`);
+            }
 
       - name: Fail check if blocked
         if: steps.review.outputs.status == 'blocked'

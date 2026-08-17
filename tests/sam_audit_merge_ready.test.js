@@ -56,10 +56,14 @@ const comment_ = (id, { user = BOT, marked = true, text = 'previous ping' } = {}
  * @param {Array} [opts.comments]   comments already on the PR (for the sticky upsert, #404)
  * @param {Error} [opts.listThrows] make the existing-comment lookup fail
  * @param {Error} [opts.patchThrows] make the update of the found comment fail
+ * @param {Error} [opts.createThrows] make the terminal createComment fail
+ * @param {boolean} [opts.allowNoComment] the terminal createComment is expected to fail and post
+ *   nothing — skip the "exactly one comment" invariant that every other case must satisfy.
  */
 async function post({
   checkRuns = [], statuses = [], throws = null,
-  comments = [], listThrows = null, patchThrows = null,
+  comments = [], listThrows = null, patchThrows = null, createThrows = null,
+  allowNoComment = false,
 }) {
   const warnings = [];
   const posted = [];
@@ -86,7 +90,10 @@ async function post({
         },
       },
       issues: {
-        createComment: async (args) => { posted.push(args); },
+        createComment: async (args) => {
+          if (createThrows) throw createThrows;
+          posted.push(args);
+        },
         updateComment: async (args) => {
           if (patchThrows) throw patchThrows;
           patched.push(args);
@@ -100,6 +107,9 @@ async function post({
     },
   };
   await compiled(github, context, core);
+  if (allowNoComment) {
+    return { body: undefined, warnings, args: undefined, posted, patched, listCalls };
+  }
   // Exactly one comment must exist afterwards — created when there was none to reuse, PATCHed
   // onto the existing one otherwise. Two of either, or one of each, is the #404 append bug.
   assert.equal(
@@ -364,6 +374,28 @@ test('the sticky path applies to the unreadable-rollup body too', async () => {
   assert.equal(patched[0].comment_id, 700);
   assert.match(body, /Could not read the check rollup/);
   assert.equal(body.split('\n')[0], MARKER);
+});
+
+test('a throwing terminal createComment does not fail the required check', async () => {
+  // The terminal createComment (no existing marked comment, or the lookup itself failed) sat
+  // outside any try/catch — the one call in this step not covered by the fail-soft contract
+  // above it. A throw here must warn, not propagate, or it reddens `Security Audit (Sam CSO)`
+  // on a PR Sam already approved.
+  const err = Object.assign(new Error('API rate limit exceeded'), { status: 403 });
+  const { posted, warnings } = await post({
+    checkRuns: [run_('test', 40, 'success')],
+    createThrows: err,
+    allowNoComment: true,
+  });
+  assert.equal(posted.length, 0, 'the throwing call never actually posts');
+  assert.ok(
+    warnings.some(w => /Could not post audit ping/.test(w)),
+    `the failure must be logged, got: ${JSON.stringify(warnings)}`
+  );
+  assert.ok(
+    warnings.some(w => /PERMISSION REGRESSION \(403\)/.test(w)),
+    `a 403 on the terminal createComment must be named a permission regression, got: ${JSON.stringify(warnings)}`
+  );
 });
 
 // ── Static guards ─────────────────────────────────────────────────────────────────────────────
