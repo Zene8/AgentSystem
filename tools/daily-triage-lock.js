@@ -28,6 +28,15 @@
 // skills/daily-triage/SKILL.md) so an in-progress run is never mistaken for abandoned, and well
 // below the ~8h gap between scheduled runs (05:00/13:00 UTC), so a crashed run cannot block the
 // next legitimate one for long.
+//
+// #418: this lock is meant to be the SOLE arbiter of "is another run in progress" (the durable
+// fix from #402's own issue), but the arbiter is only correct if it can tell "another run" apart
+// from "myself, again". Every Actions job step has GITHUB_RUN_ID (and GITHUB_RUN_ATTEMPT) in its
+// environment automatically; a second `acquire` call carrying the SAME run id as the record
+// already on disk cannot be a competing run by definition, so it must proceed rather than yield.
+// Only actually-different run ids yield. Local/manual invocations have no GITHUB_RUN_ID at all
+// (CI is the only place that sets it) so they always fall back to ordinary mutual exclusion —
+// this bypass can only ever apply to an Actions run recognising its own id.
 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,7 +49,17 @@ export const LOCK_FILE = process.env.DAILY_TRIAGE_LOCK_FILE
 export const STALE_MS = 200 * 60 * 1000; // 180min cap + slack, well under the ~8h schedule gap
 
 export function acquire(lockFile = LOCK_FILE, staleMs = STALE_MS) {
-  const held = acquireLock(lockFile, { staleMs });
+  const runId = process.env.GITHUB_RUN_ID || null;
+  const runAttempt = process.env.GITHUB_RUN_ATTEMPT || null;
+  const meta = runId ? { runId, ...(runAttempt ? { runAttempt } : {}) } : {};
+  const held = acquireLock(lockFile, {
+    staleMs,
+    meta,
+    // Never self when we have no run id of our own (manual/local invocations) — only an Actions
+    // run can recognise itself, and only against a holder record that was itself written by an
+    // Actions run carrying the same id.
+    isSelf: (holder) => Boolean(runId) && Boolean(holder) && holder.runId === runId,
+  });
   if (held.acquired) writeFileSync(`${lockFile}.token`, held.token);
   return held;
 }
