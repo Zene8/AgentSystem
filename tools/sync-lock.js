@@ -77,7 +77,15 @@ export function isStale(rec, { staleMs = DEFAULT_STALE_MS, now = Date.now() } = 
  */
 export function acquireLock(
   file,
-  { staleMs = DEFAULT_STALE_MS, now = Date.now(), meta = {}, settleMs = 50 } = {},
+  {
+    staleMs = DEFAULT_STALE_MS, now = Date.now(), meta = {}, settleMs = 50,
+    // #418: a caller can identify "the in-progress record already IS me" independently of
+    // staleness — e.g. a scheduled Actions run that would otherwise see its own GITHUB_RUN_ID in
+    // the holder record it is about to read as a competitor, and yield to itself. Defaults to
+    // "never self" so every existing caller (brain-sync-run.js) is unaffected; only a caller that
+    // opts in by passing both `meta` and `isSelf` gets the bypass.
+    isSelf = () => false,
+  } = {},
 ) {
   const token = JSON.stringify({
     pid: process.pid, host: hostname(), at: new Date(now).toISOString(), id: randomUUID(), ...meta,
@@ -92,7 +100,7 @@ export function acquireLock(
   }
 
   const holder = readLock(file);
-  if (!isStale(holder, { staleMs, now })) return { acquired: false, holder };
+  if (!isStale(holder, { staleMs, now }) && !isSelf(holder)) return { acquired: false, holder };
 
   // Taking over a stale lock, atomically. The obvious version — rm, then create with 'wx' — is a
   // TOCTOU: two processes both see the same stale record, A removes it and creates its own, and B's
