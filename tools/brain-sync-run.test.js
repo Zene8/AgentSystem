@@ -15,9 +15,13 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { classify, raiseArgs, conflictedFiles, alertKey, cacheDir, ALERT_KEY } from './brain-sync-run.js';
+import {
+  classify, raiseArgs, conflictedFiles, alertKey, cacheDir, ALERT_KEY, CORRUPT_ALERT_KEY,
+  CORRUPT_MARK, REMOTE_CORRUPT_MARK,
+} from './brain-sync-run.js';
 
 const KEY = alertKey();
+const CORRUPT_KEY = alertKey(undefined, CORRUPT_ALERT_KEY);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'brain-sync-run.js');
@@ -82,6 +86,18 @@ test('classify: only a conflict is worth waking a human', () => {
 // is wrong twice over — it opens a "resolve this merge by hand" issue about a network blip, and it
 // returns 3, which the systemd unit declares a success. A host failing to sync every 15 minutes
 // would report healthy.
+// #429/#430: weekly-memory-decay and weekly-trust-scores both died in 9s on `fatal: bad object
+// HEAD` from a corrupt ~/agent-memory, and neither alert said the brain repo was corrupt — a bare
+// exit 1 read as a plain, unremarkable failure. Corruption needs its own outcome, checked first
+// since it is the more specific match: it never shares text with the conflict message, so the two
+// cannot both fire for one failure.
+test('classify: a corrupt object database is its own outcome, not a conflict', () => {
+  const corrupt = classify(1, `brain-sync: ${CORRUPT_MARK} at /x — \`git status\` failed:\nfatal: bad object HEAD\n`);
+  assert.equal(corrupt.outcome, 'corrupt');
+  assert.equal(corrupt.alert, true, 'a damaged object database must wake a human, same as a conflict');
+  assert.equal(corrupt.exit, 3);
+});
+
 test('classify: exit 1 without the conflict message is a plain failure, not a conflict', () => {
   const offline = classify(1, 'brain-sync: git fetch --quiet origin failed (128)\nCould not resolve host: github.com\n');
   assert.equal(offline.outcome, 'error');
@@ -169,6 +185,88 @@ test('a later clean sync resolves the alert exactly once', () => {
   // Nothing left to resolve: the next clean run must not call gh again.
   const quiet = run(dir, { brainSyncExit: 0 });
   assert.equal(quiet.human.calls().length, 0, 'resolved an alert that was already resolved');
+});
+
+test('a corrupt object database exits 3 and raises the distinct corrupt alert, not the conflict one', () => {
+  const dir = scratch();
+  const r = run(dir, {
+    brainSyncExit: 1,
+    brainSyncStderr: `brain-sync: ${CORRUPT_MARK} at ${dir} — \`git status\` failed:\nfatal: bad object HEAD\n`,
+  });
+  assert.equal(r.status, 3, `expected 3 (corrupt, alert raised), got ${r.status}: ${r.stderr}`);
+
+  const calls = r.human.calls();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'raise');
+  assert.equal(calls[0][1], CORRUPT_KEY, 'corruption must not reuse the conflict key');
+  assert.notEqual(calls[0][1], KEY);
+
+  // One brain-sync attempt: there is no repair this wrapper may retry.
+  assert.equal(r.brain.calls().length, 1);
+  assert.equal(existsSync(join(dir, 'brain-sync-corrupt-alert.json')), true, 'no corrupt alert state recorded');
+  assert.equal(existsSync(join(dir, 'alert.state')), false, 'a corruption alert wrote the conflict state file');
+});
+
+test('a later clean sync resolves the corrupt alert exactly once, and never the conflict key', () => {
+  const dir = scratch();
+  run(dir, { brainSyncExit: 1, brainSyncStderr: `brain-sync: ${CORRUPT_MARK} at ${dir}\nfatal: bad object HEAD\n` });
+
+  const ok = run(dir, { brainSyncExit: 0 });
+  assert.equal(ok.status, 0);
+  const resolves = ok.human.calls().filter((c) => c[0] === 'resolve');
+  assert.equal(resolves.length, 1, 'resolved something other than exactly the one open alert');
+  assert.equal(resolves[0][1], CORRUPT_KEY);
+
+  // Nothing left to resolve: the next clean run must not call gh again for either key.
+  const quiet = run(dir, { brainSyncExit: 0 });
+  assert.equal(quiet.human.calls().length, 0, 'resolved an alert that was already resolved');
+});
+
+// Finding 2. The same "object file … is empty" text arrives either from this host's `.git` or
+// relayed from origin as `remote: ` lines. Collapsing the two is not a cosmetic mislabel: the local
+// alert body says to `mv` the checkout aside and `git clone <brain-remote>` — which clones FROM the
+// broken side and destroys the last healthy copy, including any commit on it that never reached
+// origin. `~/agent-memory` is user data; that is the discarding-unpushed-work failure mode.
+const REMOTE_CORRUPT = `brain-sync: ${REMOTE_CORRUPT_MARK} — \`git fetch --quiet origin\` was `
+  + `refused by origin:\nremote: error: object file ./objects/a0/659570 is empty\n`
+  + `remote: fatal: unable to read blob object a0659570\nfatal: protocol error: bad pack header\n`;
+
+test('classify: corruption on origin is its own side, still exit 3 and still alerting', () => {
+  const r = classify(1, REMOTE_CORRUPT);
+  assert.equal(r.outcome, 'corrupt');
+  assert.equal(r.side, 'remote');
+  assert.equal(r.alert, true);
+  assert.equal(r.exit, 3, 'no new exit code — the systemd unit declares SuccessExitStatus=0 3');
+  assert.equal(classify(1, `brain-sync: ${CORRUPT_MARK} at /x\nfatal: bad object HEAD\n`).side, 'local');
+});
+
+test('a corrupt REMOTE never produces local-reclone guidance', () => {
+  const dir = scratch();
+  const r = run(dir, { brainSyncExit: 1, brainSyncStderr: REMOTE_CORRUPT });
+  assert.equal(r.status, 3, `expected 3 (corrupt, alert raised), got ${r.status}: ${r.stderr}`);
+
+  const raise = r.human.calls().find((c) => c[0] === 'raise');
+  assert.ok(raise, 'a damaged origin must still wake a human');
+  assert.equal(raise[1], CORRUPT_KEY, 'still the corruption key, not the conflict key');
+  const body = raise.join('\n');
+
+  assert.doesNotMatch(body, /git clone/,
+    'told the operator to clone from the origin that just reported its own object database damaged');
+  assert.doesNotMatch(body, /\bmv \S/,
+    'told the operator to move aside a checkout that is the last known-healthy copy');
+  assert.doesNotMatch(body, /\bgit gc\b|\bgit prune\b|\bgit repack\b|--force\b/,
+    'a remote fault must not suggest local surgery');
+  assert.match(body, /remote/i, 'the alert must say which side is damaged');
+
+  // And the local case still gives the local instructions — this fix must not blunt that.
+  const dir2 = scratch();
+  const local = run(dir2, {
+    brainSyncExit: 1,
+    brainSyncStderr: `brain-sync: ${CORRUPT_MARK} at ${dir2}\nfatal: bad object HEAD\n`,
+  });
+  const localBody = local.human.calls().find((c) => c[0] === 'raise').join('\n');
+  assert.match(localBody, /git fsck/);
+  assert.match(localBody, /git clone/, 'the local-damage body still offers the re-clone recovery');
 });
 
 test('a setup error (exit 2) is passed through without alerting', () => {

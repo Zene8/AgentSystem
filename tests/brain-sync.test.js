@@ -15,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { classifyCorruption, CORRUPT_MARK, REMOTE_CORRUPT_MARK } from '../tools/brain-sync.js';
+
 const TOOL = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'brain-sync.js');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t'];
 
@@ -256,4 +258,124 @@ test('an unknown flag exits 2 rather than guessing', () => {
   const r = spawnSync(process.execPath, [TOOL, '--wat'], { encoding: 'utf8' });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /unknown option/);
+});
+
+// ── the corrupt-object-database guard ────────────────────────────────────────
+//
+// A damaged object database (a zeroed-out loose object) makes plain git commands fail with git's
+// own distinctive error text -- "object file ... is empty", "fatal: bad object" -- and until now
+// brain-sync.js reported that identically to an offline fetch or a stale token: exit 1, a generic
+// message. brain-sync-run.js's classify() then filed it as a non-alerting error. Real-world blast
+// radius: #429/#430 -- weekly-memory-decay and weekly-trust-scores both died in 9s on this exact
+// `fatal: bad object HEAD`, and nothing in the chain said the brain repo was corrupt.
+
+/** Corrupt a real git object the way production actually broke: truncate a loose object to empty. */
+function corruptHead(repo) {
+  const head = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  const objPath = path.join(repo, '.git', 'objects', head.slice(0, 2), head.slice(2));
+  fs.chmodSync(objPath, 0o644); // git writes loose objects read-only
+  fs.writeFileSync(objPath, '');
+  return objPath;
+}
+
+test('a corrupt object database is reported distinctly, not as a generic failure or a conflict', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    corruptHead(a);
+    const r = sync(a);
+    assert.equal(r.code, 1, 'a damaged object database must not be reported as healthy');
+    assert.match(r.err, /agent-memory git object database is corrupt/);
+    assert.doesNotMatch(r.err, /merge conflict needs a human/,
+      'corruption must not be conflated with the #348 merge-conflict guard');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('--ignore-markers does not bypass the corruption guard', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    corruptHead(a);
+    const r = sync(a, ['--ignore-markers']);
+    assert.equal(r.code, 1, 'there is no operator override for a damaged object database');
+    assert.match(r.err, /agent-memory git object database is corrupt/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+// The regression that the first version of this guard shipped with. The guard only ran on the
+// `!allowFail` path, and the one call that reads the most of the object database — the merge inside
+// `git pull` — is `allowFail: true`, because a merge conflict is an expected outcome there.
+//
+// So damage that `git status` never touches (a bad object behind the merge base) produced: a
+// non-zero pull, an EMPTY unmerged-paths list, and a fall through to the conflict branch, which
+// printed `merge conflict needs a human` followed by `(see git status)`. brain-sync-run.js then
+// raised the conflict alert, telling a person to resolve a merge that does not exist while the real
+// fault — a corrupt object database — went unnamed. Verified against the pre-fix file: it prints
+// exactly that.
+test('object damage that only the merge touches is CORRUPT, not a phantom merge conflict', () => {
+  const { base, origin, hosts: [a, b] } = makeWorld();
+  try {
+    const node = path.join('nexus', 'personal-brain', 'nodes', 'shared.md');
+    // Both hosts edit the same node, so the pull must do a real three-way content merge and read the
+    // *base* blob. Different lines, so absent the corruption this merges cleanly — the test must
+    // fail on the corruption, not on a conflict it engineered.
+    fs.writeFileSync(path.join(b, node), 'seed\nfrom-b\n');
+    git(b, ['add', '-A']);
+    git(b, ['commit', '-q', '-m', 'b']);
+    git(b, ['push', '-q', 'origin', 'HEAD']);
+
+    fs.writeFileSync(path.join(a, node), 'from-a\nseed\n');
+    // Corrupt the merge BASE blob only. HEAD, the index and the working tree are all intact, so
+    // `git status` (which compares stat data and re-hashes the working file) is perfectly happy and
+    // the fetch, which moves commits and trees, never reads it either.
+    const blob = git(a, ['rev-parse', `HEAD:${node.split(path.sep).join('/')}`]);
+    const objPath = path.join(a, '.git', 'objects', blob.slice(0, 2), blob.slice(2));
+    fs.chmodSync(objPath, 0o644);
+    fs.writeFileSync(objPath, '');
+    assert.equal(
+      spawnSync('git', ['-C', a, 'status', '--porcelain'], { encoding: 'utf8' }).status, 0,
+      'precondition: this damage must be invisible to git status, or the test proves nothing');
+
+    const r = sync(a);
+    assert.equal(r.code, 1);
+    assert.match(r.err, /agent-memory git object database is corrupt/);
+    assert.doesNotMatch(r.err, /merge conflict needs a human/,
+      'a corrupt object database was reported as a merge conflict — the alert would tell a human '
+      + 'to resolve a merge that does not exist');
+    assert.doesNotMatch(r.err, /\(see git status\)/,
+      'the empty-conflict-list fallback fired, which is the pre-fix symptom');
+    assert.ok(origin);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+// ── local damage vs. the remote's damage ─────────────────────────────────────
+//
+// Not reproducible against a file:// origin (git only prefixes `remote: ` over a real transport, and
+// a local clone hardlinks its objects), so it is asserted on the classifier with stderr shaped the
+// way ssh/https actually relay it.
+
+test('corruption reported by origin is diagnosed as REMOTE, never as local damage', () => {
+  const relayed = [
+    'remote: error: object file ./objects/a0/659570b3c5 is empty',
+    'remote: fatal: unable to read blob object a0659570b3c5',
+    'fatal: protocol error: bad pack header',
+  ].join('\n');
+  const c = classifyCorruption(relayed);
+  assert.equal(c?.side, 'remote',
+    'a corrupt ORIGIN read as local damage sends the operator to delete their own healthy checkout');
+
+  assert.equal(classifyCorruption('error: object file .git/objects/a0/659570 is empty')?.side, 'local');
+  // Local wins when both sides are shouting: the damage in front of the operator is the one to fix.
+  assert.equal(classifyCorruption(`${relayed}\nfatal: bad object HEAD`)?.side, 'local');
+  assert.equal(classifyCorruption('fatal: unable to access https://…: Could not resolve host'), null,
+    'an offline fetch is not corruption');
+  assert.equal(classifyCorruption(''), null);
+});
+
+test('the two sentinel phrases are disjoint, and neither is the conflict phrase', () => {
+  // brain-sync-run.js classifies with String.includes, so a phrase containing the other would make
+  // a remote fault match the local branch and hand back re-clone instructions.
+  assert.ok(!REMOTE_CORRUPT_MARK.includes(CORRUPT_MARK));
+  assert.ok(!CORRUPT_MARK.includes(REMOTE_CORRUPT_MARK));
+  for (const m of [CORRUPT_MARK, REMOTE_CORRUPT_MARK]) {
+    assert.ok(!m.includes('merge conflict needs a human'));
+  }
 });

@@ -25,13 +25,15 @@
 //   0  synced, nothing to do, or skipped because another sync held the lock
 //   2  setup error from brain-sync (no checkout at that path) — passed through, not alerted, because
 //      a host that has never cloned the brain would otherwise re-raise the same issue forever
-//   3  conflict; a human-needed alert was raised. 3 rather than 1 so a systemd unit can declare
-//      SuccessExitStatus=0 3 and not mark a working watchdog as failed (same convention as
-//      tools/actions-watchdog.js).
+//   3  conflict, or a corrupt object database; a human-needed alert was raised either way. 3 rather
+//      than 1 so a systemd unit can declare SuccessExitStatus=0 3 and not mark a working watchdog as
+//      failed (same convention as tools/actions-watchdog.js). Corruption reuses 3 rather than adding
+//      a fourth code: it is already alerting, and a new code would need the systemd unit's
+//      SuccessExitStatus updated on every host to match, or a working guard reads as a crash.
 //
 // Usage:
 //   node tools/brain-sync-run.js [--pull-only] [--path <brain>] [--lock <file>] [--state <file>]
-//                                [--stale-ms <n>] [--ignore-markers]
+//                                [--corrupt-state <file>] [--stale-ms <n>] [--ignore-markers]
 //                                [--brain-sync <script>] [--human-needed <script>]
 //
 // Node builtins only (repo rule for tools/).
@@ -43,6 +45,7 @@ import { homedir, hostname, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './is-main.js';
 import { acquireLock, releaseLock, DEFAULT_STALE_MS, workBudgetMs } from './sync-lock.js';
+import { CORRUPT_MARK, REMOTE_CORRUPT_MARK } from './brain-sync.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -50,16 +53,35 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const ALERT_KEY = 'brain-sync-conflict';
 
 /**
- * The key for one host. Per-host on purpose: the blocked tree is per-host, so a single global key
- * means the laptop resolving its conflict closes the issue the Mission Control box is still stuck
- * behind — one host's recovery silently cancelling another's alert.
+ * A second, distinct key prefix for object-database corruption. Not folded into ALERT_KEY: a
+ * conflict and a corrupt object database need different human action (resolve a merge vs. `git
+ * fsck` and likely a fresh clone), so one key covering both means fixing one closes an issue that
+ * never described the other, and the alert body for whichever was open second would be wrong about
+ * which problem it is.
  */
-export function alertKey(host = hostname()) {
-  return `${ALERT_KEY}-${String(host).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+export const CORRUPT_ALERT_KEY = 'brain-sync-corrupt';
+
+/**
+ * The key for one host under a given prefix. Per-host on purpose: the blocked tree is per-host, so
+ * a single global key means the laptop resolving its conflict closes the issue the Mission Control
+ * box is still stuck behind — one host's recovery silently cancelling another's alert.
+ */
+export function alertKey(host = hostname(), base = ALERT_KEY) {
+  return `${base}-${String(host).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 }
 
 /** The exact line brain-sync.js prints when a merge stopped for a person. */
 const CONFLICT_MARK = 'merge conflict needs a human';
+
+/**
+ * The phrases brain-sync.js prints when a git command failed because an object database is damaged
+ * (#429/#430: weekly-memory-decay and weekly-trust-scores both died in 9s on `fatal: bad object
+ * HEAD`, and nothing downstream said the brain repo was corrupt). Imported from brain-sync.js and
+ * re-exported here, so there is exactly one literal per phrase in the repo -- a second hand-copied
+ * string is a silent classifier failure the day someone reworders one side. They are disjoint
+ * substrings by construction, which is what lets `includes()` below tell them apart.
+ */
+export { CORRUPT_MARK, REMOTE_CORRUPT_MARK };
 
 /**
  * What a brain-sync exit code means to us.
@@ -69,10 +91,22 @@ const CONFLICT_MARK = 'merge conflict needs a human';
  * does two bad things at once: it opens a "resolve this merge by hand" issue about a network blip,
  * and it returns 3, which the unit declares a success. A sync that is failing every 15 minutes
  * would report healthy while crying wolf. So the conflict verdict requires brain-sync to have
- * actually said so.
+ * actually said so. Corruption gets the same treatment, and is checked first because it is the more
+ * specific match: brain-sync.js exits on corruption before it can reach either conflict branch, so
+ * a corruption stderr never carries the conflict phrase.
+ *
+ * `side` says whose object database is damaged -- this host's, or origin's as relayed through
+ * `remote: ` lines. Same outcome and same exit code; entirely different instructions to the human,
+ * so the two must not collapse into one verdict here.
  */
 export function classify(code, stderr = '') {
   if (code === 0) return { outcome: 'ok', alert: false, exit: 0 };
+  if (code === 1 && String(stderr).includes(REMOTE_CORRUPT_MARK)) {
+    return { outcome: 'corrupt', side: 'remote', alert: true, exit: 3 };
+  }
+  if (code === 1 && String(stderr).includes(CORRUPT_MARK)) {
+    return { outcome: 'corrupt', side: 'local', alert: true, exit: 3 };
+  }
   if (code === 1 && String(stderr).includes(CONFLICT_MARK)) {
     return { outcome: 'conflict', alert: true, exit: 3 };
   }
@@ -86,7 +120,70 @@ export function classify(code, stderr = '') {
  * offers no merge strategy: the whole point of stopping here is that only a person can decide which
  * side of a memory node is right.
  */
-export function raiseArgs({ root, host = hostname(), detail, kind = 'merge' }) {
+export function raiseArgs({ root, host = hostname(), detail, kind = 'merge', side = 'local' }) {
+  // Damage on origin, not here. This body must never suggest re-cloning: that clones from the
+  // broken side, and it discards a local checkout that is both healthy and possibly ahead of origin
+  // -- the one copy of any commit that never got pushed. It is deliberately the read-only half of
+  // the local body: diagnose, preserve, escalate.
+  if (kind === 'corrupt' && side === 'remote') {
+    return [
+      'raise', alertKey(host, CORRUPT_ALERT_KEY),
+      '--title', `Agent memory REMOTE git repository is corrupt (seen from ${host})`,
+      '--why',
+        `tools/brain-sync.js in ${root} on ${host} was refused by origin, which reported damage in `
+        + `**its own** object database -- the failing lines came back prefixed \`remote: \`. The `
+        + `checkout on ${host} is not known to be damaged. Nothing was synced in either direction, `
+        + `so every host is now diverging from a broken origin.\n\n`
+        + `Git's own error:\n${detail || '(see brain-sync.js output)'}`,
+      '--action',
+        `Do NOT re-clone and do NOT delete the checkout on ${host}. It is a healthy full copy, it `
+        + `may hold commits that never reached the damaged origin, and a fresh clone would pull `
+        + `from the broken side.\n\n`
+        + `On ${host}, confirm the local side is fine and see what it holds that origin does not:\n`
+        + '```bash\n'
+        + `cd ${root}\n`
+        + 'git fsck --full                    # expected: clean, the damage is not here\n'
+        + 'git log --oneline origin/HEAD..HEAD  # local commits origin has never seen\n'
+        + '```\n\n'
+        + 'Then repair origin, which only a human can do: restore the server-side repo from backup, '
+        + 'or (for a hosted remote) open a support ticket. If origin has to be rebuilt, push this '
+        + 'healthy checkout into the replacement rather than cloning the broken one.\n'
+        + `Then confirm: node ~/dev/AgentSystem/tools/brain-sync.js --status\n`,
+    ];
+  }
+  // Corrupt is its own shape, not another flavor of "conflict": there is no merge to resolve, no
+  // markers to remove, and offering "commit" or "git status" as next steps would be actively wrong.
+  if (kind === 'corrupt') {
+    return [
+      'raise', alertKey(host, CORRUPT_ALERT_KEY),
+      '--title', `Agent memory git repository is corrupt on ${host}`,
+      '--why',
+        `tools/brain-sync.js in ${root} on ${host} hit a git failure that names the object database `
+        + `itself as damaged (it can surface on \`git status\`, or later on the merge inside \`git `
+        + `pull\` when the damage is behind the merge base rather than at HEAD). Nothing was synced `
+        + `in either direction: no pull, no push, no `
+        + `commit. This is not a merge conflict and brain-sync.js makes no attempt to repair it -- `
+        + `only a human with \`git fsck\` and, most likely, a fresh clone from a healthy peer can.\n\n`
+        + `Git's own error:\n${detail || '(see brain-sync.js output)'}`,
+      '--action',
+        `On ${host}:\n`
+        + '```bash\n'
+        + `cd ${root}\n`
+        + 'git fsck --full        # see exactly what is damaged\n'
+        + 'git log --oneline -20  # anything written here that never reached origin?\n'
+        + 'git reflog\n'
+        + '```\n\n'
+        + 'Do not run `git gc`, `git prune`, or `git repack` against a damaged database first -- '
+        + 'each of those can turn partial corruption into permanent data loss. This repo is one clone '
+        + 'among several: every other host that has synced holds a full copy, so the usual fix is to '
+        + 'note anything above that never reached origin, then replace the damaged checkout:\n'
+        + '```bash\n'
+        + `mv ${root} ${root}.corrupt-$(date +%s)\n`
+        + `git clone <brain-remote> ${root}\n`
+        + '```\n'
+        + `Then confirm: node ~/dev/AgentSystem/tools/brain-sync.js --status\n`,
+    ];
+  }
   const cause = kind === 'markers'
     ? `the working tree in ${root} on ${host} still contains merge-conflict markers from an earlier `
       + `merge that was never finished. The sync stopped before touching git: brain-sync.js would `
@@ -203,6 +300,14 @@ if (isMainModule(import.meta.url)) {
   // calls `resolve`, and the human-needed issue stays open forever after the conflict is long fixed.
   // A stale "memory sync is blocked" issue that nobody can clear trains people to ignore the label.
   const stateFile = value('state', join(cacheDir(), 'brain-sync-alert.json'));
+  // Separate from stateFile for the same reason CORRUPT_ALERT_KEY is separate from ALERT_KEY: a
+  // clean run must be able to resolve "conflict fixed" without wrongly also claiming "corruption
+  // fixed" (or vice versa) when only one of the two was ever open. Defaults alongside stateFile
+  // (same directory) rather than to a second independent cacheDir() call, so that a caller who
+  // isolates state with `--state <dir>/x` (every test in this file does) isolates both by default
+  // without having to learn a second flag -- only a caller who wants the two split across
+  // directories needs `--corrupt-state` at all.
+  const corruptStateFile = value('corrupt-state', join(dirname(stateFile), 'brain-sync-corrupt-alert.json'));
   const staleMs = Number(value('stale-ms', DEFAULT_STALE_MS)) || DEFAULT_STALE_MS;
   const brainSync = value('brain-sync', join(HERE, 'brain-sync.js'));
   const humanNeeded = value('human-needed', join(HERE, 'human-needed.js'));
@@ -227,11 +332,22 @@ if (isMainModule(import.meta.url)) {
     return true;
   };
 
-  const markRaised = () => {
+  const markRaised = (file) => {
     try {
-      mkdirSync(dirname(stateFile), { recursive: true });
-      writeFileSync(stateFile, JSON.stringify({ raised: true, at: new Date().toISOString(), root }));
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ raised: true, at: new Date().toISOString(), root }));
     } catch { /* the alert is already open; state is only an optimisation */ }
+  };
+
+  // Resolve one previously-raised alert on a clean run. Only when we know we raised it: calling
+  // `resolve` on every clean run would spawn a gh API call every 15 minutes on every host to say
+  // nothing. Conflict and corruption are resolved independently -- a clean run proves both are
+  // gone, but each has its own key and state file, so each is only closed if it was the one open.
+  const maybeResolve = (key, file) => {
+    if (!readState(file)?.raised) return;
+    if (runHumanNeeded(['resolve', key])) {
+      try { rmSync(file, { force: true }); } catch { /* next clean run retries */ }
+    }
   };
 
   let verdict = { exit: 0 };
@@ -247,7 +363,7 @@ if (isMainModule(import.meta.url)) {
       runHumanNeeded(raiseArgs({
         root, host: hostname(), kind: 'markers', detail: stuck.slice(0, 20).join('\n'),
       }));
-      markRaised();
+      markRaised(stateFile);
       verdict = { outcome: 'conflict', alert: true, exit: 3 };
     } else {
       // --ignore-markers is forwarded, not consumed here: brain-sync.js carries the same guard
@@ -272,16 +388,21 @@ if (isMainModule(import.meta.url)) {
       if (r.stdout) process.stdout.write(r.stdout);
       if (r.stderr) process.stderr.write(r.stderr);
 
-      if (verdict.alert) {
+      if (verdict.outcome === 'corrupt') {
+        // No conflictDetail() here: that helper parses CONFLICT_MARK's paths-list shape, which
+        // corruption's stderr does not have. raiseArgs's own '(see brain-sync.js output)' fallback
+        // is the right default, so pass brain-sync's raw stderr as-is.
+        runHumanNeeded(raiseArgs({
+          root, host: hostname(), kind: 'corrupt', side: verdict.side, detail: r.stderr,
+        }));
+        markRaised(corruptStateFile);
+      } else if (verdict.alert) {
         const detail = conflictDetail(r.stderr);
         runHumanNeeded(raiseArgs({ root, host: hostname(), detail }));
-        markRaised();
-      } else if (verdict.outcome === 'ok' && readState(stateFile)?.raised) {
-        // Only resolve when we know we raised. Calling `resolve` on every clean run would spawn a gh
-        // API call every 15 minutes on every host to say nothing.
-        if (runHumanNeeded(['resolve', alertKey()])) {
-          try { rmSync(stateFile, { force: true }); } catch { /* next clean run retries */ }
-        }
+        markRaised(stateFile);
+      } else if (verdict.outcome === 'ok') {
+        maybeResolve(alertKey(), stateFile);
+        maybeResolve(alertKey(hostname(), CORRUPT_ALERT_KEY), corruptStateFile);
       }
     }
   } finally {

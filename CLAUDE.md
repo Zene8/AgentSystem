@@ -112,11 +112,26 @@ Three triggers now do, all through one wrapper, `tools/brain-sync-run.js`:
   a green exit code. brain-sync exit 1 becomes exit 3 here plus a `brain-sync-conflict`
   human-needed alert; a later clean sync resolves it. (`graph.json` is the one exception and
   `brain-sync.js` already handles it — take either side, rebuild from `nodes/`.)
-- The alert key is **per host** (`brain-sync-conflict-<hostname>`): one issue per machine, because
-  a conflict on the laptop and a conflict on the runner are two different people-tasks, and a
-  single shared key lets the second one resolve the first one's issue. Alert state lives in
-  `~/.cache/agentsystem/` (`%LOCALAPPDATA%\agentsystem` on Windows), not `tmpdir()` — a reboot
-  clearing the 20h de-duplication window turns a daily timer back into a daily issue comment.
+- The alert keys are **per host** — `brain-sync-conflict-<hostname>` for a merge that needs a
+  person, and `brain-sync-corrupt-<hostname>` for a damaged git object database (#434). One issue
+  per machine, because a conflict on the laptop and a conflict on the runner are two different
+  people-tasks, and a single shared key lets the second one resolve the first one's issue. The two
+  keys are separate for the same reason in the other axis: resolving a merge and running `git fsck`
+  are different jobs, so fixing one must not close an issue that described the other. Each has its
+  own state file next to the other in `~/.cache/agentsystem/`
+  (`%LOCALAPPDATA%\agentsystem` on Windows) — `brain-sync-alert.json` and
+  `brain-sync-corrupt-alert.json`, overridable with `--state` / `--corrupt-state`. Not `tmpdir()`:
+  a reboot clearing the 20h de-duplication window turns a daily timer back into a daily issue
+  comment.
+- **A corrupt object database is not a merge conflict**, and brain-sync.js says so in its own
+  sentinel phrase (`agent-memory git object database is corrupt`) that `brain-sync-run.js` matches
+  the same way it matches the conflict phrase. Two things this got wrong once and must keep right:
+  the check runs on **every** failed git call, including the `allowFail` ones — the merge inside
+  `git pull` is `allowFail: true`, so damage behind the merge base surfaced as a non-zero pull with
+  zero unmerged paths and was reported as a phantom "resolve this merge by hand". And damage
+  reported by **origin** (git prefixes those lines `remote: `) gets its own phrase,
+  `agent-memory remote object database is corrupt`, plus an alert body that says explicitly not to
+  re-clone: the local checkout is the healthy copy and may hold commits origin never received.
 - A brain with committed conflict markers (`<<<<<<<`) in it is refused before the sync runs, since
   syncing on top of them propagates them to every host. `--ignore-markers` is the escape hatch for
   the person actually resolving them. The scan is repo-wide on purpose: scoping it to files git
@@ -132,8 +147,10 @@ Three triggers now do, all through one wrapper, `tools/brain-sync-run.js`:
   The refusal says "merge conflict needs a human" verbatim, because `brain-sync-run.js` classifies
   on that phrase and reads a bare exit 1 as a network blip that alerts nobody.
 - Exit codes: `0` synced/skipped, `2` no brain checkout on this host (passed through, *not*
-  alerted, or a host that never cloned it would re-raise forever), `3` conflict alerted — hence
-  `SuccessExitStatus=0 3` in the unit.
+  alerted, or a host that never cloned it would re-raise forever), `3` conflict **or corruption**
+  alerted — hence `SuccessExitStatus=0 3` in the unit. Corruption deliberately reuses `3` rather
+  than taking a fourth code: it is already alerting, and a new code would need every host's unit
+  re-installed to match or a working guard reads as a crash.
 - Overlap is real: the timer can fire mid-`SessionEnd`. `tools/sync-lock.js` is a time-stale
   lockfile in `tmpdir()` — deliberately **outside** the brain, since `brain-sync.js` runs
   `git add -A` and would commit and push a lockfile to every host.
