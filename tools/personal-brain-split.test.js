@@ -156,6 +156,39 @@ describe('splitPersonalBrain — field preservation', () => {
     }
   });
 
+  it('mirrors frontmatter connections into graph.json edges', () => {
+    const root = makeTmpMemoryRoot();
+    try {
+      const brainDir = join(root, 'nexus', 'personal-brain');
+      writeBrain(brainDir, `## Goals\n- ship memory system\n`);
+
+      const r1 = runSplit(root);
+      assert.ok(r1.ok);
+
+      const nodesDir = join(brainDir, 'nodes');
+      const files = readdirSync(nodesDir).filter(f => f.endsWith('.md'));
+      const nodeFile = join(nodesDir, files[0]);
+      const nodeId = files[0].replace(/\.md$/, '');
+
+      // Inject connections
+      const raw = readFileSync(nodeFile, 'utf8');
+      const patched = raw.replace(/^---\n/, '---\nconnections: [[other-node]]\n');
+      writeFileSync(nodeFile, patched, 'utf8');
+
+      const r2 = runSplit(root);
+      assert.ok(r2.ok);
+
+      const graph = JSON.parse(readFileSync(join(brainDir, 'graph.json'), 'utf8'));
+      const edgeExists = graph.edges.some(e => 
+        (e.source === nodeId && e.target === 'other-node') ||
+        (e.source === 'other-node' && e.target === nodeId)
+      );
+      assert.ok(edgeExists, 'should have added the connection as an edge in graph.json');
+    } finally {
+      cleanup(root);
+    }
+  });
+
   it('does not add salience line when none existed before', () => {
     const root = makeTmpMemoryRoot();
     try {

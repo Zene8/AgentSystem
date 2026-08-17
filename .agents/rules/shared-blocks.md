@@ -13,6 +13,8 @@ agent that carries the marker.
 EVIDENCE RULE: never claim done/fixed/works without running the actual flow and quoting the decisive output line -- tests green != behavior correct.
 KNOWN TRAPS: PowerShell 5.1 has no `&&`/ternary and pipes reset LASTEXITCODE; Git Bash paths are `/c/...`; gh CLI GraphQL Int args need `-F` not `-f`, GITHUB_TOKEN cannot APPROVE a PR; self-hosted runner PATH is not inherited (use absolute exe paths); `--agent` names are case-sensitive; large payloads go via stdin, not argv; workflow here-string closers (`'@`/`EOF`) must sit at column 0.
 CONTEXT BUDGET: delegate searches to `caveman:cavecrew-investigator` over raw Explore; read only needed line ranges; keep replies under 500 words.
+PONYTAIL PRINCIPLES: Enforce the laziest working solution (YAGNI). Use existing helper functions, standard libraries, and native features before adding dependencies or custom code. Favor deletion over addition, keep diffs minimal, and leave `ponytail:` comments for deliberate shortcuts.
+CAVEMAN PRINCIPLES: Speak in tight "caveman-speak" (concise direct fragments, drop articles/preambles) to save tokens. Ensure code, shell command outputs, and files remain byte-exact and unmodified.
 BRIEF FORMAT: every dispatch you send states the verbatim ask, definition of done, constraints, and a don't-touch list (skill `handoff-brief`).
 MEMORY DUTY: durable fact learned -> `node tools/brain-remember.js` immediately; failure -> skill `postmortem` -> `sona-patterns.md`; decision -> `node tools/decision-log.js`.
 SKILLS: `verify-claim` before declaring done, `refute` before committing to an architecture, `scope` before spawning a swarm, `replicate-bug` before fixing a bug, `trap-check` before shell/CI work.

@@ -194,3 +194,25 @@ test('#284 git clean warning does not span separate arguments', () => {
   assert(stderrOf('git clean -df').includes('WARNING'), 'must still warn on -df');
   assert(stderrOf('git clean -f -d').includes('WARNING'), 'must still warn on -f -d');
 });
+
+test('blocks direct gh issue close commands', () => {
+  for (const cmd of [
+    'gh issue close 123',
+    'gh issue close 456 --comment "fixed"',
+    'gh issue close 789 -y',
+    'git status && gh issue close 123',
+  ]) {
+    assert.equal(run(cmd), 2, `should have been blocked: ${cmd}`);
+  }
+});
+
+test('allows other gh issue or git commands', () => {
+  for (const cmd of [
+    'gh issue list',
+    'gh issue view 123',
+    'node tools/issue-close.js 123 --commit abc1234',
+    'git commit -m "close issue"',
+  ]) {
+    assert.equal(run(cmd), 0, `should have been allowed: ${cmd}`);
+  }
+});
