@@ -168,6 +168,96 @@ function writeAntigravityAgent(file, name, desc, model, content) {
   ok(`Antigravity: ${join(ANTI_AGENTS_DIR, file)}`);
 }
 
+// Copy hook scripts to Antigravity plugin staging dir
+function copyHooksToAntigravity() {
+  const destHooksDir = join(ANTI_PLUGIN_DIR, 'hooks');
+  if (existsSync(destHooksDir)) {
+    rmSync(destHooksDir, { recursive: true, force: true });
+  }
+  ensureDir(destHooksDir);
+  
+  const srcHooksDir = join(REPO_ROOT, 'hooks');
+  
+  // 1. Copy hooks/*.js and package.json
+  for (const f of readdirSync(srcHooksDir)) {
+    if ((f.endsWith('.js') && !f.endsWith('.test.js')) || f === 'package.json') {
+      writeFileSync(join(destHooksDir, f), readFileSync(join(srcHooksDir, f)));
+    }
+  }
+  
+  // 2. Copy hooks/lib/*
+  const srcLib = join(srcHooksDir, 'lib');
+  const destLib = join(destHooksDir, 'lib');
+  if (existsSync(srcLib)) {
+    ensureDir(destLib);
+    for (const f of readdirSync(srcLib)) {
+      if (!f.includes('.test.')) {
+        writeFileSync(join(destLib, f), readFileSync(join(srcLib, f)));
+      }
+    }
+  }
+  
+  // 3. Copy hooks/claude-hooks/*
+  const srcSh = join(srcHooksDir, 'claude-hooks');
+  const destSh = join(destHooksDir, 'claude-hooks');
+  if (existsSync(srcSh)) {
+    ensureDir(destSh);
+    for (const f of readdirSync(srcSh)) {
+      if (f.endsWith('.sh')) {
+        writeFileSync(join(destSh, f), readFileSync(join(srcSh, f)));
+      }
+    }
+  }
+}
+
+// Write the hooks.json manifest for Antigravity plugin
+function writeAntigravityHooksManifest() {
+  const manifestPath = join(ANTI_PLUGIN_DIR, 'hooks.json');
+  const manifest = {
+    "agentsystem": {
+      "PreInvocation": [
+        {
+          "type": "command",
+          "command": "node hooks/antigravity-bridge.js PreInvocation",
+          "timeout": 20
+        }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": "*",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "node hooks/antigravity-bridge.js PreToolUse",
+              "timeout": 10
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "matcher": "*",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "node hooks/antigravity-bridge.js PostToolUse",
+              "timeout": 15
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "type": "command",
+          "command": "node hooks/antigravity-bridge.js Stop",
+          "timeout": 30
+        }
+      ]
+    }
+  };
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+}
+
 // Finalize the plugin manifest and install it into agy if the CLI is available.
 function installAntigravityPlugin() {
   writeFileSync(join(ANTI_PLUGIN_DIR, 'plugin.json'), JSON.stringify({
@@ -176,6 +266,9 @@ function installAntigravityPlugin() {
     description: 'AgentSystem agent roster synced from .agents/agents',
     author: 'AgentSystem',
   }, null, 2) + '\n', 'utf8');
+
+  copyHooksToAntigravity();
+  writeAntigravityHooksManifest();
 
   for (const agy of ['agy', join(HOME, '.local', 'bin', 'agy')]) {
     try {
@@ -264,7 +357,7 @@ function main() {
 
   // Rebuild the Antigravity plugin staging dir from scratch so removed agents don't linger.
   // Not under --check: that mode writes nothing.
-  if (!check && existsSync(ANTI_AGENTS_DIR)) rmSync(ANTI_AGENTS_DIR, { recursive: true, force: true });
+  if (!check && existsSync(ANTI_PLUGIN_DIR)) rmSync(ANTI_PLUGIN_DIR, { recursive: true, force: true });
 
   const files = readdirSync(AGENTS_DIR).filter(f => f.endsWith('.md'));
   const drifted = [];

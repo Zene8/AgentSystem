@@ -142,6 +142,18 @@ ${text}
 
     if (!graph.nodes.includes(id)) graph = addNode(graph, id);
 
+    // #253: Mirror connections from existing node files into graph.json
+    // so they are not silently dropped by downstream wikilink-sync passes.
+    if (preserved.connections) {
+      const raw = preserved.connections;
+      const links = (Array.isArray(raw) ? raw.join(',') : String(raw ?? '')).match(/\[\[([^\]]+)\]\]/g) || [];
+      const targets = links.map(l => l.slice(2, -2));
+      for (const target of targets) {
+        if (!graph.nodes.includes(target)) graph = addNode(graph, target);
+        graph = addEdge(graph, id, target);
+      }
+    }
+
     const prevInSection = sectionLastNode.get(section);
     if (prevInSection && prevInSection !== id) graph = addEdge(graph, prevInSection, id);
     sectionLastNode.set(section, id);

@@ -90,4 +90,13 @@ if printf '%s\n' "$SEGMENTS" | grep -E '(^|[[:space:]])git[[:space:]]+clean([[:s
   echo "WARNING: git clean -fd will delete untracked files. Proceeding." >&2
 fi
 
+# Block: direct gh issue close.
+# Enforces the verify-before-close routine (#151). Issues must only be closed
+# via the verification script tools/issue-close.js.
+GH_CLOSE='(^|[[:space:]])gh[[:space:]]+issue[[:space:]]+close([[:space:]]|$)'
+if printf '%s\n' "$SEGMENTS" | grep -qE "$GH_CLOSE"; then
+  echo "BLOCKED: direct 'gh issue close' is forbidden. Use 'node tools/issue-close.js <issue-number> --commit <sha>' instead to verify the fix has landed on main." >&2
+  exit 2
+fi
+
 exit 0
