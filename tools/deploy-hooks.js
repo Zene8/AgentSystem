@@ -60,6 +60,17 @@ function buildManifest() {
       }
     }
   }
+  // Shared modules required by hooks via relative './lib/...' paths (e.g.
+  // routines-context-inject.js -> ./lib/override-state.cjs). Without this, a hook that
+  // requires a lib module fails MODULE_NOT_FOUND on every deployed host (#423-follow-up).
+  const libDir = join(hooksDir, 'lib');
+  if (existsSync(libDir)) {
+    for (const f of readdirSync(libDir)) {
+      if (f.endsWith('.js') || f.endsWith('.cjs')) {
+        manifest.push({ src: join(libDir, f), dest: join(CLAUDE_HOME, 'hooks', 'lib', f) });
+      }
+    }
+  }
   const server = join(REPO, 'tools', 'mission-control', 'webhook-server.js');
   if (existsSync(server)) {
     manifest.push({ src: server, dest: join(CLAUDE_HOME, 'remote-control-server.js') });
