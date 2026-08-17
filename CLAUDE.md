@@ -219,6 +219,13 @@ Mission Control's `GET /briefing` serves.
   `daily-triage-watchdog.yml` on GitHub-hosted infra, so a dead self-hosted runner cannot hide the
   outage. Both use the key `daily-triage-down`, so one outage is one issue. A successful run closes
   it. Four consecutive silent failures went unnoticed before this existed.
+- **The Drive archive has no file extension.** Stage 1 saves the brief to Drive as `YYYY-MM-DD`,
+  mimeType `text/plain` — not `YYYY-MM-DD.md`. The on-disk copy at `$LIFE_REPO/briefings/YYYY-MM-DD.md`
+  is a different, correctly-suffixed file; do not conflate the two. Stage 2 searching Drive for
+  `<date>.md` matches nothing and reads as "stage 1 never ran" — that false premise is what #233
+  was opened on, and it flowed straight into the daily closeouts. Stage 1 also actually fires
+  ~14:05 UTC, not the documented 06:00, so the 05:00 UTC stage-2 run can never see a same-day
+  brief inside its 3h freshness window regardless of the naming bug (#436).
 
 ## Human-needed alerts
 
