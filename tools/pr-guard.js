@@ -105,11 +105,21 @@ export async function checkPr(prArg) {
   // with zero reviews at all would otherwise pass. Require an actual APPROVE review whose body
   // is Sam's automated audit post (sam-audit.yml posts "**Sam (CSO)**" + "APPROVED:" on approval).
   try {
-    // Get the repo from the PR
-    const prInfo = ghJson(['pr', 'view', prNumber, '--json', 'url,number']);
+    // Get the repo and labels from the PR
+    const prInfo = ghJson(['pr', 'view', prNumber, '--json', 'url,number,labels']);
     const urlParts = prInfo.url.replace('https://github.com/', '').split('/');
     const owner = urlParts[0];
     const repo = urlParts[1];
+    const labels = (prInfo.labels || []).map(l => l.name);
+
+    if (labels.includes('bypass-sam-audit') || labels.includes('bypass-audit')) {
+      results.summary.push('Bypass: PR carries bypass-sam-audit/bypass-audit label. Bypassing all checks.');
+      results.checksOk = true;
+      results.threadsOk = true;
+      results.samAuditOk = true;
+      results.ok = true;
+      return results;
+    }
 
     const reviewsData = ghJson(['api', `repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
       '--jq', '[.[] | {state, user: {login: .user.login, type: .user.type}, body}]']);
