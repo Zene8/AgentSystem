@@ -17,7 +17,15 @@ Hooks do nothing until **copied** to `~/.claude/hooks/` AND **registered** under
 - `node tools/deploy-hooks.js` — deploy + register + drop stale registrations, idempotent
 - `node tools/deploy-hooks.js --check` — exit 1 on drift, missing **or stale** registration
 
-Run after any `hooks/` change. Manifest is `HOOK_REGISTRY` in `tools/deploy-hooks.js` — add new
+Run after any `hooks/` change — though **SessionStart now runs it for you** once that change is on
+`main`: the start phase of `hooks/continuous-sync-hook.js` deploys whenever `tools/repo-sync.js`
+reports it pulled, i.e. on a clean `main` checkout only (#396). Before that, a merged `hooks/`
+change was installed-but-inert on every host until someone remembered the command, and the daily
+drift check raised a `human-needed` alert for a condition that healed itself at the next session.
+It is not a substitute for running it by hand on a feature branch, where the pull — and so the
+deploy — is deliberately skipped.
+
+Manifest is `HOOK_REGISTRY` in `tools/deploy-hooks.js` — add new
 hooks there. Registration was once PowerShell-only, so on Linux the whole pipeline was
 installed-but-inert; `--check` is what stops that recurring.
 
@@ -197,7 +205,7 @@ See `docs/memory-and-routing-redesign.md` → "Routines engine".
 
 ## Life OS daily cadence
 
-Two stages. **Stage 1 (06:00)** is a Grok Task, external to this repo: it triages mail/calendar and
+Two stages. **Stage 1 (~14:05 UTC)** is a Grok Task, external to this repo: it triages mail/calendar and
 archives a brief with a machine-readable `handoff:` block. **Stage 2 (13:00 and 05:00 UTC — 06:00 and 22:00 Pacific)** is the `daily-triage`
 job in `scheduled-tasks.yml` — Jarvis reads that handoff, covers Beeper/Discord/GitHub, executes
 AI-actionable items as **draft PRs only**, and writes `$LIFE_REPO/closeouts/YYYY-MM-DD.md`, which
@@ -219,6 +227,21 @@ Mission Control's `GET /briefing` serves.
   `daily-triage-watchdog.yml` on GitHub-hosted infra, so a dead self-hosted runner cannot hide the
   outage. Both use the key `daily-triage-down`, so one outage is one issue. A successful run closes
   it. Four consecutive silent failures went unnoticed before this existed.
+- **The Drive archive has two independent defects, not one.** (1) **Naming** (#436): when the
+  archive does land, stage 1 saves it to Drive as `YYYY-MM-DD`, mimeType `text/plain` — not
+  `YYYY-MM-DD.md`. The on-disk copy at `$LIFE_REPO/briefings/YYYY-MM-DD.md` is a different,
+  correctly-suffixed file; do not conflate the two. Stage 2 searching Drive for `<date>.md` matches
+  nothing and reads as "stage 1 never ran." Stage 1 also actually fires ~14:05 UTC, not the
+  documented 06:00, so the 05:00 UTC stage-2 run can never see a same-day brief inside its 3h
+  freshness window regardless of the naming bug. (2) **Intermittent missing archive** (#233 —
+  its premise is corroborated, not false): on 2026-08-16, confirmed by the `noreply@x.ai` Gmail
+  digest arriving on schedule, stage 1 ran and archived nothing to Drive under any name; the same
+  gap shape recurs on 2026-08-14 and every date 08-04 through 08-10, per a folder listing
+  (`parentId = '1DPzRNSaSD0MlfU2ldSEMXejNVA_1tnq7'`, 2026-08-17) that showed only `2026-08-15`,
+  `2026-08-13`, `2026-08-12`, `2026-08-11`, `2026-08-03` — gaps the naming bug alone can't produce,
+  since a wrongly-named file still shows up in a listing. The Gmail digest is a ran/didn't-run
+  signal only, nothing more: its body is truncated after a few hundred characters and ends in a
+  "Continue reading" link to grok.com, so it cannot substitute for the archived brief.
 
 ## Human-needed alerts
 

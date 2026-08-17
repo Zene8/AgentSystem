@@ -5,13 +5,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   mergeHookSettings, HOOK_REGISTRY, staleRegistrations, hooksDirTarget, hooksDirPath,
+  diffManifest,
 } from './deploy-hooks.js';
+
+// A hook's own file hashing "same" proves nothing if a module it require()s was never
+// deployed: hooks/lib/override-state.cjs was missing from the manifest, so every
+// SessionStart threw "Cannot find module './lib/override-state.cjs'" while --check
+// reported in-sync. Every relative require must land in the manifest.
+test('every module a hook requires is in the deploy manifest', () => {
+  const hooksDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks');
+  const dests = new Set(diffManifest().map(r => r.dest.replaceAll('\\', '/')));
+  const installed = join(homedir(), '.claude', 'hooks').replaceAll('\\', '/');
+  for (const f of readdirSync(hooksDir)) {
+    if (!f.endsWith('.js') || f.endsWith('.test.js')) continue;
+    const src = readFileSync(join(hooksDir, f), 'utf8');
+    for (const [, rel] of src.matchAll(/require\(['"](\.\/[^'"]+)['"]\)/g)) {
+      // require() is extensionless-tolerant: './routing-config' means routing-config.js.
+      const base = `${installed}/${rel.slice(2)}`;
+      const found = ['', '.js', '.cjs', '.json'].some(ext => dests.has(base + ext));
+      assert.ok(found, `${f} requires ${rel}, which deploy-hooks never installs`);
+    }
+  }
+});
 
 test('registers every manifest entry into empty settings', () => {
   const s = {};
