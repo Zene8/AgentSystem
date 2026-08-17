@@ -197,7 +197,7 @@ See `docs/memory-and-routing-redesign.md` → "Routines engine".
 
 ## Life OS daily cadence
 
-Two stages. **Stage 1 (06:00)** is a Grok Task, external to this repo: it triages mail/calendar and
+Two stages. **Stage 1 (~14:05 UTC)** is a Grok Task, external to this repo: it triages mail/calendar and
 archives a brief with a machine-readable `handoff:` block. **Stage 2 (13:00 and 05:00 UTC — 06:00 and 22:00 Pacific)** is the `daily-triage`
 job in `scheduled-tasks.yml` — Jarvis reads that handoff, covers Beeper/Discord/GitHub, executes
 AI-actionable items as **draft PRs only**, and writes `$LIFE_REPO/closeouts/YYYY-MM-DD.md`, which
