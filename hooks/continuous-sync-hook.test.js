@@ -14,22 +14,36 @@ const path = require('node:path');
 const os = require('node:os');
 
 const HOOK = path.join(__dirname, 'continuous-sync-hook.js');
-const { workerPlan, PHASES, CHILD_ENV_GUARD } = require('./continuous-sync-hook.js');
+const { workerPlan, followUp, PHASES, CHILD_ENV_GUARD } = require('./continuous-sync-hook.js');
 
 const scratch = () => fs.mkdtempSync(path.join(os.tmpdir(), 'continuous-sync-'));
 
-/** A fake tools dir whose scripts record their argv instead of touching git. */
-function fakeTools(dir, { exitCode = 0 } = {}) {
+/**
+ * A fake tools dir whose scripts record their argv instead of touching git.
+ * `stdout` maps a script name to what it prints — the worker reads repo-sync's output to decide
+ * whether a hook deploy is due (#396), so that output has to be forgeable here.
+ */
+function fakeTools(dir, { exitCode = 0, stdout = {} } = {}) {
   const tools = path.join(dir, 'tools');
   fs.mkdirSync(tools, { recursive: true });
-  for (const name of ['brain-sync-run.js', 'repo-sync.js']) {
+  for (const name of ['brain-sync-run.js', 'repo-sync.js', 'deploy-hooks.js']) {
     fs.writeFileSync(path.join(tools, name), `
       require('fs').appendFileSync(${JSON.stringify(path.join(dir, 'calls.log'))},
         JSON.stringify([${JSON.stringify(name)}, ...process.argv.slice(2)]) + '\\n');
+      process.stdout.write(${JSON.stringify(stdout[name] || '')});
       process.exit(${exitCode});
     `);
   }
   return tools;
+}
+
+/** Run the worker directly against a fake tools dir, so `stdout` can be forged per script. */
+function runWorker(phase, dir, opts = {}) {
+  const tools = fakeTools(dir, opts);
+  return spawnSync(process.execPath, [HOOK, '--worker', `--phase=${phase}`], {
+    encoding: 'utf8',
+    env: { ...process.env, AGENT_TOOLS_ROOT: tools, CONTINUOUS_SYNC_LOG: path.join(dir, 'sync.log') },
+  });
 }
 
 const calls = (dir) => {
@@ -60,6 +74,46 @@ test('SessionEnd commits and pushes memory, and never touches code', () => {
   // Pulling code out from under anything at session end is how you rewrite a tree someone is
   // still using. Code sync is SessionStart-only, on purpose.
   assert.equal(plan.some((s) => s.script.includes('repo-sync')), false);
+});
+
+// ── deploying what the pull landed (#396) ─────────────────────────────────────
+
+test('a pull that landed schedules a hook deploy, a skipped pull does not', () => {
+  assert.deepEqual(
+    followUp('repo-sync.js', 'repo-sync: pulled main (a1b2c3d)\n', '/t'),
+    { script: path.join('/t', 'deploy-hooks.js'), args: [] },
+    'a hooks/ change that is pulled but not deployed leaves the host running the old hook',
+  );
+  // repo-sync prints nothing when it refuses (feature branch, dirty tree, no network). Deploying
+  // then would install a WIP hook system-wide, and a session with nothing to do must be silent.
+  assert.equal(followUp('repo-sync.js', '', '/t'), null);
+  assert.equal(followUp('repo-sync.js', 'repo-sync: skipped — uncommitted local changes\n', '/t'), null);
+  assert.equal(followUp('repo-sync.js', 'repo-sync: would pull main — clean main\n', '/t'), null, '--dry-run is not a pull');
+  assert.equal(followUp('brain-sync-run.js', 'repo-sync: pulled main (a1b2c3d)', '/t'), null, 'memory sync must not deploy hooks');
+});
+
+test('the start worker deploys hooks after a pull that landed', () => {
+  const dir = scratch();
+  const r = runWorker('start', dir, { stdout: { 'repo-sync.js': 'repo-sync: pulled main (a1b2c3d)\n' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(
+    calls(dir).map((c) => c[0]),
+    ['brain-sync-run.js', 'repo-sync.js', 'deploy-hooks.js'],
+    'deploy-hooks must run after the pull, or a merged hooks/ change stays inert until someone '
+    + 'runs it by hand (#396)',
+  );
+});
+
+test('a session with nothing pulled runs no deploy at all', () => {
+  const dir = scratch();
+  runWorker('start', dir);
+  assert.deepEqual(calls(dir).map((c) => c[0]), ['brain-sync-run.js', 'repo-sync.js']);
+});
+
+test('the deploy never runs at session end, pull line or not', () => {
+  const dir = scratch();
+  runWorker('end', dir, { stdout: { 'repo-sync.js': 'repo-sync: pulled main (a1b2c3d)\n' } });
+  assert.deepEqual(calls(dir).map((c) => c[0]), ['brain-sync-run.js']);
 });
 
 test('an unknown phase plans nothing rather than guessing', () => {

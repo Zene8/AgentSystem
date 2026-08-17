@@ -17,7 +17,15 @@ Hooks do nothing until **copied** to `~/.claude/hooks/` AND **registered** under
 - `node tools/deploy-hooks.js` — deploy + register + drop stale registrations, idempotent
 - `node tools/deploy-hooks.js --check` — exit 1 on drift, missing **or stale** registration
 
-Run after any `hooks/` change. Manifest is `HOOK_REGISTRY` in `tools/deploy-hooks.js` — add new
+Run after any `hooks/` change — though **SessionStart now runs it for you** once that change is on
+`main`: the start phase of `hooks/continuous-sync-hook.js` deploys whenever `tools/repo-sync.js`
+reports it pulled, i.e. on a clean `main` checkout only (#396). Before that, a merged `hooks/`
+change was installed-but-inert on every host until someone remembered the command, and the daily
+drift check raised a `human-needed` alert for a condition that healed itself at the next session.
+It is not a substitute for running it by hand on a feature branch, where the pull — and so the
+deploy — is deliberately skipped.
+
+Manifest is `HOOK_REGISTRY` in `tools/deploy-hooks.js` — add new
 hooks there. Registration was once PowerShell-only, so on Linux the whole pipeline was
 installed-but-inert; `--check` is what stops that recurring.
 
@@ -104,11 +112,26 @@ Three triggers now do, all through one wrapper, `tools/brain-sync-run.js`:
   a green exit code. brain-sync exit 1 becomes exit 3 here plus a `brain-sync-conflict`
   human-needed alert; a later clean sync resolves it. (`graph.json` is the one exception and
   `brain-sync.js` already handles it — take either side, rebuild from `nodes/`.)
-- The alert key is **per host** (`brain-sync-conflict-<hostname>`): one issue per machine, because
-  a conflict on the laptop and a conflict on the runner are two different people-tasks, and a
-  single shared key lets the second one resolve the first one's issue. Alert state lives in
-  `~/.cache/agentsystem/` (`%LOCALAPPDATA%\agentsystem` on Windows), not `tmpdir()` — a reboot
-  clearing the 20h de-duplication window turns a daily timer back into a daily issue comment.
+- The alert keys are **per host** — `brain-sync-conflict-<hostname>` for a merge that needs a
+  person, and `brain-sync-corrupt-<hostname>` for a damaged git object database (#434). One issue
+  per machine, because a conflict on the laptop and a conflict on the runner are two different
+  people-tasks, and a single shared key lets the second one resolve the first one's issue. The two
+  keys are separate for the same reason in the other axis: resolving a merge and running `git fsck`
+  are different jobs, so fixing one must not close an issue that described the other. Each has its
+  own state file next to the other in `~/.cache/agentsystem/`
+  (`%LOCALAPPDATA%\agentsystem` on Windows) — `brain-sync-alert.json` and
+  `brain-sync-corrupt-alert.json`, overridable with `--state` / `--corrupt-state`. Not `tmpdir()`:
+  a reboot clearing the 20h de-duplication window turns a daily timer back into a daily issue
+  comment.
+- **A corrupt object database is not a merge conflict**, and brain-sync.js says so in its own
+  sentinel phrase (`agent-memory git object database is corrupt`) that `brain-sync-run.js` matches
+  the same way it matches the conflict phrase. Two things this got wrong once and must keep right:
+  the check runs on **every** failed git call, including the `allowFail` ones — the merge inside
+  `git pull` is `allowFail: true`, so damage behind the merge base surfaced as a non-zero pull with
+  zero unmerged paths and was reported as a phantom "resolve this merge by hand". And damage
+  reported by **origin** (git prefixes those lines `remote: `) gets its own phrase,
+  `agent-memory remote object database is corrupt`, plus an alert body that says explicitly not to
+  re-clone: the local checkout is the healthy copy and may hold commits origin never received.
 - A brain with committed conflict markers (`<<<<<<<`) in it is refused before the sync runs, since
   syncing on top of them propagates them to every host. `--ignore-markers` is the escape hatch for
   the person actually resolving them. The scan is repo-wide on purpose: scoping it to files git
@@ -124,8 +147,10 @@ Three triggers now do, all through one wrapper, `tools/brain-sync-run.js`:
   The refusal says "merge conflict needs a human" verbatim, because `brain-sync-run.js` classifies
   on that phrase and reads a bare exit 1 as a network blip that alerts nobody.
 - Exit codes: `0` synced/skipped, `2` no brain checkout on this host (passed through, *not*
-  alerted, or a host that never cloned it would re-raise forever), `3` conflict alerted — hence
-  `SuccessExitStatus=0 3` in the unit.
+  alerted, or a host that never cloned it would re-raise forever), `3` conflict **or corruption**
+  alerted — hence `SuccessExitStatus=0 3` in the unit. Corruption deliberately reuses `3` rather
+  than taking a fourth code: it is already alerting, and a new code would need every host's unit
+  re-installed to match or a working guard reads as a crash.
 - Overlap is real: the timer can fire mid-`SessionEnd`. `tools/sync-lock.js` is a time-stale
   lockfile in `tmpdir()` — deliberately **outside** the brain, since `brain-sync.js` runs
   `git add -A` and would commit and push a lockfile to every host.
@@ -197,7 +222,7 @@ See `docs/memory-and-routing-redesign.md` → "Routines engine".
 
 ## Life OS daily cadence
 
-Two stages. **Stage 1 (06:00)** is a Grok Task, external to this repo: it triages mail/calendar and
+Two stages. **Stage 1 (~14:05 UTC)** is a Grok Task, external to this repo: it triages mail/calendar and
 archives a brief with a machine-readable `handoff:` block. **Stage 2 (13:00 and 05:00 UTC — 06:00 and 22:00 Pacific)** is the `daily-triage`
 job in `scheduled-tasks.yml` — Jarvis reads that handoff, covers Beeper/Discord/GitHub, executes
 AI-actionable items as **draft PRs only**, and writes `$LIFE_REPO/closeouts/YYYY-MM-DD.md`, which
@@ -219,6 +244,21 @@ Mission Control's `GET /briefing` serves.
   `daily-triage-watchdog.yml` on GitHub-hosted infra, so a dead self-hosted runner cannot hide the
   outage. Both use the key `daily-triage-down`, so one outage is one issue. A successful run closes
   it. Four consecutive silent failures went unnoticed before this existed.
+- **The Drive archive has two independent defects, not one.** (1) **Naming** (#436): when the
+  archive does land, stage 1 saves it to Drive as `YYYY-MM-DD`, mimeType `text/plain` — not
+  `YYYY-MM-DD.md`. The on-disk copy at `$LIFE_REPO/briefings/YYYY-MM-DD.md` is a different,
+  correctly-suffixed file; do not conflate the two. Stage 2 searching Drive for `<date>.md` matches
+  nothing and reads as "stage 1 never ran." Stage 1 also actually fires ~14:05 UTC, not the
+  documented 06:00, so the 05:00 UTC stage-2 run can never see a same-day brief inside its 3h
+  freshness window regardless of the naming bug. (2) **Intermittent missing archive** (#233 —
+  its premise is corroborated, not false): on 2026-08-16, confirmed by the `noreply@x.ai` Gmail
+  digest arriving on schedule, stage 1 ran and archived nothing to Drive under any name; the same
+  gap shape recurs on 2026-08-14 and every date 08-04 through 08-10, per a folder listing
+  (`parentId = '1DPzRNSaSD0MlfU2ldSEMXejNVA_1tnq7'`, 2026-08-17) that showed only `2026-08-15`,
+  `2026-08-13`, `2026-08-12`, `2026-08-11`, `2026-08-03` — gaps the naming bug alone can't produce,
+  since a wrongly-named file still shows up in a listing. The Gmail digest is a ran/didn't-run
+  signal only, nothing more: its body is truncated after a few hundred characters and ends in a
+  "Continue reading" link to grok.com, so it cannot substitute for the archived brief.
 
 ## Human-needed alerts
 
