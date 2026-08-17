@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { agentMemoryRoot } from './graph/graph-lib.js';
-import { readRegistry, writeRegistry, upsertRepo } from './graph/known-repos.js';
+import { readRegistry, writeRegistry, upsertRepo, githubSlugForRepo } from './graph/known-repos.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS = __dirname;
@@ -110,8 +110,13 @@ function bootstrapRepo(repoPathRaw, opts = {}) {
   else if (opts.skipGraph) log('  graph-init: skipped (--skip-graph)');
 
   let reg = readRegistry(REGISTRY);
-  reg = upsertRepo(reg, { slug, path: repoPath.replace(/\\/g, '/'), primary_cli: 'claude' });
+  // Record the GitHub owner/name at bootstrap, so a fleet-wide sweep does not have to re-derive it
+  // from every checkout on every run — and so hosts that lack the checkout still know the identity
+  // (#403). Null for a non-GitHub or remote-less repo; upsertRepo then leaves any existing value be.
+  const github = git ? githubSlugForRepo(null, repoPath) : null;
+  reg = upsertRepo(reg, { slug, path: repoPath.replace(/\\/g, '/'), primary_cli: 'claude', github });
   writeRegistry(REGISTRY, reg);
+  if (github) log(`  github: ${github}`);
   log(`  registered: ${slug} → ${REGISTRY}`);
 
   return { slug, repoPath, git, brainOk };

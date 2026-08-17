@@ -1,5 +1,6 @@
 // known-repos.js — global registry of bootstrapped repos
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
 
 export function readRegistry(registryPath) {
@@ -32,6 +33,10 @@ export function upsertRepo(registry, entry) {
   if (typeof entry.description === 'string' && entry.description.trim()) {
     record.description = entry.description.trim();
   }
+  // Same rule for the GitHub identity: set it when known, otherwise let the spread below keep
+  // whatever is already recorded. A slug is NOT a GitHub name (`genie` is `arboreyecare/genie`),
+  // so this can only ever come from the checkout's origin remote — never be guessed.
+  if (isGitHubSlug(entry.github)) record.github = entry.github.trim();
   const idx = registry.repos.findIndex(r => r.slug === entry.slug);
   if (idx >= 0) {
     const repos = [...registry.repos];
@@ -64,4 +69,44 @@ export function repoPathForHost(repo, platform = process.platform) {
 
 export function findRepo(registry, slug) {
   return registry.repos.find(r => r.slug === slug) ?? null;
+}
+
+/** `owner/name` shape check — one slash, no whitespace, both halves non-empty. */
+export function isGitHubSlug(v) {
+  return typeof v === 'string' && /^[^/\s]+\/[^/\s]+$/.test(v.trim());
+}
+
+/**
+ * `owner/name` from a git remote URL, or null when the remote is not GitHub.
+ * Handles https, ssh (`git@github.com:o/n.git`), `ssh://`, and an optional `.git` / trailing slash.
+ */
+export function parseGitHubSlug(remoteUrl) {
+  if (typeof remoteUrl !== 'string') return null;
+  const m = remoteUrl.trim().match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/** origin's URL for a checkout, or null when the dir is not a git repo / has no origin. */
+export function gitOriginUrl(repoPath) {
+  try {
+    // cwd, not `git -C`: same result, and it fails cleanly when repoPath does not exist.
+    return execFileSync('git', ['remote', 'get-url', 'origin'],
+      { cwd: repoPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The GitHub `owner/name` for a registry entry: the recorded `github` field when present,
+ * otherwise derived from the checkout's origin remote. Null when neither is available.
+ *
+ * Both shapes are accepted on purpose. known-repos.json lives in the separately-synced private
+ * `agent-memory` repo, so a host can be running today's tooling against a registry that predates
+ * the `github` field — deriving from origin keeps that host sweeping instead of silently covering
+ * nothing.
+ */
+export function githubSlugForRepo(repo, repoPath) {
+  if (isGitHubSlug(repo?.github)) return repo.github.trim();
+  return repoPath ? parseGitHubSlug(gitOriginUrl(repoPath)) : null;
 }
