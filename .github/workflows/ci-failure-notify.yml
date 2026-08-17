@@ -31,10 +31,10 @@ jobs:
 
           if [ -z "$pr_number" ]; then
             echo "No associated PR found"
-            echo "pr_number=" >> $GITHUB_OUTPUT
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
           else
             echo "Found PR #$pr_number"
-            echo "pr_number=$pr_number" >> $GITHUB_OUTPUT
+            echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
           fi
 
       - name: List failed jobs and post comment
@@ -53,12 +53,16 @@ jobs:
             exit 0
           fi
 
+          # Bullet each job name. Parameter expansion, not `sed`: SC2001, and the whole point of
+          # this file's history is that the linter's findings here are real.
+          failed_list="- ${failed_jobs//$'\n'/$'\n'- }"
+
           # Build the comment body
           comment_body=$(cat <<EOF
           ❌ **CI checks failed**
 
           Failed jobs:
-          $(echo "$failed_jobs" | sed 's/^/- /')
+          $failed_list
 
           [View full run](https://github.com/$REPO/actions/runs/$RUN_ID)
           EOF
