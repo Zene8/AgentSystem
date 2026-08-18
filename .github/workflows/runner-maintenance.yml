@@ -603,7 +603,7 @@ jobs:
       contents: read
     env:
       GH_REPO: ${{ github.repository }}
-      ALERT_KEY: runner-brain-repair-blocked
+      ALERT_KEY: runner-brain-reclone-blocked
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -670,7 +670,11 @@ jobs:
           NEW="$HOME/agent-memory-reclone-$STAMP"
           git clone --quiet "$ORIGIN_URL" "$NEW"
           echo "NEW=$NEW" >> "$GITHUB_ENV"
-          echo "cloned $ORIGIN_URL into $NEW"
+          # Redact any embedded credential (https://x-access-token:TOKEN@... or a bare PAT) —
+          # secret-masking only redacts values GitHub already knows are secrets, not arbitrary
+          # strings baked into a git remote URL.
+          SAFE_URL="$(echo "$ORIGIN_URL" | sed -E 's#://[^@/]+@#://***@#')"
+          echo "cloned $SAFE_URL into $NEW"
 
       - name: Prove nothing local-only would be lost, then swap
         shell: bash
@@ -692,13 +696,27 @@ jobs:
               || stop "old HEAD ($OLD_HEAD) does not exist in the fresh clone — it may be a local-only commit that origin never received"
           fi
 
+          # for-each-ref on a damaged store can itself error and yield nothing — an empty loop
+          # must never read as "zero branches to check". Capture it to a file and check its exit
+          # code explicitly, since piping into `while read` would hide the exit code behind the
+          # pipeline's last command.
+          REFS_FILE="$(mktemp)"
+          git -C "$BRAIN" for-each-ref refs/heads --format='%(objectname) %(refname:short)' > "$REFS_FILE" 2>&1
+          REFS_RC=$?
+          [ "$REFS_RC" -eq 0 ] || stop "for-each-ref refs/heads failed against the corrupt checkout (exit $REFS_RC) — cannot prove local branches are safe, refusing to trust an empty result"
           while read -r sha ref; do
             [ -n "$sha" ] || continue
             git -C "$NEW" cat-file -e "$sha" 2>/dev/null \
               || stop "local branch $ref (at $sha) does not exist in the fresh clone — possible local-only work"
-          done < <(git -C "$BRAIN" for-each-ref refs/heads --format='%(objectname) %(refname:short)' 2>/dev/null)
+          done < "$REFS_FILE"
 
-          DANGLING="$(git -C "$BRAIN" fsck --no-reflog --unreachable 2>/dev/null | grep '^dangling commit' || true)"
+          # Same principle for fsck: a corrupt store can fail to walk objects at all, and an
+          # empty "dangling commit" result from a failed fsck is not proof there are none.
+          FSCK_FILE="$(mktemp)"
+          git -C "$BRAIN" fsck --no-reflog --unreachable > "$FSCK_FILE" 2>&1
+          FSCK_DANGLE_RC=$?
+          [ "$FSCK_DANGLE_RC" -eq 0 ] || stop "fsck --unreachable failed against the corrupt checkout (exit $FSCK_DANGLE_RC) — cannot prove there are no dangling commits, refusing to trust an empty result"
+          DANGLING="$(grep '^dangling commit' "$FSCK_FILE" || true)"
           if [ -n "$DANGLING" ]; then
             echo "$DANGLING"
             stop "the corrupt checkout has dangling commits fsck can still see — these may be lost work; a human must inspect them before this can proceed"

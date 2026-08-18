@@ -248,6 +248,7 @@ the pre-merge evidence available.
 ```bash
 gh workflow run runner-maintenance.yml -f mode=status            # read-only; always run this first
 gh workflow run runner-maintenance.yml -f mode=repair-brain      # only after reading a status run
+gh workflow run runner-maintenance.yml -f mode=reclone-brain     # only when repair-brain can't run — object store is corrupt
 gh workflow run runner-maintenance.yml -f mode=bootstrap-run-log # one-time; unblocks weekly-trust-scores
 ```
 
@@ -285,3 +286,30 @@ node tools/graph/graph-init.js <slug> --brain-path="$HOME/agent-memory/nexus/<sl
 Use `--brain-path`. The positional `graph-init.js <slug> <path>` form writes a brain nested inside
 the brain and prints a success line for work it did not do (#346), and its output arrow is relative
 so the two forms are indistinguishable from the log.
+
+`reclone-brain` is the escalation when `repair-brain` refuses because the git object store itself
+is unreadable (`error: object file .../XX is empty`, `fatal: bad object HEAD`) rather than merely
+holding conflict markers — `repair-brain` fetches and merges, both of which need a working object
+store first.
+
+```bash
+gh workflow run runner-maintenance.yml -f mode=reclone-brain    # only after status/repair-brain confirm corruption, not conflicts
+```
+
+It replaces rather than repairs, and only after proving the replacement drops nothing:
+
+1. tar the whole checkout **including `.git`** first, same as `repair-brain`;
+2. refuse to run at all unless `rev-parse HEAD` fails or `fsck --full` reports damage — this is not
+   a shortcut around `repair-brain` for ordinary conflicts;
+3. clone origin fresh into a **side** directory; the corrupt checkout is never touched by the clone;
+4. prove the old HEAD, every local branch tip, and `fsck --no-reflog --unreachable` (zero dangling
+   commits) all check out against the fresh clone — and treat a failed `for-each-ref` or `fsck` call
+   itself as unproven, not as "nothing to report", since a damaged store can fail to walk objects at
+   all and silently yield empty output;
+5. swap by `mv`, never `rm -rf` — the corrupt checkout lands at `agent-memory-corrupted-<stamp>` and
+   is kept, not deleted;
+6. rebuild every graph, then re-run `memory-decay.js --all` against the fresh clone.
+
+If any of that cannot be proven safe the job **stops**, raises the `runner-brain-reclone-blocked`
+human-needed alert (a distinct key from `repair-brain`'s `runner-brain-repair-blocked` — resolving
+one must not close an alert about the other), and exits nonzero.
