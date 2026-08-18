@@ -45,6 +45,10 @@ on:
           - status
           # Reconcile ~/agent-memory, resolve committed conflict markers, rebuild the graphs.
           - repair-brain
+          # Escalation when repair-brain refuses because the git object store itself is corrupt
+          # (not a conflict-marker problem). Backs up, clones origin fresh into a side directory,
+          # proves nothing local-only would be lost, only then swaps it in.
+          - reclone-brain
           # One-time bootstrap of ~/agent-memory/nexus/run-log/ so weekly-trust-scores can run.
           - bootstrap-run-log
           # Re-deploy hooks + agent defs and install the memory sync timer, then prove the drift
@@ -565,6 +569,209 @@ jobs:
             --title "[Infra]: the runner's agent-memory could not be repaired automatically" \
             --why "\`runner-maintenance.yml\` (mode repair-brain) stopped on \`$(hostname)\` rather than force a resolution. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). Stopping is the designed outcome when the brain cannot be reconciled losslessly — the runner may hold commits that exist on no other host, so a forced resolution would destroy facts permanently. A pre-repair backup of the whole checkout, .git included, was written to \`~/agent-memory-backups/\` on that host." \
             --action "Read the run log for the \`stop\` reason. Dispatch \`gh workflow run runner-maintenance.yml -f mode=status\` for the current state. Detached HEAD or an in-progress rebase means a human must decide what that state was meant to be. UNRESOLVED lines from resolve-brain-markers.js name the exact files whose conflicts neither rule could resolve; for a graph.json that means rebuilding it from nodes/ with \`node tools/graph/graph-init.js <slug> --brain-path=\\\"\$HOME/agent-memory/nexus/<slug>\\\"\` (the --brain-path form, per #346). This issue closes itself on the next successful repair." \
+            || echo "::warning::could not raise the human-needed alert"
+
+  # ── reclone-brain ──────────────────────────────────────────────────────────────────────────
+  #
+  # repair-brain assumes the object store is readable — it fetches, merges, resolves markers.
+  # None of that works when objects are missing or empty (`error: object file .../XX is empty`,
+  # `fatal: bad object HEAD`). This mode does not repair; it replaces, and only after proving
+  # the replacement loses nothing:
+  #
+  #   * tar the whole checkout INCLUDING .git first, same as repair-brain, before touching
+  #     anything;
+  #   * refuse to run at all unless the checkout actually looks corrupt — this is not a shortcut
+  #     around repair-brain for ordinary conflicts;
+  #   * clone origin fresh into a SIDE directory — the corrupt checkout is never touched by the
+  #     clone itself;
+  #   * prove every local branch tip and the old HEAD exist in the fresh clone, and that fsck
+  #     finds no dangling commits, BEFORE swapping anything in;
+  #   * swap by `mv`, never `rm -rf` — the corrupt checkout is moved aside under a
+  #     `agent-memory-corrupted-<stamp>` name and kept, not deleted;
+  #   * on anything that cannot be proven safe, STOP — raise a human-needed alert and exit
+  #     nonzero. That ordering (backup, prove, move-aside-never-delete, swap) is the entire
+  #     safety argument.
+  #
+  # Banned outright, same as repair-brain: `reset --hard`, `push --force`, `checkout --theirs`,
+  # `clean -fd`. Also banned here specifically: `rm -rf` on anything that was ever
+  # ~/agent-memory — corrupted or not, it only ever gets moved aside.
+  reclone-brain:
+    if: inputs.mode == 'reclone-brain'
+    runs-on: [self-hosted, Linux]
+    permissions:
+      issues: write
+      contents: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      ALERT_KEY: runner-brain-reclone-blocked
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Back up the whole brain checkout (including .git)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRAIN="$HOME/agent-memory"
+          if [ ! -d "$BRAIN" ]; then
+            echo "::error::$BRAIN does not exist on this host — nothing to reclone"
+            exit 1
+          fi
+          mkdir -p "$HOME/agent-memory-backups"
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          BACKUP="$HOME/agent-memory-backups/agent-memory-$STAMP.tar.gz"
+          tar -czf "$BACKUP" -C "$HOME" agent-memory
+          echo "BACKUP=$BACKUP" >> "$GITHUB_ENV"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          echo "backup written to $BACKUP ($(du -h "$BACKUP" | cut -f1))"
+          # shellcheck disable=SC2012  # names are ours (agent-memory-*.tar.gz); we want mtime order
+          ls -1t "$HOME/agent-memory-backups" | head -5
+
+      - name: Refuse unless the checkout actually looks corrupt
+        id: detect
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          BRAIN="$HOME/agent-memory"
+
+          HEAD_OK=1
+          git -C "$BRAIN" rev-parse HEAD >/dev/null 2>&1 || HEAD_OK=0
+          OLD_HEAD="$(git -C "$BRAIN" rev-parse HEAD 2>/dev/null || echo unknown)"
+
+          FSCK_OUT="$(git -C "$BRAIN" fsck --full 2>&1)"
+          FSCK_RC=0
+          echo "$FSCK_OUT" | grep -Eiq 'missing|empty|corrupt|error:' && FSCK_RC=1
+
+          reasons=""
+          [ "$HEAD_OK" -eq 0 ] && reasons="${reasons}HEAD does not resolve. "
+          [ "$FSCK_RC" -eq 1 ] && reasons="${reasons}fsck reports damage: $(echo "$FSCK_OUT" | grep -Ei 'missing|empty|corrupt|error:' | head -5 | tr '\n' ' ')"
+
+          if git -C "$BRAIN" fetch --quiet origin >/dev/null 2>&1; then
+            echo "note: fetch against origin unexpectedly succeeded despite the above"
+          fi
+
+          echo "$reasons"
+
+          if [ "$HEAD_OK" -eq 1 ] && [ "$FSCK_RC" -eq 0 ]; then
+            echo "::error::$BRAIN does not look corrupt (HEAD resolves, fsck --full is clean). Use mode=repair-brain for ordinary conflicts, or mode=status to inspect first."
+            exit 1
+          fi
+
+          echo "OLD_HEAD_OK=$HEAD_OK" >> "$GITHUB_ENV"
+          echo "OLD_HEAD=$OLD_HEAD" >> "$GITHUB_ENV"
+          echo "confirmed corrupt — proceeding to clone-and-prove"
+
+      - name: Clone origin fresh, side-by-side — does not touch ~/agent-memory
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRAIN="$HOME/agent-memory"
+          ORIGIN_URL="$(git -C "$BRAIN" config --get remote.origin.url)"
+          NEW="$HOME/agent-memory-reclone-$STAMP"
+          git clone --quiet "$ORIGIN_URL" "$NEW"
+          echo "NEW=$NEW" >> "$GITHUB_ENV"
+          # Redact any embedded credential (https://x-access-token:TOKEN@... or a bare PAT) —
+          # secret-masking only redacts values GitHub already knows are secrets, not arbitrary
+          # strings baked into a git remote URL.
+          SAFE_URL="$(echo "$ORIGIN_URL" | sed -E 's#://[^@/]+@#://***@#')"
+          echo "cloned $SAFE_URL into $NEW"
+
+      - name: Prove nothing local-only would be lost, then swap
+        shell: bash
+        run: |
+          set -uo pipefail
+          BRAIN="$HOME/agent-memory"
+
+          stop() {
+            echo "::error::$1"
+            echo "STOPPING. Nothing was moved and nothing was swapped."
+            echo "$BRAIN is exactly as this run found it."
+            echo "Fresh clone (unused) left at: ${NEW:-<none>}"
+            echo "Full pre-repair backup (working tree AND .git): ${BACKUP:-<not taken>}"
+            exit 1
+          }
+
+          if [ "${OLD_HEAD_OK:-0}" -eq 1 ]; then
+            git -C "$NEW" cat-file -e "$OLD_HEAD" 2>/dev/null \
+              || stop "old HEAD ($OLD_HEAD) does not exist in the fresh clone — it may be a local-only commit that origin never received"
+          fi
+
+          # for-each-ref on a damaged store can itself error and yield nothing — an empty loop
+          # must never read as "zero branches to check". Capture it to a file and check its exit
+          # code explicitly, since piping into `while read` would hide the exit code behind the
+          # pipeline's last command.
+          REFS_FILE="$(mktemp)"
+          git -C "$BRAIN" for-each-ref refs/heads --format='%(objectname) %(refname:short)' > "$REFS_FILE" 2>&1
+          REFS_RC=$?
+          [ "$REFS_RC" -eq 0 ] || stop "for-each-ref refs/heads failed against the corrupt checkout (exit $REFS_RC) — cannot prove local branches are safe, refusing to trust an empty result"
+          while read -r sha ref; do
+            [ -n "$sha" ] || continue
+            git -C "$NEW" cat-file -e "$sha" 2>/dev/null \
+              || stop "local branch $ref (at $sha) does not exist in the fresh clone — possible local-only work"
+          done < "$REFS_FILE"
+
+          # Same principle for fsck: a corrupt store can fail to walk objects at all, and an
+          # empty "dangling commit" result from a failed fsck is not proof there are none.
+          FSCK_FILE="$(mktemp)"
+          git -C "$BRAIN" fsck --no-reflog --unreachable > "$FSCK_FILE" 2>&1
+          FSCK_DANGLE_RC=$?
+          [ "$FSCK_DANGLE_RC" -eq 0 ] || stop "fsck --unreachable failed against the corrupt checkout (exit $FSCK_DANGLE_RC) — cannot prove there are no dangling commits, refusing to trust an empty result"
+          DANGLING="$(grep '^dangling commit' "$FSCK_FILE" || true)"
+          if [ -n "$DANGLING" ]; then
+            echo "$DANGLING"
+            stop "the corrupt checkout has dangling commits fsck can still see — these may be lost work; a human must inspect them before this can proceed"
+          fi
+
+          echo "verified: old HEAD and every local branch tip exist in the fresh clone, no dangling commits found"
+
+          CORRUPTED="$HOME/agent-memory-corrupted-$STAMP"
+          mv "$BRAIN" "$CORRUPTED" || stop "could not move $BRAIN aside — refusing to touch the fresh clone"
+          if ! mv "$NEW" "$BRAIN"; then
+            echo "::error::moved $BRAIN aside to $CORRUPTED but could not move the fresh clone into place."
+            echo "MANUAL RECOVERY NEEDED: fresh clone is sitting at $NEW — move it to $BRAIN by hand."
+            exit 1
+          fi
+          echo "swapped: corrupted checkout preserved at $CORRUPTED, fresh clone now live at $BRAIN"
+
+          for dir in "$BRAIN"/nexus/*/; do
+            [ -d "$dir" ] || continue
+            dir="${dir%/}"
+            slug="$(basename "$dir")"
+            { [ -d "$dir/nodes" ] || [ -f "$dir/graph.json" ]; } || continue
+            echo "--- rebuilding graph for $slug"
+            node "$GITHUB_WORKSPACE/tools/graph/graph-init.js" "$slug" --brain-path="$dir" || stop "graph rebuild failed for $slug after the swap"
+          done
+
+          echo "=== proving the fresh brain is healthy"
+          node "$GITHUB_WORKSPACE/tools/memory-decay.js" --all || stop "memory-decay fails against the freshly cloned brain"
+
+          echo "reclone-brain completed. Corrupted checkout preserved at $CORRUPTED. Backup retained at ${BACKUP:-<not taken>}"
+
+      - name: Post-reclone status
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          BRAIN="$HOME/agent-memory"
+          git -C "$BRAIN" log --oneline -5 2>/dev/null || true
+          git -C "$BRAIN" fsck --full 2>&1 | head -20 || true
+
+      - name: Clear the human-needed alert
+        if: success()
+        shell: bash
+        run: |
+          node "$GITHUB_WORKSPACE/tools/human-needed.js" resolve "$ALERT_KEY" \
+            --comment "runner-maintenance reclone-brain completed on $(hostname) at $(date -u +%Y-%m-%dT%H:%M:%SZ). Origin was cloned fresh after proving no local-only work would be lost. The corrupted checkout is preserved at ~/agent-memory-corrupted-$STAMP, not deleted." \
+            || echo "::warning::could not clear the human-needed alert"
+
+      - name: Raise the human-needed alert (reclone stopped)
+        if: failure()
+        shell: bash
+        run: |
+          node "$GITHUB_WORKSPACE/tools/human-needed.js" raise "$ALERT_KEY" \
+            --title "[Infra]: the runner's agent-memory is corrupt and could not be safely recloned" \
+            --why "\`runner-maintenance.yml\` (mode reclone-brain) stopped on \`$(hostname)\` rather than force a swap. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). Stopping is the designed outcome when the fresh clone cannot be proven to contain everything the corrupt checkout has — a forced swap could permanently drop a commit that exists on no other host. A pre-repair backup of the whole checkout, .git included, was written to \`~/agent-memory-backups/\` on that host, and nothing at \`~/agent-memory\` was moved." \
+            --action "Read the run log for the \`stop\` reason. If it names local-only branch tips or dangling commits, a human must inspect the pre-repair tarball or the still-in-place corrupt checkout by hand and decide what to cherry-pick before this can be re-dispatched. If the checkout turns out not to be corrupt after all, use mode=repair-brain or mode=status instead. This issue closes itself on the next successful reclone." \
             || echo "::warning::could not raise the human-needed alert"
 
   # ── bootstrap-run-log ──────────────────────────────────────────────────────────────────────
