@@ -24,17 +24,47 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # A branch name is a STRING, not a guarantee that the issue exists. `issue-747-not-planned-close`
+      # (PR #453) matched the regex, resolved to nothing, and the `gh issue view 747` two steps down
+      # exited 1 under this job's `-e` shell -- turning deterministic bookkeeping into a red run and an
+      # email (#457). So the number is resolved here, ONCE, and an unresolvable one is reported as
+      # absent so both downstream steps skip on their existing `!= ''` guards.
+      #
+      # This is NOT the unlinked-PR gate and must never become one. `pr-linked-issue-check.yml` is the
+      # required check that fails an unlinked PR, and it already reported #453 correctly; a second
+      # failure here adds no signal and one more email.
       - name: Extract linked issue number from head branch
         id: linked
         run: |
+          set -uo pipefail
           BRANCH="${HEAD_REF}"
-          if [[ "$BRANCH" =~ issue-([0-9]+) ]]; then
-            echo "issue_number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          else
+          if [[ ! "$BRANCH" =~ issue-([0-9]+) ]]; then
+            echo "Branch '$BRANCH' carries no issue-<N> segment — nothing to autolink."
             echo "issue_number=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          N="${BASH_REMATCH[1]}"
+
+          # `gh issue view` resolves pull requests too -- they share the numbering space -- so ask for
+          # the type as well and accept only a real Issue. Same distinction pr-linked-issue-check.yml
+          # draws, for the same reason: `Closes #<pr>` is a typo, not a link.
+          if ! RESOLVED=$(gh api "repos/${REPO}/issues/${N}" --jq '.pull_request | if . then "pr" else "issue" end' 2>&1); then
+            echo "Issue #${N} from branch '$BRANCH' does not resolve in ${REPO} — skipping autolink."
+            echo "  gh said: ${RESOLVED}"
+            echo "issue_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$RESOLVED" != "issue" ]; then
+            echo "#${N} resolves to a pull request, not an issue — skipping autolink."
+            echo "issue_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Branch '$BRANCH' -> issue #${N} (resolved)."
+          echo "issue_number=${N}" >> "$GITHUB_OUTPUT"
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.repository }}
 
       - name: Append "Closes #N" to PR body if absent
         if: steps.linked.outputs.issue_number != ''
@@ -50,6 +80,8 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+        # Bookkeeping, not a gate (#457): a transient API error here must not produce a red run.
+        continue-on-error: true
 
       - name: Copy labels + milestone from linked issue
         if: steps.linked.outputs.issue_number != ''
@@ -68,6 +100,8 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+        # Bookkeeping, not a gate (#457): a transient API error here must not produce a red run.
+        continue-on-error: true
 
       - name: Add spec/implementation label based on branch/title
         run: |

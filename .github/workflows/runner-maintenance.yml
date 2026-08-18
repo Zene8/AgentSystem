@@ -54,6 +54,9 @@ on:
           # Re-deploy hooks + agent defs and install the memory sync timer, then prove the drift
           # is gone. Reads ~/agent-memory but never writes it and never pushes anything.
           - repair-install
+          # Seed the runner's action archive cache so `Set up job` stops re-downloading the same
+          # action tarballs from codeload and stops getting 429'd. Touches no repo state at all.
+          - seed-action-cache
 
 # Two dispatches touching ~/agent-memory at once would produce exactly the half-merged tree this
 # workflow exists to repair.
@@ -77,11 +80,36 @@ jobs:
       - name: Report the runner's brain state
         shell: bash
         run: |
+          # `set +e` first and deliberately, same reason spelled out on the repair-install BEFORE
+          # step: GitHub invokes this as `bash --noprofile --norc -e -o pipefail {0}`, and a step's
+          # own `set -uo pipefail` does NOT clear that -e. Without this line the FIRST git call that
+          # exits non-zero ends the probe, which is exactly what happened on run 32187001323 (#457):
+          # against a brain whose object database is damaged, `git diff --diff-filter=U | wc -l`
+          # returned 128, pipefail propagated it, -e killed the step, and the report stopped before
+          # `dirty paths`, `unmerged` and the whole canonical-checkout section -- the one thing #449
+          # tells a human to read first. A diagnostic that dies in the state it exists to diagnose
+          # gives a human LESS on a sick host than on a healthy one. Every value below is therefore
+          # captured with its own rc and prints as `unknown` with a reason when it cannot be read.
+          set +e
           set -uo pipefail
           BRAIN="$HOME/agent-memory"
           WS="$GITHUB_WORKSPACE"
 
           out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          # Read one value from git. Never fails; an unreadable value carries its own reason, since
+          # a blank line and a healthy empty value are indistinguishable to the human reading this.
+          gitval() {
+            local o rc
+            o="$(git -C "$BRAIN" "$@" 2>&1)"; rc=$?
+            if [ $rc -ne 0 ]; then
+              printf 'unknown (git %s exited %s: %s)' "$1" "$rc" "$(printf '%s' "$o" | head -1)"
+            elif [ -z "$o" ]; then
+              printf '<empty>'
+            else
+              printf '%s' "$o"
+            fi
+          }
 
           out "## Runner brain status"
           out ""
@@ -104,8 +132,22 @@ jobs:
 
           GITDIR="$(git -C "$BRAIN" rev-parse --absolute-git-dir 2>/dev/null)"
           BRANCH="$(git -C "$BRAIN" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-          out "branch        $BRANCH"
-          out "HEAD          $(git -C "$BRAIN" log -1 --format='%h %ad %s' --date=iso 2>/dev/null)"
+          out "branch        $(gitval rev-parse --abbrev-ref HEAD)"
+          out "HEAD          $(gitval log -1 "--format=%h %ad %s" --date=iso)"
+
+          # An empty HEAD plus a failing fetch plus rc 128 is not a merge conflict -- it is a damaged
+          # object database, the `brain-sync-corrupt` condition (#434). Name it, because the repair
+          # for it (`reclone-brain`) is a DIFFERENT job from the repair for a conflict
+          # (`repair-brain`), and a human reading a truncated report cannot tell which they need.
+          FSCK_OUT="$(git -C "$BRAIN" cat-file -e HEAD^{commit} 2>&1)"; FSCK_RC=$?
+          if [ $FSCK_RC -ne 0 ]; then
+            out "OBJECT DB     DAMAGED — HEAD does not resolve to a readable commit (rc $FSCK_RC)"
+            out "              $(printf '%s' "$FSCK_OUT" | head -2 | tr '\n' ' ')"
+            out "              This is corruption, NOT a merge conflict: see #434. The report below"
+            out "              continues; every remaining value is best-effort."
+          else
+            out "OBJECT DB     HEAD resolves — no corruption at HEAD"
+          fi
 
           IN_MERGE=no; [ -f "$GITDIR/MERGE_HEAD" ] && IN_MERGE=YES
           IN_REBASE=no
@@ -121,8 +163,21 @@ jobs:
             out "behind/ahead  fetch failed — cannot compare with origin"
           fi
 
-          UNMERGED="$(git -C "$BRAIN" diff --name-only --diff-filter=U 2>/dev/null | wc -l)"
-          DIRTY="$(git -C "$BRAIN" status --porcelain 2>/dev/null | wc -l)"
+          # NOT `git ... | wc -l`: with pipefail a git rc of 128 fails the whole pipeline (the #457
+          # abort), and `wc -l` of no output is `0`, which reads as "clean" -- the worst possible
+          # answer on a corrupt brain. Capture, check rc, then count.
+          DIRTY_RAW="$(git -C "$BRAIN" status --porcelain 2>&1)"; DIRTY_RC=$?
+          if [ $DIRTY_RC -ne 0 ]; then
+            DIRTY="unknown (git status exited $DIRTY_RC: $(printf '%s' "$DIRTY_RAW" | head -1))"
+          else
+            DIRTY="$(printf '%s' "$DIRTY_RAW" | grep -c . )"
+          fi
+          UNMERGED_RAW="$(git -C "$BRAIN" diff --name-only --diff-filter=U 2>&1)"; UNMERGED_RC=$?
+          if [ $UNMERGED_RC -ne 0 ]; then
+            UNMERGED="unknown (git diff exited $UNMERGED_RC: $(printf '%s' "$UNMERGED_RAW" | head -1))"
+          else
+            UNMERGED="$(printf '%s' "$UNMERGED_RAW" | grep -c . )"
+          fi
           out "dirty paths   $DIRTY"
           out "unmerged      $UNMERGED"
           out '```'
@@ -130,13 +185,20 @@ jobs:
           out ""
           out "### Working tree (first 40 entries of --porcelain)"
           out '```'
-          git -C "$BRAIN" status --porcelain 2>/dev/null | head -40 | tee -a "$GITHUB_STEP_SUMMARY" || true
+          if [ $DIRTY_RC -ne 0 ]; then
+            out "unavailable — git status exited $DIRTY_RC"
+            printf '%s\n' "$DIRTY_RAW" | head -5 | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' "${DIRTY_RAW:-<clean>}" | head -40 | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           out '```'
 
           out ""
           out "### Conflict markers (read-only --check; exit 1 here just means markers exist)"
           out '```'
-          node "$WS/tools/resolve-brain-markers.js" --root="$BRAIN" --check 2>&1 | tail -60 | tee -a "$GITHUB_STEP_SUMMARY"
+          MARKERS="$(node "$WS/tools/resolve-brain-markers.js" --root="$BRAIN" --check 2>&1)"; MARKERS_RC=$?
+          printf '%s\n' "${MARKERS:-<no output>}" | tail -60 | tee -a "$GITHUB_STEP_SUMMARY"
+          out "(exit $MARKERS_RC — 1 means markers exist, which is a finding, not a probe failure)"
           out '```'
 
           out ""
@@ -1552,3 +1614,208 @@ jobs:
             out "## VERDICT: FAIL — see the ::error:: annotations above. Re-read BEFORE vs AFTER to see what the repair did and did not move."
           fi
           exit "$gate"
+
+  # ── seed-action-cache ──────────────────────────────────────────────────────────────────────
+  #
+  # `Sam Security Audit` run 32182510133 failed in **Set up job**, before a single line of this
+  # repo's code ran:
+  #
+  #     Failed to download action 'https://codeload.github.com/actions/checkout/tar.gz/11d5960a…'
+  #     Error: Response status code does not indicate success: 429 (Too Many Requests).
+  #     Failed to download archive '…' after 3 attempts.
+  #
+  # One PR sync fires six workflows here, and ~10 self-hosted jobs each re-download the identical
+  # `actions/checkout` tarball from a single egress IP. codeload throttles the IP, `Set up job`
+  # fails, and a required check goes red for a reason no diff can fix. Retrying is not a fix: the
+  # next sync does exactly the same thing.
+  #
+  # The runner supports a local archive cache and this is the GitHub-supported knob. From
+  # actions/runner `src/Runner.Common/Constants.cs`:
+  #
+  #     public static readonly string ActionArchiveCacheDirectory = "ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE";
+  #
+  # and `src/Runner.Worker/ActionManager.cs`, which reads it and, on a hit, copies from disk
+  # INSTEAD of calling codeload at all:
+  #
+  #     var cacheArchiveFile = Path.Combine(actionArchiveCacheDir,
+  #         downloadInfo.ResolvedNameWithOwner.Replace(Path.DirectorySeparatorChar, '_')…,
+  #         $"{downloadInfo.ResolvedSha}.tar.gz");            // .zip on Windows
+  #     if (File.Exists(cacheArchiveFile)) { … File.Copy(cacheArchiveFile, archiveFile); useActionArchiveCache = true; }
+  #     …
+  #     if (!useActionArchiveCache) { await DownloadRepositoryArchive(…); }
+  #
+  # Two properties of that code shape this job. A **miss falls straight through to the download**,
+  # so a partial or stale cache can only help, never break a run — which is why this job needs no
+  # rollback path. And the layout is fixed: `<cache>/<owner>_<repo>/<sha>.tar.gz`, keyed on the
+  # RESOLVED SHA, which is why every `uses:` in this repo being SHA-pinned is what makes seeding
+  # possible at all — a tag-pinned action resolves to a SHA the runner only learns at job time.
+  #
+  # ── Why a separate mode and not part of repair-install ─────────────────────────────────────
+  #
+  # repair-install's preflight `fatal`s when the canonical checkout is unhealthy, and rightly so.
+  # But the 429 has nothing to do with ~/agent-memory or brain-sync, and a fix for a red required
+  # check must not be blocked behind an unrelated brain repair. This mode reads no brain state,
+  # writes no repo state, and can run when repair-install cannot.
+  #
+  # ── Why this job never restarts the runner ─────────────────────────────────────────────────
+  #
+  # It is EXECUTING ON the runner it would be restarting; `svc.sh restart` here kills this job
+  # mid-step and reports a failure — one more red run, which is the thing being fixed. So the job
+  # seeds the cache and writes the export, then REPORTS whether the variable is live in the
+  # listener process rather than claiming a result it cannot produce. The runner self-updates and
+  # restarts on its own cadence, so the setting goes live without a human; the job says so plainly
+  # instead of pretending it is already in effect.
+  seed-action-cache:
+    if: inputs.mode == 'seed-action-cache'
+    runs-on: [self-hosted, Linux]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Seed the action archive cache
+        shell: bash
+        run: |
+          # Diagnostic-and-best-effort, same contract as `status`: GitHub invokes this as
+          # `bash -e -o pipefail`, and one unreachable tarball must not abort the seeding of the
+          # rest. Every fallible command carries its own rc.
+          set +e
+          set -uo pipefail
+          WS="$GITHUB_WORKSPACE"
+          CACHE="$HOME/actions-runner-action-cache"
+
+          out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          out "## Action archive cache on $(hostname)"
+          out ""
+          out '```'
+          out "cache dir     $CACHE"
+          if ! mkdir -p "$CACHE"; then
+            out "FATAL - cannot create $CACHE"
+            out '```'
+            exit 1
+          fi
+
+          # Collect every SHA-pinned `uses:` in this repo. Deliberately parsed out of the workflow
+          # files rather than hard-coded: a list that has to be updated by hand is a list that goes
+          # stale silently, and a stale entry here reads as a working cache that never hits.
+          PINS="$(grep -rhoE 'uses:[[:space:]]+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}' "$WS/.github/workflows/" | sed -E 's/^uses:[[:space:]]+//' | sort -u)"
+          out "pinned actions $(printf '%s\n' "$PINS" | grep -c .)"
+          out '```'
+          out ""
+          out '```'
+
+          SEEDED=0
+          PRESENT=0
+          FAILED=0
+          while IFS= read -r pin; do
+            [ -n "$pin" ] || continue
+            REPO_PART="${pin%@*}"
+            SHA="${pin#*@}"
+            OWNER="${REPO_PART%%/*}"
+            NAME="${REPO_PART#*/}"
+            # Layout is fixed by ActionManager.cs: '/' in owner/repo becomes '_', file is <sha>.tar.gz.
+            DIR="$CACHE/${OWNER}_${NAME}"
+            DEST="$DIR/${SHA}.tar.gz"
+            if [ -s "$DEST" ]; then
+              out "present  $pin"
+              PRESENT=$((PRESENT+1))
+              continue
+            fi
+            mkdir -p "$DIR"
+            # Download ONCE, here, instead of once per job forever. Straight to a temp name so an
+            # interrupted transfer can never leave a truncated file that the runner would happily
+            # copy and then fail to untar.
+            curl -fsSL --retry 3 --retry-delay 5 -o "$DEST.part" "https://codeload.github.com/${OWNER}/${NAME}/tar.gz/${SHA}"
+            CURL_RC=$?
+            if [ $CURL_RC -eq 0 ] && tar -tzf "$DEST.part" >/dev/null 2>&1; then
+              mv -f "$DEST.part" "$DEST"
+              out "seeded   $pin"
+              SEEDED=$((SEEDED+1))
+            else
+              rm -f "$DEST.part"
+              out "FAILED   $pin (curl rc $CURL_RC; left uncached, runner falls through to codeload)"
+              FAILED=$((FAILED+1))
+            fi
+          done <<< "$PINS"
+          out '```'
+          out ""
+          out "seeded $SEEDED, already present $PRESENT, failed $FAILED"
+
+      - name: Wire the cache into the runner service, then report whether it is live
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          CACHE="$HOME/actions-runner-action-cache"
+          RUNNER_DIR="$HOME/actions-runner"
+          SVC="$RUNNER_DIR/runsvc.sh"
+
+          out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          out ""
+          out "### Wiring ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE into the service"
+          out '```'
+          out "runner dir    $RUNNER_DIR"
+
+          # runsvc.sh, NOT a systemd drop-in and NOT a `.env` file. The unit generated by the
+          # runner's own svc.sh is `ExecStart={{RunnerRoot}}/runsvc.sh` with no EnvironmentFile, so
+          # a `.env` would be read by nothing; a drop-in would need sudo, which this job does not
+          # have and should not want on the host that gates merges. runsvc.sh is owned by the
+          # runner user and carries an explicit insertion point for exactly this:
+          #   "# insert anything to setup env when running as a service"
+          if [ ! -f "$SVC" ]; then
+            out "runsvc.sh     NOT FOUND at $SVC - cannot wire the variable."
+            out "              The cache directory is still seeded and costs nothing; set"
+            out "              ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=$CACHE by hand for the service."
+            out '```'
+            exit 0
+          fi
+
+          MARKER='insert anything to setup env when running as a service'
+          if grep -qF 'ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE' "$SVC"; then
+            out "runsvc.sh     already exports the variable - left untouched"
+          elif ! grep -qF "$MARKER" "$SVC"; then
+            out "runsvc.sh     insertion marker NOT FOUND - not edited."
+            out "              Add by hand, before the RunnerService.js launch:"
+            out "              export ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=$CACHE"
+          else
+            cp -p "$SVC" "$SVC.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+            # Insert immediately after the marked line so the export precedes the RunnerService
+            # launch. Appending at EOF would land AFTER `wait $PID` and never execute.
+            awk -v cache="$CACHE" -v marker="$MARKER" '
+              { print }
+              index($0, marker) && !done { print "export ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE=\"" cache "\""; done = 1 }
+            ' "$SVC" > "$SVC.new"
+            if grep -qF 'ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE' "$SVC.new"; then
+              cat "$SVC.new" > "$SVC"   # preserve the existing inode, mode and ownership
+              rm -f "$SVC.new"
+              out "runsvc.sh     export inserted (a timestamped .bak sits beside it)"
+            else
+              rm -f "$SVC.new"
+              out "runsvc.sh     rewrite produced no export - left untouched"
+            fi
+          fi
+
+          # Is it live RIGHT NOW? The seeding above does nothing until the listener process itself
+          # carries the variable, and "the file says so" is not "the process has it" - the same
+          # distinction #362 turned on. Read the actual process environment.
+          LISTENER_PID="$(pgrep -f Runner.Listener | head -1)"
+          if [ -n "$LISTENER_PID" ] && [ -r "/proc/$LISTENER_PID/environ" ]; then
+            if tr '\0' '\n' < "/proc/$LISTENER_PID/environ" | grep -q '^ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE='; then
+              out "LIVE          YES - the running listener carries it; cache hits start now"
+            else
+              out "LIVE          NOT YET - the running listener predates this edit."
+              out "              This job will NOT restart the runner: it is executing ON that"
+              out "              runner, so a restart kills this job and reports a failure. The"
+              out "              setting goes live at the next runner restart, which the runner's"
+              out "              own auto-update performs unattended. To force it from the console:"
+              out "                cd $RUNNER_DIR && sudo ./svc.sh stop && sudo ./svc.sh start"
+            fi
+          else
+            out "LIVE          UNKNOWN - no readable Runner.Listener process environment"
+          fi
+          out '```'
+          out ""
+          out "_A cache MISS is harmless: ActionManager.cs falls through to the normal download, so"
+          out "a partial or stale cache can only reduce codeload traffic, never break a job._"

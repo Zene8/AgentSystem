@@ -313,3 +313,92 @@ It replaces rather than repairs, and only after proving the replacement drops no
 If any of that cannot be proven safe the job **stops**, raises the `runner-brain-reclone-blocked`
 human-needed alert (a distinct key from `repair-brain`'s `runner-brain-repair-blocked` — resolving
 one must not close an alert about the other), and exits nonzero.
+
+## Action archive cache — the 429 in `Set up job` (#457)
+
+`Sam Security Audit` run 32182510133 failed **before any repo code ran**:
+
+```
+Failed to download action 'https://codeload.github.com/actions/checkout/tar.gz/11d5960a…'
+Error: Response status code does not indicate success: 429 (Too Many Requests).
+Failed to download archive '…' after 3 attempts.
+```
+
+One PR sync fires six workflows here and ~10 self-hosted jobs each re-download the *identical*
+`actions/checkout` tarball from one egress IP. codeload throttles the IP and a required check goes
+red for a reason no diff can fix. Re-running is not a fix — the next sync repeats it exactly.
+
+The runner has a supported local archive cache. From actions/runner
+`src/Runner.Common/Constants.cs`:
+
+```csharp
+public static readonly string ActionArchiveCacheDirectory = "ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE";
+```
+
+`src/Runner.Worker/ActionManager.cs` reads it, and on a hit copies from disk instead of calling
+codeload at all; on a **miss it falls straight through** to `DownloadRepositoryArchive`. That
+fall-through is why seeding is safe with no rollback path: a partial or stale cache can only reduce
+codeload traffic, never break a job. The layout is fixed by that same file —
+`<cache>/<owner>_<repo>/<resolvedSha>.tar.gz` (`.zip` on Windows), keyed on the **resolved SHA**,
+which is why every `uses:` in this repo being SHA-pinned is what makes seeding possible at all: a
+tag-pinned action resolves to a SHA the runner only learns at job time.
+
+Seed it with the dispatch-only job:
+
+```bash
+gh workflow run runner-maintenance.yml -f mode=seed-action-cache
+```
+
+It parses every SHA-pinned `uses:` out of `.github/workflows/`, downloads each tarball once into
+`$HOME/actions-runner-action-cache`, verifies it untars before moving it into place, and reports
+seeded/present/failed. A hard-coded action list was rejected: a list updated by hand goes stale
+silently, and a stale entry reads as a working cache that never hits.
+
+Three things about that job that are deliberate:
+
+- **It is its own mode, not part of `repair-install`.** `repair-install`'s preflight `fatal`s on an
+  unhealthy canonical checkout, and rightly so — but a 429 from codeload has nothing to do with
+  `~/agent-memory`, and a fix for a red required check must not sit behind an unrelated brain
+  repair. This mode reads no brain state and writes no repo state.
+- **It wires the variable through `runsvc.sh`, not a `.env` and not a systemd drop-in.** The unit
+  the runner's own `svc.sh` generates is `ExecStart={{RunnerRoot}}/runsvc.sh` with **no
+  `EnvironmentFile`** — a `.env` would be read by nothing. A drop-in needs `sudo` on the host that
+  gates merges. `runsvc.sh` is owned by the runner user and carries an explicit insertion point,
+  `# insert anything to setup env when running as a service`; the export goes immediately after it,
+  because appending at EOF lands after `wait $PID` and never executes. A timestamped `.bak` is left
+  beside it.
+- **It never restarts the runner.** It is executing *on* the runner it would restart, so
+  `svc.sh restart` kills the job and reports a failure — one more red run, the thing being fixed.
+  Instead it reads `/proc/<Runner.Listener pid>/environ` and reports whether the variable is
+  actually live, because "the file says so" is not "the process has it" (the #362 distinction). The
+  setting goes live at the next runner restart, which auto-update performs unattended; to force it
+  from the host console: `cd ~/actions-runner && sudo ./svc.sh stop && sudo ./svc.sh start`.
+
+## The `status` probe must never fail (#457)
+
+`runner-maintenance.yml -f mode=status` run 32187001323 exited **128** mid-report, printing the
+first few lines and then stopping — no `dirty paths`, and none of the canonical-checkout section,
+which is the first thing #449 tells a human to read. The step's own header says it is "read-only by
+construction … none of them may fail the job — an unknown state must still be reported", and that
+contract was broken by the shell: GitHub invokes `run:` as
+`bash --noprofile --norc -e -o pipefail {0}`, and a step's own `set -uo pipefail` does **not** clear
+that `-e`. Against a brain with a damaged object database the first `git` call returned 128,
+`pipefail` propagated it and `-e` ended the probe.
+
+Rules for anything diagnostic in that file:
+
+- Start the step with an explicit **`set +e`**. Nothing else clears the injected `-e`.
+- Never `git … | wc -l`. Two failure modes in one: `pipefail` turns a git rc of 128 into a dead
+  step, and `wc -l` of no output is `0`, which reads as *clean* — the worst possible answer on a
+  corrupt brain. Capture, check the rc, then count.
+- An unreadable value prints as `unknown (git <cmd> exited <rc>: <first line>)`, never as a blank —
+  a blank line and a healthy empty value are indistinguishable to the human reading the report.
+- The probe names corruption explicitly: an empty `HEAD` plus a failed fetch plus rc 128 is the
+  `brain-sync-corrupt` condition (#434), **not** a merge conflict, and the two have different
+  repairs (`reclone-brain` vs `repair-brain`). A truncated report leaves a human unable to tell
+  which they need.
+
+`repair-install` and `Post-repair status` were checked for the same shape and already guard every
+command (`set +e` / `|| true`). The `-euo pipefail` steps elsewhere in the file are deliberate
+fail-stop safety properties and were left alone — a *repair* that half-runs should stop; a *probe*
+that half-runs is the bug.
