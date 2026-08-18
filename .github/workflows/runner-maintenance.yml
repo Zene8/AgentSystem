@@ -54,6 +54,11 @@ on:
           # Re-deploy hooks + agent defs and install the memory sync timer, then prove the drift
           # is gone. Reads ~/agent-memory but never writes it and never pushes anything.
           - repair-install
+          # The one case repair-install's self-heal refuses: a canon checkout that is behind
+          # origin/main AND has local edits. PRESERVES those edits with `git stash push`, proves
+          # the stash object exists before touching the tree, then merge --ff-only, then prints
+          # the exact `git stash pop` to restore them. Never discards anything.
+          - heal-canon
           # Seed the runner's action archive cache so `Set up job` stops re-downloading the same
           # action tarballs from codeload and stops getting 429'd. Touches no repo state at all.
           - seed-action-cache
@@ -282,6 +287,70 @@ jobs:
           out "fetch writes remote refs. Dispatch \`repair-install\` for the bounded self-heal — fetch, a"
           out "return to \`main\` if canon is parked on another branch, then merge --ff-only; clean tree and"
           out "attached HEAD only, and the branch it leaves is never deleted._"
+
+          # ── the actual canon diff, not just the path names (#462) ────────────────────────────
+          # enforcement-drift-check reports `FAILED: canon checkout is behind origin/main`, and
+          # repair-install's self-heal correctly REFUSES to rewrite a dirty tree from a dispatch.
+          # That leaves exactly one way forward: a human decides keep-or-discard on those edits.
+          # Until now this report printed the FILE NAMES only, and `ssh` to this host is refused,
+          # so there was no way to read them at all — which is why 2 dirty paths have sat in canon
+          # since 2026-08-10 failing a nightly job nobody could act on. Read-only by construction:
+          # `diff`/`diff --stat`/`ls-files` compare the index and worktree against the local HEAD,
+          # no fetch, no remote rev-spec, nothing written. `status` still mutates nothing.
+          if [ "$CANON_IS_GIT" = yes ]; then
+            CANON_DIFF_CAP=500
+            DIFF_FILE="$(mktemp)"
+
+            out ""
+            out "#### canon tracked-file diff vs \`HEAD\` (read-only, no fetch)"
+            git -C "$CANON" diff --stat > "$DIFF_FILE" 2>&1
+            out '```'
+            if [ -s "$DIFF_FILE" ]; then
+              tee -a "$GITHUB_STEP_SUMMARY" < "$DIFF_FILE"
+            else
+              out "(no tracked-file modifications)"
+            fi
+            out '```'
+
+            git -C "$CANON" diff > "$DIFF_FILE" 2>&1
+            DIFF_LINES="$(wc -l < "$DIFF_FILE" | tr -d ' ')"
+            if [ "$DIFF_LINES" -gt 0 ]; then
+              out ""
+              out "<details><summary>full <code>git diff</code> — $DIFF_LINES line(s)</summary>"
+              out ""
+              out '```diff'
+              head -"$CANON_DIFF_CAP" "$DIFF_FILE" | tee -a "$GITHUB_STEP_SUMMARY"
+              out '```'
+              if [ "$DIFF_LINES" -gt "$CANON_DIFF_CAP" ]; then
+                out ""
+                out "_TRUNCATED at the ${CANON_DIFF_CAP}-line cap; ${DIFF_LINES} line(s) total. The"
+                out "remainder is not printed here. Dispatch \`heal-canon\`: it stashes these edits"
+                out "whole — every line preserved — and reports the stash ref to read them from._"
+              fi
+              out "</details>"
+            fi
+
+            # `git diff` shows tracked modifications only. Staged changes and untracked files are
+            # invisible to it and are exactly the two things a keep-or-discard call must not be
+            # told about by omission, so each is named separately when present.
+            git -C "$CANON" diff --cached --stat > "$DIFF_FILE" 2>&1
+            if [ -s "$DIFF_FILE" ]; then
+              out ""
+              out "#### canon STAGED changes (\`git diff --cached --stat\`)"
+              out '```'
+              tee -a "$GITHUB_STEP_SUMMARY" < "$DIFF_FILE"
+              out '```'
+            fi
+
+            git -C "$CANON" ls-files --others --exclude-standard > "$DIFF_FILE" 2>&1
+            if [ -s "$DIFF_FILE" ]; then
+              out ""
+              out "#### canon UNTRACKED files (covered by no diff above; \`heal-canon\` refuses while any exist)"
+              out '```'
+              head -50 "$DIFF_FILE" | tee -a "$GITHUB_STEP_SUMMARY"
+              out '```'
+            fi
+          fi
 
           echo "canon report changed nothing."
 
@@ -1879,3 +1948,224 @@ jobs:
           out ""
           out "_A cache MISS is harmless: ActionManager.cs falls through to the normal download, so"
           out "a partial or stale cache can only reduce codeload traffic, never break a job._"
+
+  # ── heal-canon ─────────────────────────────────────────────────────────────────────────────
+  #
+  # The gap between `status` and `repair-install`, and the last source of the nightly failure
+  # email (#462). `enforcement-drift-check` reports:
+  #
+  #     FAILED: canon checkout is behind origin/main
+  #
+  # and repair-install's bounded self-heal answers, correctly:
+  #
+  #     SKIPPED — canon has 2 dirty path(s); someone may be mid-edit.
+  #     Rewriting that tree from a dispatch is not acceptable.
+  #
+  # Both are right. `repair-install` may never start rewriting working trees as a side effect of
+  # someone dispatching it to fix hooks, so that skip stays exactly as it is. But that leaves the
+  # host with no repair path at all, and `ssh` here is refused, so the drift has stood since
+  # 2026-08-10 failing a nightly job nobody could act on.
+  #
+  # This mode is the missing path, and it is a separate dispatch precisely so that touching a
+  # dirty tree is always something a human chose, never something a hook repair did on the way
+  # past. Its contract is narrow: PRESERVE the edits, never adjudicate them.
+  #
+  #   * `git stash push` — the only mutation of the working tree. NOT `checkout --`, NOT
+  #     `reset --hard`, NOT `clean`. Those three are banned here the same way they are banned in
+  #     repair-brain and reclone-brain: each destroys work with a zero exit code, and a repair
+  #     that can silently lose a human's edits is worse than the drift it fixes.
+  #   * The stash is PROVEN to exist before the tree is touched further — `refs/stash` resolves,
+  #     the entry carrying this run's stamp is in `git stash list`, and the stash count went up.
+  #     Same shape, and the same reason, as the reclone-brain prove step: an unverified "it
+  #     worked" from the step that is supposed to be preserving the data is the one failure that
+  #     cannot be undone afterwards. If any of the three proofs fails, the run STOPS and does
+  #     nothing else — no fetch, no merge, no second attempt.
+  #   * UNTRACKED files stop the run before anything happens at all. `stash push` without `-u`
+  #     leaves them where they are, so they cannot be swept away by this job — but merging on top
+  #     of them can fail in confusing ways, and more to the point a human deciding keep-or-discard
+  #     must be shown them rather than have them silently excluded from the stash they are told
+  #     preserves their work.
+  #   * A tree with no local edits is not this mode's job — it is repair-install's, which already
+  #     handles the clean case and does the branch-return as well. Reported and exited 0.
+  #
+  # Nothing here reads or writes ~/agent-memory. This is code only.
+  heal-canon:
+    if: inputs.mode == 'heal-canon'
+    runs-on: [self-hosted, Linux]
+    permissions:
+      contents: read
+    steps:
+      - name: Stash canon's local edits, prove the stash exists, then fast-forward
+        shell: bash
+        run: |
+          # `set +e` first and deliberately (#460): GitHub invokes this as `bash --noprofile
+          # --norc -e -o pipefail {0}`, and a step's own `set -uo pipefail` does NOT clear that
+          # -e. Every guard below is "run it, capture $?, then decide" — a SIMPLE COMMAND, which
+          # under the inherited -e kills the step before the `$?` line and before `stop` can
+          # print why. In this job that would be catastrophic rather than merely confusing: the
+          # step would die mid-sequence with no statement of what it had already done to the
+          # tree. Nothing below relies on -e; every mutation is followed by an explicit check.
+          set +e
+          set -uo pipefail
+          CANON="$HOME/dev/AgentSystem"
+
+          out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          stop() {
+            out ""
+            out "**STOPPING.** $*"
+            echo "::error::$*"
+            exit 1
+          }
+
+          out "## heal-canon on \`$(hostname)\`"
+          out ""
+          out '```'
+          out "canon   $CANON"
+
+          [ -e "$CANON" ] || stop "$CANON does not exist on this host — there is nothing to heal. Clone the repo there and dispatch repair-install."
+          git -C "$CANON" rev-parse --git-dir >/dev/null 2>&1 \
+            || stop "$CANON exists but is not a git checkout. This job will not guess what it is; inspect it on the host."
+
+          BRANCH="$(git -C "$CANON" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+          HEAD_BEFORE="$(git -C "$CANON" log -1 --format='%h %ad %s' --date=iso 2>/dev/null || echo '?')"
+          SHA_BEFORE="$(git -C "$CANON" rev-parse HEAD 2>/dev/null || echo '?')"
+          out "branch  $BRANCH"
+          out "HEAD    $HEAD_BEFORE"
+          out '```'
+
+          [ "$BRANCH" != "HEAD" ] && [ "$BRANCH" != "?" ] \
+            || stop "canon is on a DETACHED HEAD. Stashing from a detached HEAD leaves the stash reachable but the branch context unrecoverable, and this job will not do that. On the host: git -C $CANON switch -c <name>, then re-dispatch."
+
+          # ── untracked files: name them and stop, before anything is touched ──────────────────
+          UNTRACKED_FILE="$(mktemp)"
+          git -C "$CANON" ls-files --others --exclude-standard > "$UNTRACKED_FILE" 2>&1
+          if [ -s "$UNTRACKED_FILE" ]; then
+            out ""
+            out "Untracked files present in canon — these would NOT be captured by \`git stash push\`:"
+            out '```'
+            head -50 "$UNTRACKED_FILE" | tee -a "$GITHUB_STEP_SUMMARY"
+            out '```'
+            stop "canon holds untracked file(s), listed above. This job stashes TRACKED edits only and will not sweep untracked files up silently, nor claim to have preserved work it did not touch. Deal with them on the host (keep, delete, or commit them), then re-dispatch heal-canon."
+          fi
+
+          # ── nothing to preserve is repair-install's case, not this one ───────────────────────
+          DIRTY="$(git -C "$CANON" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "$DIRTY" = "0" ]; then
+            out ""
+            out "canon has NO local edits — there is nothing for this mode to preserve."
+            out "Dispatch \`repair-install\`: its bounded self-heal already handles the clean case"
+            out "(fetch, return to \`main\` if parked elsewhere, then merge --ff-only)."
+            exit 0
+          fi
+
+          out ""
+          out "### edits about to be stashed ($DIRTY dirty path(s))"
+          out '```'
+          git -C "$CANON" status --porcelain 2>&1 | head -50 | tee -a "$GITHUB_STEP_SUMMARY"
+          out '```'
+          out '```'
+          git -C "$CANON" diff --stat 2>&1 | head -50 | tee -a "$GITHUB_STEP_SUMMARY"
+          out '```'
+
+          # ── stash, then PROVE it before anything else moves ──────────────────────────────────
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          STASH_MSG="canon-heal $STAMP"
+          STASH_COUNT_BEFORE="$(git -C "$CANON" stash list 2>/dev/null | wc -l | tr -d ' ')"
+
+          STASH_OUT="$(git -C "$CANON" stash push -m "$STASH_MSG" 2>&1)"
+          STASH_RC=$?
+          out ""
+          out "### git stash push -m \"$STASH_MSG\""
+          out '```'
+          [ -n "$STASH_OUT" ] && out "$STASH_OUT"
+          out "exit $STASH_RC"
+          out '```'
+
+          # Three independent proofs, all required. A non-zero exit is the easy failure; the one
+          # that matters is a ZERO exit with no stash behind it, because that is the shape that
+          # would let the merge proceed over edits nothing is holding.
+          STASH_SHA="$(git -C "$CANON" rev-parse --verify --quiet refs/stash 2>/dev/null)"
+          STASH_ENTRY="$(git -C "$CANON" stash list --format='%gd %gs' 2>/dev/null | grep -F "$STASH_MSG" | head -1)"
+          STASH_COUNT_AFTER="$(git -C "$CANON" stash list 2>/dev/null | wc -l | tr -d ' ')"
+
+          out '```'
+          out "refs/stash resolves to   ${STASH_SHA:-<nothing>}"
+          out "entry for this run       ${STASH_ENTRY:-<not found in git stash list>}"
+          out "stash count              $STASH_COUNT_BEFORE -> $STASH_COUNT_AFTER"
+          out '```'
+
+          [ "$STASH_RC" -eq 0 ] \
+            || stop "git stash push exited $STASH_RC. The working tree was NOT touched further — no fetch and no merge were run. Read the git output above; the edits are still in the tree exactly as they were."
+          [ -n "$STASH_SHA" ] \
+            || stop "git stash push reported success but refs/stash does not resolve — there is no stash object holding those edits, so nothing here has preserved them and this job will not merge over them. Nothing further was done."
+          [ -n "$STASH_ENTRY" ] \
+            || stop "refs/stash resolves but no entry carrying \"$STASH_MSG\" is in git stash list — this run cannot prove the stash it is about to rely on is the one it created. Refusing to merge over edits it cannot name. Nothing further was done."
+          [ "$STASH_COUNT_AFTER" -gt "$STASH_COUNT_BEFORE" ] \
+            || stop "the stash count did not increase ($STASH_COUNT_BEFORE -> $STASH_COUNT_AFTER), so no new stash entry was created despite a zero exit. Refusing to merge. Nothing further was done."
+
+          STASH_REF="${STASH_ENTRY%% *}"
+          POP_CMD="git -C $CANON stash pop '$STASH_REF'"
+
+          # The tree must actually be clean now; if it is not, the merge would touch edits the
+          # stash does not hold, which is the whole thing this job exists not to do.
+          DIRTY_AFTER="$(git -C "$CANON" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "$DIRTY_AFTER" != "0" ]; then
+            git -C "$CANON" status --porcelain 2>&1 | head -20 | tee -a "$GITHUB_STEP_SUMMARY"
+            stop "canon still reports $DIRTY_AFTER dirty path(s) after the stash, listed above. No fetch and no merge were run. Your edits are safe in $STASH_REF ($STASH_SHA); restore them with: $POP_CMD"
+          fi
+
+          out ""
+          out "PROVEN: edits preserved in \`$STASH_REF\` (\`$STASH_SHA\`), canon tree now clean."
+
+          # ── fetch + merge --ff-only ──────────────────────────────────────────────────────────
+          # --ff-only and nothing else: if canon holds commits origin/main does not, this refuses
+          # rather than merging or rebasing, and the stash is still there to pop.
+          out ""
+          out "### fetch + merge --ff-only origin/main"
+          out '```'
+          FETCH_OUT="$(git -C "$CANON" fetch --quiet origin main 2>&1)"
+          FETCH_RC=$?
+          [ -n "$FETCH_OUT" ] && out "$FETCH_OUT"
+          [ "$FETCH_RC" -eq 0 ] \
+            || stop "git fetch origin main failed in canon (exit $FETCH_RC) — no network, no credentials, or origin unreachable. Canon is unchanged apart from the stash; restore your edits with: $POP_CMD"
+
+          if [ "$BRANCH" != "main" ]; then
+            out "canon is on branch '$BRANCH', not main."
+            out '```'
+            out ""
+            out "The tree is now clean, which is the state \`repair-install\` needs: dispatch it to"
+            out "return canon to \`main\` and fast-forward. Returning canon to another branch is its"
+            out "job, not this one's, and doing it here would duplicate that logic untested."
+            out ""
+            out "Your edits are preserved. Restore them with:"
+            out '```'
+            out "$POP_CMD"
+            out '```'
+            exit 0
+          fi
+
+          MERGE_OUT="$(git -C "$CANON" merge --ff-only origin/main 2>&1)"
+          MERGE_RC=$?
+          [ -n "$MERGE_OUT" ] && out "$MERGE_OUT"
+          out "exit $MERGE_RC"
+          out "HEAD before  $HEAD_BEFORE"
+          out "HEAD after   $(git -C "$CANON" log -1 --format='%h %ad %s' --date=iso 2>/dev/null || echo '?')"
+          out '```'
+
+          [ "$MERGE_RC" -eq 0 ] \
+            || stop "git merge --ff-only origin/main refused (exit $MERGE_RC) — canon holds commits that are not on origin/main, so it cannot fast-forward, and NOTHING was forced. Canon is still at $SHA_BEFORE. Your edits are preserved; restore them with: $POP_CMD"
+
+          out ""
+          out "### DONE — canon fast-forwarded, your edits preserved"
+          out ""
+          out "The edits that were in the tree are in the stash, untouched. Restore them with:"
+          out ""
+          out '```'
+          out "$POP_CMD"
+          out '```'
+          out ""
+          out "Read them without restoring: \`git -C $CANON stash show -p '$STASH_REF'\`."
+          out "If the fast-forward makes the pop conflict, \`git -C $CANON stash branch <name> '$STASH_REF'\`"
+          out "checks the stash out on a branch at the commit it was made from and applies it there."
+          out "Nothing in this job deletes a stash; \`$STASH_REF\` stays until a human drops it."
+          exit 0

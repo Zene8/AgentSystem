@@ -402,3 +402,48 @@ Rules for anything diagnostic in that file:
 command (`set +e` / `|| true`). The `-euo pipefail` steps elsewhere in the file are deliberate
 fail-stop safety properties and were left alone — a *repair* that half-runs should stop; a *probe*
 that half-runs is the bug.
+
+## Healing a dirty canon checkout — `heal-canon` (#462)
+
+`enforcement-drift-check` fails on one line when the canonical checkout `~/dev/AgentSystem` falls
+behind:
+
+```
+FAILED: canon checkout is behind origin/main
+```
+
+`repair-install`'s bounded self-heal answers, correctly:
+
+```
+SKIPPED — canon has 2 dirty path(s); someone may be mid-edit.
+Rewriting that tree from a dispatch is not acceptable.
+```
+
+Both are right, and together they are a dead end: `repair-install` must never start rewriting
+working trees as a side effect of someone dispatching it to fix hooks, and `ssh` to the runner host
+is refused, so nobody can resolve the edits by hand either. That is why two dirty paths sat in canon
+from 2026-08-10 failing a nightly job.
+
+Two things close it, both in `runner-maintenance.yml`:
+
+- **`status` prints the diff, not just the path names.** `git diff --stat`, the full `git diff`
+  capped at 500 lines (the cap is stated when hit), plus separate sections naming staged changes
+  and untracked files, which no `git diff` covers. Read-only — no fetch, no remote rev-spec —
+  because `status` mutates nothing. Without this, a keep-or-discard call needs host access that
+  does not exist.
+- **`heal-canon` is the repair, and it preserves the edits rather than discarding them.**
+  `git stash push`, then `merge --ff-only`, then it prints the exact `git stash pop` to restore.
+  `checkout --`, `reset --hard` and `clean` are banned here for the same reason they are banned in
+  `repair-brain` and `reclone-brain`: each destroys work with a zero exit code.
+
+The stash is **proven to exist before the tree is touched further** — `refs/stash` resolves, an
+entry carrying this run's stamp is in `git stash list`, and the count went up — the same shape as
+the `reclone-brain` prove step, for the same reason. A zero exit from `stash push` with no stash
+behind it is the shape that would let the merge run over unheld edits, so all three proofs are
+required and any failure stops the run having done nothing else. Untracked files stop it before
+anything happens at all: `stash push` without `-u` leaves them alone, so this job will not claim to
+have preserved work it never touched. A clean tree is reported and handed back to `repair-install`,
+which already covers that case including the branch return.
+
+`heal-canon` is a separate dispatch on purpose. Touching a dirty tree should always be something a
+human chose.
