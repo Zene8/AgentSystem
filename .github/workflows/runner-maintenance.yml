@@ -741,6 +741,16 @@ jobs:
       - name: Prove nothing local-only would be lost, then swap
         shell: bash
         run: |
+          # `set +e` first and deliberately, same reason as the `status` probe (#457): GitHub
+          # invokes this as `bash --noprofile --norc -e -o pipefail {0}`, and a step's own
+          # `set -uo pipefail` does NOT clear that -e. Every guard below is written as
+          # "run it, capture $?, then decide" -- which is a SIMPLE COMMAND, so under the
+          # inherited -e a non-zero git exit killed the step before the `$?` line ever ran and
+          # before `stop` could print why. That is run 32189007924 (#460): zero stdout from this
+          # step, then `exit 11`, no ::error:: and no STOPPING line. The guards were correct and
+          # unreachable. Nothing below relies on -e for safety: every dangerous action is
+          # `... || stop` or an explicit `if !`, and `stop` is the only path that skips the swap.
+          set +e
           set -uo pipefail
           BRAIN="$HOME/agent-memory"
 
@@ -762,22 +772,72 @@ jobs:
           # must never read as "zero branches to check". Capture it to a file and check its exit
           # code explicitly, since piping into `while read` would hide the exit code behind the
           # pipeline's last command.
+          #
+          # stderr goes to its OWN file, not `2>&1` into the parsed one (#460). A damaged store
+          # makes for-each-ref emit lines like `error: refs/heads/main: invalid sha1 pointer
+          # faf5f97…`, and merging those into the list being parsed hands the loop `sha=error:`,
+          # `ref=refs/heads/main:` — a lookup that fails in the fresh clone and stops the run with
+          # a message naming a branch called "error:". That is a false negative dressed as a
+          # safety stop, on precisely the host this job exists for.
           REFS_FILE="$(mktemp)"
-          git -C "$BRAIN" for-each-ref refs/heads --format='%(objectname) %(refname:short)' > "$REFS_FILE" 2>&1
+          REFS_ERR="$(mktemp)"
+          git -C "$BRAIN" for-each-ref refs/heads --format='%(objectname) %(refname:short)' > "$REFS_FILE" 2> "$REFS_ERR"
           REFS_RC=$?
-          [ "$REFS_RC" -eq 0 ] || stop "for-each-ref refs/heads failed against the corrupt checkout (exit $REFS_RC) — cannot prove local branches are safe, refusing to trust an empty result"
+          REFS_LINES="$(grep -c . "$REFS_FILE")"
+          if [ -s "$REFS_ERR" ]; then
+            echo "for-each-ref reported problems against the corrupt store (expected; every ref it could still read is checked below):"
+            head -20 "$REFS_ERR"
+          fi
+          # Same predicate as fsck below: the untrustworthy case is "told us nothing", not
+          # "exited non-zero". A store with one broken ref makes for-each-ref exit non-zero while
+          # still listing every ref it can read, and each of those IS then proven against the
+          # fresh clone. Zero lines is the case that proves nothing.
+          [ "$REFS_LINES" -gt 0 ] \
+            || stop "for-each-ref refs/heads listed NO branches against the corrupt checkout (exit $REFS_RC) — cannot prove local branches are safe, refusing to trust an empty result"
+          echo "checking $REFS_LINES local branch tip(s) against the fresh clone"
           while read -r sha ref; do
             [ -n "$sha" ] || continue
             git -C "$NEW" cat-file -e "$sha" 2>/dev/null \
               || stop "local branch $ref (at $sha) does not exist in the fresh clone — possible local-only work"
           done < "$REFS_FILE"
 
-          # Same principle for fsck: a corrupt store can fail to walk objects at all, and an
-          # empty "dangling commit" result from a failed fsck is not proof there are none.
+          # Same principle for fsck, with one correction that #460 forced. The old predicate was
+          # `rc == 0 or stop`, and `git fsck` CANNOT exit 0 against a store that is corrupt by
+          # definition -- so the guard demanded a clean fsck from the very repository this job
+          # exists to replace, and reclone-brain could never succeed on any host that needed it.
+          #
+          # This is NOT "we ignore fsck failures now". The safety property is unchanged and is
+          # about LOST WORK: a `dangling commit` line still stops the run, unconditionally, below.
+          # What changed is the question asked of the exit code. `rc != 0` does not mean "fsck
+          # told us nothing" -- against a damaged store fsck reports each bad object and keeps
+          # walking, then exits non-zero precisely BECAUSE it found damage. The thing that would
+          # make an empty result untrustworthy is fsck never walking at all, and that is what is
+          # tested here, two ways:
+          #
+          #   * ZERO output lines -> it produced no enumeration whatsoever; an empty
+          #     "no dangling commits" is unproven, so stop. (The original #457-class trap.)
+          #   * a `fatal:` line -> git aborted mid-walk. fsck reports per-object problems as
+          #     `error:` and continues; `fatal:` is the one that means it gave up, so anything it
+          #     had not reached yet is unexamined and an empty dangling list is again unproven.
+          #
+          # Only a non-zero rc that walked far enough to report `error:`-level damage is tolerated,
+          # and even then the dangling-commit check below is what actually decides.
           FSCK_FILE="$(mktemp)"
           git -C "$BRAIN" fsck --no-reflog --unreachable > "$FSCK_FILE" 2>&1
           FSCK_DANGLE_RC=$?
-          [ "$FSCK_DANGLE_RC" -eq 0 ] || stop "fsck --unreachable failed against the corrupt checkout (exit $FSCK_DANGLE_RC) — cannot prove there are no dangling commits, refusing to trust an empty result"
+          FSCK_LINES="$(grep -c . "$FSCK_FILE")"
+          echo "fsck --no-reflog --unreachable exited $FSCK_DANGLE_RC with $FSCK_LINES line(s) of output"
+          if [ "$FSCK_DANGLE_RC" -ne 0 ]; then
+            if [ "$FSCK_LINES" -eq 0 ]; then
+              stop "fsck --unreachable exited $FSCK_DANGLE_RC and reported NOTHING against the corrupt checkout — it never walked the object graph, so an empty dangling-commit list proves nothing; refusing to trust an empty result"
+            fi
+            if grep -q '^fatal:' "$FSCK_FILE"; then
+              grep '^fatal:' "$FSCK_FILE" | head -5
+              stop "fsck --unreachable aborted with a fatal error against the corrupt checkout — it stopped mid-walk, so objects it never reached are unexamined and an empty dangling-commit list proves nothing"
+            fi
+            echo "fsck exited non-zero but walked and reported — that is the expected shape for a damaged store; the dangling-commit check below is the decisive one"
+            head -20 "$FSCK_FILE"
+          fi
           DANGLING="$(grep '^dangling commit' "$FSCK_FILE" || true)"
           if [ -n "$DANGLING" ]; then
             echo "$DANGLING"
