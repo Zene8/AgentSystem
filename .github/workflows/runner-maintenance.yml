@@ -139,7 +139,7 @@ jobs:
           # object database, the `brain-sync-corrupt` condition (#434). Name it, because the repair
           # for it (`reclone-brain`) is a DIFFERENT job from the repair for a conflict
           # (`repair-brain`), and a human reading a truncated report cannot tell which they need.
-          FSCK_OUT="$(git -C "$BRAIN" cat-file -e HEAD^{commit} 2>&1)"; FSCK_RC=$?
+          FSCK_OUT="$(git -C "$BRAIN" cat-file -e 'HEAD^{commit}' 2>&1)"; FSCK_RC=$?
           if [ $FSCK_RC -ne 0 ]; then
             out "OBJECT DB     DAMAGED — HEAD does not resolve to a readable commit (rc $FSCK_RC)"
             out "              $(printf '%s' "$FSCK_OUT" | head -2 | tr '\n' ' ')"
