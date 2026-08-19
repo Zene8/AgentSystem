@@ -126,11 +126,26 @@ export function formatReport(branches, misroutes) {
   return lines.join('\n');
 }
 
-// Pure: #351 --check predicate. A quiet week (no log file) is NOT a failure. A log that EXISTS
-// with content but yields zero PARSED records, or parses but joins to zero rows (the "241/97
-// unique hashes, only 2 overlap" failure from the #351 audit — hint records and actual records
-// minted with different promptHashes for the same turn) is the blind-routing-telemetry failure
-// this exists to catch.
+// #466: below this many parsed records, a zero-join result is inconclusive, not drift — a
+// freshly-onboarded or low-traffic host just hasn't accumulated enough pairs yet. Picked at the
+// low end of "order of 10-20" from the issue: high enough that a handful of stray hint records
+// (the baselyserver shape below) can't look like a healthy sample, low enough to still catch
+// drift quickly once a host is actually routing.
+const MIN_SAMPLE = 15;
+
+// Pure: #351 --check predicate, revised by #466. A quiet week (no log file) is NOT a failure. A
+// log that EXISTS with content but yields zero PARSED records is genuine corruption (unchanged).
+// A parsed-but-zero-join result is only reported as drift when BOTH sides of the join are
+// populated (at least one hint record AND at least one actual-agent record) and still don't
+// overlap — that's the "241/97 unique hashes, only 2 overlap" failure from the #351 audit, where
+// hint records and actual records were minted with different promptHashes for the same turn.
+//
+// A headless CI host (e.g. baselyserver, #466) runs no interactive sessions: memory-router.js
+// still logs hints, but sona-writeback-hook.js never fires because no agent ever answers, so
+// actuals is permanently empty. That's a structurally different state from #351 — one side never
+// existed, there's nothing to fail to join — and reporting it as drift paged every single day
+// with no fix available. Same logic applies below MIN_SAMPLE: too few records to tell "empty by
+// construction" apart from "minting mismatch" with any confidence, so treat it as inconclusive.
 export function checkRoutingLog(logPath) {
   const path = logPath || ROUTING_LOG_PATH;
   if (!existsSync(path)) {
@@ -151,10 +166,45 @@ export function checkRoutingLog(logPath) {
     return { blind: true, reason: `${lines.length} line(s) present but 0 parsed as valid JSON`, totalRecords: 0, joinedRecords: 0 };
   }
   const joined = joinRecords(records);
-  if (joined.length === 0) {
-    return { blind: true, reason: `${records.length} record(s) parsed but 0 hint/actual pairs share a promptHash`, totalRecords: records.length, joinedRecords: 0 };
+  if (joined.length > 0) {
+    return { blind: false, reason: null, totalRecords: records.length, joinedRecords: joined.length };
   }
-  return { blind: false, reason: null, totalRecords: records.length, joinedRecords: joined.length };
+  // Zero join from here down — the ambiguous case. Check the sample floor first: below it, there
+  // aren't enough records to distinguish "empty by construction" from "minting mismatch" at all.
+  if (records.length < MIN_SAMPLE) {
+    return {
+      blind: false,
+      reason: `only ${records.length} record(s) parsed — below the ${MIN_SAMPLE}-record floor to evaluate join health`,
+      totalRecords: records.length,
+      joinedRecords: 0,
+    };
+  }
+  // Classify exactly as joinRecords() does -- `hint` wins, `agent` only as an else-if. Counting
+  // the two sides with independent hasOwnProperty checks would put a record carrying BOTH fields
+  // on both sides, so it would read as "both sides populated" while joinRecords filed it under
+  // hints alone and produced no pair: a false `blind: true` on the one shape no operator could
+  // act on. The two must agree or this predicate is measuring a different log than the join is.
+  let hintCount = 0;
+  let actualCount = 0;
+  for (const r of records) {
+    if (!r || !r.promptHash) continue;
+    if (Object.prototype.hasOwnProperty.call(r, 'hint')) hintCount += 1;
+    else if (Object.prototype.hasOwnProperty.call(r, 'agent')) actualCount += 1;
+  }
+  if (hintCount === 0 || actualCount === 0) {
+    return {
+      blind: false,
+      reason: `${records.length} record(s) parsed but only one side of the join is populated (${hintCount} hint, ${actualCount} actual) — headless host, not drift`,
+      totalRecords: records.length,
+      joinedRecords: 0,
+    };
+  }
+  return {
+    blind: true,
+    reason: `${records.length} record(s) parsed (${hintCount} hint, ${actualCount} actual) but 0 hint/actual pairs share a promptHash`,
+    totalRecords: records.length,
+    joinedRecords: 0,
+  };
 }
 
 function parseArgs(argv) {
@@ -176,7 +226,11 @@ function main() {
       process.exitCode = 1;
       return;
     }
-    console.log(`routing-report --check: OK — ${result.totalRecords} record(s), ${result.joinedRecords} joined`);
+    // #466: a non-blind result can now carry a reason (headless host, below the sample floor).
+    // Print it — the drift-check job records only this one line, and "OK" with no explanation is
+    // how a host that is silently never joining looks identical to a healthy one.
+    const why = result.reason ? ` — ${result.reason}` : '';
+    console.log(`routing-report --check: OK — ${result.totalRecords} record(s), ${result.joinedRecords} joined${why}`);
     return;
   }
 
