@@ -177,8 +177,12 @@
 # block. This entry documents the contract stage 2 depends on; changing it means changing
 # skills/daily-briefing/portable-prompt.md, which is what Grok actually runs.
 #
-# STAGE 2 runs twice daily (13:00 and 05:00 UTC = 06:00 and 22:00 Pacific): the `daily-triage`
-# job in scheduled-tasks.yml.
+# STAGE 2 runs twice daily (15:00 and 05:00 UTC = 08:00 and 22:00 Pacific): the `daily-triage`
+# job in scheduled-tasks.yml. #452: the 13:00 slot moved to 15:00 because stage 1 actually fires
+# ~14:05-14:21 UTC (not the documented 06:00), so 13:00 always missed the 3h freshness window —
+# same defect the issue named for 05:00. The 05:00 slot stays: it can never see a same-day fresh
+# brief by design (evening Pacific check-in, stage 1 only runs once, in the morning) and that is
+# expected, not a bug — it still covers Beeper/Discord/GitHub via the fallback sweep.
 - id: daily-briefing
   description: Stage 1 (06:00, external Grok Tasks) — mail + calendar triage, brief archived to Drive and disk
   trigger: schedule
@@ -193,14 +197,16 @@
   action: "Stage 1 is a Grok Task, not a local cron — nothing here launches it. Prompt: skills/daily-briefing/portable-prompt.md. Its step 5 chains the Sunday weekly + last-day monthly roll-ups, so there are no separate weekly/monthly crons. Brief goes to Drive `Life OS/briefings/YYYY-MM-DD` AND ${LIFE_REPO:-$HOME/life}/briefings/YYYY-MM-DD.md — the exact name MC's /briefing tab serves and stage 2 reads."
 
 - id: daily-triage
-  description: Stage 2 — twice daily (06:00 and 22:00 Pacific): read stage 1's handoff, cover chat/GitHub, execute AI-actionable items as draft PRs, draft outbound, write the closeout
+  description: Stage 2 — twice daily (08:00 and 22:00 Pacific): read stage 1's handoff, cover chat/GitHub, execute AI-actionable items as draft PRs, draft outbound, write the closeout
   trigger: schedule
   mechanism: cron
   workflow_job: daily-triage
-  # Two crons, both required to exist — `verify` checks every entry in this list. 13:00 UTC = 06:00
-  # PDT, 05:00 UTC = 22:00 PDT (the previous Pacific day). UTC-only and DST-blind, so these become
-  # 05:00 and 21:00 Pacific in winter.
-  schedule: "0 13 * * *, 0 5 * * *"
+  # Two crons, both required to exist — `verify` checks every entry in this list. 15:00 UTC = 08:00
+  # PDT (moved from 13:00 UTC by #452 so this slot lands after stage 1's real ~14:05-14:21 UTC
+  # fire time, inside the 3h freshness window), 05:00 UTC = 22:00 PDT (the previous Pacific day,
+  # never fresh by design). UTC-only and DST-blind, so these become 07:00 and 21:00 Pacific in
+  # winter.
+  schedule: "0 15 * * *, 0 5 * * *"
   task_name: AgentSystem-DailyTriage
   enforce: hard
   enabled: true
