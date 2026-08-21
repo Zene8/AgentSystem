@@ -6,6 +6,8 @@
 //
 // Usage:
 //   node tools/routing-report.js [--log=<path>]
+//   node tools/routing-report.js --check          # drift predicate, exit 1 when blind
+//   node tools/routing-report.js --diagnose       # read-only shape dump for a zero-join host
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -207,6 +209,67 @@ export function checkRoutingLog(logPath) {
   };
 }
 
+// #472: read-only diagnostic for a host whose --check says "N record(s) parsed (H hint, A actual)
+// but 0 hint/actual pairs share a promptHash". That verdict names the symptom and nothing else,
+// and on the one host where it fires (baselyserver) there is no shell — ssh is refused — so the
+// log itself was unreadable and the cause unknowable. This prints the SHAPE of the log: how many
+// records of each side, over what time span, and for each actual record the nearest-in-time hint
+// record. Two causes look completely different here. A minting mismatch (#351) shows actuals and
+// hints interleaved seconds apart and still not matching; a structurally unjoinable log shows the
+// two sides separated in time or arriving in disjoint bursts, i.e. different processes entirely.
+//
+// It prints hashes (truncated), agent/hint names and timestamps only. Prompt TEXT is never in
+// routing-log.jsonl to begin with — memory-router.js stores promptHash(prompt), never the prompt —
+// so there is nothing here that could leak into a workflow log.
+export function diagnoseRoutingLog(records, limit) {
+  const cap = limit || 20;
+  const hints = [];
+  const actuals = [];
+  for (const r of records) {
+    if (!r || !r.promptHash) continue;
+    if (Object.prototype.hasOwnProperty.call(r, 'hint')) hints.push(r);
+    else if (Object.prototype.hasOwnProperty.call(r, 'agent')) actuals.push(r);
+  }
+  const lines = [];
+  const uniqHint = new Set(hints.map(r => r.promptHash));
+  const uniqActual = new Set(actuals.map(r => r.promptHash));
+  let overlap = 0;
+  for (const h of uniqActual) if (uniqHint.has(h)) overlap += 1;
+  lines.push(`records ${records.length} — hint ${hints.length} (${uniqHint.size} unique), actual ${actuals.length} (${uniqActual.size} unique), overlapping hashes ${overlap}`);
+  const span = arr => {
+    const ts = arr.map(r => r.ts).filter(Boolean).sort();
+    return ts.length ? `${ts[0]} .. ${ts[ts.length - 1]}` : '(no timestamps)';
+  };
+  lines.push(`hint time span    ${span(hints)}`);
+  lines.push(`actual time span  ${span(actuals)}`);
+  const ms = r => {
+    const t = Date.parse(r.ts || '');
+    return Number.isNaN(t) ? null : t;
+  };
+  lines.push('');
+  lines.push(`last ${cap} actual record(s), each with its nearest-in-time hint record:`);
+  const tail = actuals.slice(-cap);
+  if (tail.length === 0) lines.push('  (none)');
+  for (const a of tail) {
+    const at = ms(a);
+    let best = null;
+    let bestGap = null;
+    for (const h of hints) {
+      const ht = ms(h);
+      if (at === null || ht === null) continue;
+      const gap = Math.abs(ht - at);
+      if (bestGap === null || gap < bestGap) { bestGap = gap; best = h; }
+    }
+    const ah = String(a.promptHash).slice(0, 10);
+    const left = `  actual ${a.ts || '(no ts)'} hash ${ah} agent=${a.agent}`;
+    if (!best) { lines.push(`${left}  ->  no comparable hint record`); continue; }
+    const bh = String(best.promptHash).slice(0, 10);
+    const same = best.promptHash === a.promptHash ? 'SAME HASH' : 'different hash';
+    lines.push(`${left}\n      nearest hint ${best.ts} hash ${bh} hint=${best.hint} gap=${Math.round(bestGap / 1000)}s (${same})`);
+  }
+  return lines.join('\n');
+}
+
 function parseArgs(argv) {
   const flags = {};
   for (const a of argv.slice(2)) {
@@ -231,6 +294,17 @@ function main() {
     // how a host that is silently never joining looks identical to a healthy one.
     const why = result.reason ? ` — ${result.reason}` : '';
     console.log(`routing-report --check: OK — ${result.totalRecords} record(s), ${result.joinedRecords} joined${why}`);
+    return;
+  }
+
+  if (flags.diagnose) {
+    const path = flags.log || ROUTING_LOG_PATH;
+    if (!existsSync(path)) {
+      console.log(`routing-report --diagnose: no log at ${path} — nothing to diagnose`);
+      return;
+    }
+    console.log(`routing-report --diagnose: ${path}`);
+    console.log(diagnoseRoutingLog(loadRecords(path), Number(flags.limit) || 20));
     return;
   }
 

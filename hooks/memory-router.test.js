@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   classify, matchDomain, extractKeywords, markerPath, alreadyInjected, detectRepoSlug,
+  hashPointerPath, writeHashPointer,
 } = require('./memory-router.js');
 
 test('infra/deploy/CI routes to Friday, not directly to Leo', () => {
@@ -26,6 +27,36 @@ test('schema/migration routes to Friday, not directly to Pym', () => {
 test('bare "audit" does not misroute to Sam', () => {
   const out = classify('can you audit my config files');
   assert.doesNotMatch(out, /Sam/);
+});
+
+// #473: hashPointerPath/writeHashPointer share promptHash with sona-writeback-hook.js's
+// logRoutingActual so a hint record and its actual-agent counterpart join by construction.
+test('hashPointerPath is stable per transcript_path and distinct across sessions', () => {
+  const a = hashPointerPath({ transcript_path: '/tmp/session-a.jsonl' });
+  const b = hashPointerPath({ transcript_path: '/tmp/session-a.jsonl' });
+  const c = hashPointerPath({ transcript_path: '/tmp/session-b.jsonl' });
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+});
+
+test('writeHashPointer writes a hash+ts JSON record readable at the same path', () => {
+  const payload = { transcript_path: `/tmp/session-writehash-${Date.now()}.jsonl` };
+  writeHashPointer(payload, 'abc123def4567890');
+  const raw = fs.readFileSync(hashPointerPath(payload), 'utf8');
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.hash, 'abc123def4567890');
+  assert.equal(typeof parsed.ts, 'number');
+});
+
+test('writeHashPointer never throws even if the tmpdir write fails', () => {
+  const os2 = require('os');
+  const origTmpdir = os2.tmpdir;
+  try {
+    os2.tmpdir = () => '/nonexistent-dir-that-does-not-exist/deep/path';
+    assert.doesNotThrow(() => writeHashPointer({ transcript_path: '/tmp/x.jsonl' }, 'hash'));
+  } finally {
+    os2.tmpdir = origTmpdir;
+  }
 });
 
 test('explicit security audit phrase still routes to Sam', () => {
