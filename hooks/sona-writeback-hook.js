@@ -14,7 +14,32 @@ const crypto = require('node:crypto');
 // routing-log.jsonl writer verbatim (do NOT reimplement the hash) so the "actual agent"
 // record we append here joins cleanly against the "hint" record memory-router.js already
 // wrote for the same prompt.
-const { promptHash, logRoutingEvent } = require('./memory-router');
+const { promptHash, logRoutingEvent, hashPointerPath } = require('./memory-router');
+
+// #473: max age for the pointer file memory-router.js writes at UserPromptSubmit time. Stop
+// fires right after the same turn completes, so a fresh pointer is normally seconds old — this
+// is generous headroom for a long-running turn, not a real deadline. Its job is to catch a
+// stale leftover (e.g. the writer crashed before ever refreshing it) rather than trust an old
+// hash from a different turn; sessionKey already keys the file per-session/transcript so it
+// can't collide across sessions.
+const HASH_POINTER_MAX_AGE_MS = 30 * 60 * 1000;
+
+// #473: read back the promptHash memory-router.js wrote for the CURRENT turn at
+// UserPromptSubmit time, so this Stop-time record hashes the exact same value instead of
+// re-deriving it from transcript text (which injected content routinely breaks — see #473).
+// Returns null (never throws) on anything short of a fresh, well-formed pointer, so the caller
+// falls back to today's extraction path.
+function readHashPointer(transcriptPath) {
+  try {
+    const raw = fs.readFileSync(hashPointerPath({ transcript_path: transcriptPath }), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.hash !== 'string' || !parsed.hash) return null;
+    if (typeof parsed.ts !== 'number' || Date.now() - parsed.ts > HASH_POINTER_MAX_AGE_MS) return null;
+    return parsed.hash;
+  } catch {
+    return null;
+  }
+}
 
 // Deployed copies live in ~/.claude/hooks where "../tools" does not exist — every
 // candidate is existence-checked so the hook works from both locations (2026-07-12 audit).
@@ -258,14 +283,22 @@ function extractLastUserPromptText(transcriptPath) {
 // Never throws — telemetry must never affect the episodic write-back it rides alongside.
 function logRoutingActual(facts, transcriptPath) {
   try {
-    // #351: hash the LAST user prompt (the turn that just completed), not the first — see
-    // extractLastUserPromptText's comment for why that's the one memory-router.js's hint
-    // record for this turn actually shares a promptHash with.
-    const lastPrompt = extractLastUserPromptText(transcriptPath);
-    if (!lastPrompt) return;
+    // #473: prefer the pointer hash memory-router.js wrote for this exact turn at
+    // UserPromptSubmit time — identical by construction, no transcript-text reconstruction.
+    // Fall back to the #351 last-user-prompt extraction only when the pointer is missing,
+    // stale, or unreadable, so this change can never make the join worse than it is today.
+    let hash = readHashPointer(transcriptPath);
+    if (!hash) {
+      // #351: hash the LAST user prompt (the turn that just completed), not the first — see
+      // extractLastUserPromptText's comment for why that's the one memory-router.js's hint
+      // record for this turn actually shares a promptHash with.
+      const lastPrompt = extractLastUserPromptText(transcriptPath);
+      if (!lastPrompt) return;
+      hash = promptHash(lastPrompt);
+    }
     logRoutingEvent({
       ts: new Date().toISOString(),
-      promptHash: promptHash(lastPrompt),
+      promptHash: hash,
       agent: (facts && facts.agent) || 'unknown',
     });
   } catch {
@@ -362,5 +395,5 @@ if (require.main === module) {
 
 module.exports = {
   extractEpisodicFacts, extractFirstUserPromptText, extractLastUserPromptText,
-  logRoutingActual, writeEpisodicNode,
+  logRoutingActual, writeEpisodicNode, readHashPointer, HASH_POINTER_MAX_AGE_MS,
 };

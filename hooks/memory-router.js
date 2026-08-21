@@ -164,6 +164,27 @@ function dedupPath(payload) {
   return path.join(os.tmpdir(), `memory-router-dedup-${sessionKey(payload)}.json`);
 }
 
+// #473: pointer file carrying THIS turn's promptHash, written at UserPromptSubmit time and
+// read back by hooks/sona-writeback-hook.js's logRoutingActual() at Stop/SubagentStop time —
+// same session, same turn. This replaces reconstructing the prompt text from the transcript
+// at Stop time (extractLastUserPromptText), which frequently returns an injected block
+// (<system-reminder>, hook additionalContext, a headless machine prompt) rather than the
+// human prompt memory-router.js actually hashed, so the two sides hash different text and
+// never join (see #473). Sharing the hash by construction means the join can't drift out of
+// sync again just because the transcript format gains a new injected-block shape.
+// Same tmpdir/sessionKey pattern as markerPath/dedupPath above.
+function hashPointerPath(payload) {
+  return path.join(os.tmpdir(), `memory-router-hash-${sessionKey(payload)}.json`);
+}
+
+// Write this turn's promptHash to the pointer file. Never throws — telemetry must not affect
+// routing. `ts` (epoch ms) lets a reader treat a stale/leftover pointer as missing.
+function writeHashPointer(payload, hash) {
+  try {
+    fs.writeFileSync(hashPointerPath(payload), JSON.stringify({ hash, ts: Date.now() }));
+  } catch { /* non-fatal */ }
+}
+
 function loadInjectedIds(dedupFile) {
   try {
     const raw = fs.readFileSync(dedupFile, 'utf8');
@@ -277,6 +298,7 @@ module.exports = {
   promptHash, logRoutingEvent, ROUTING_LOG_PATH,
   sessionKey, logInjection, INJECTION_LOG_PATH, repoBrainDir,
   isTrivialPrompt, dedupPath, loadInjectedIds, saveInjectedIds,
+  hashPointerPath, writeHashPointer,
   SCORE_FLOOR, RETRIEVAL_TOP, MIN_PROMPT_LEN, ACK_REGEX,
 };
 
@@ -299,12 +321,17 @@ if (require.main === module) {
     // #124: log the hint (branch id + agent) so routing-report.js can later join it against
     // the actual agent used (logged by hooks/sona-writeback-hook.js) via the shared promptHash.
     if (p) {
+      const hash = promptHash(prompt);
       logRoutingEvent({
         ts: new Date().toISOString(),
-        promptHash: promptHash(prompt),
+        promptHash: hash,
         hint: matched ? matched.id : 'none',
         agentHint: matched ? matched.agentDisplay.split(' ')[0] : null,
       });
+      // #473: share this turn's hash with sona-writeback-hook.js's Stop-time logRoutingActual
+      // via a per-session pointer file, so the two sides join by construction rather than by
+      // re-deriving the same transcript text (which injected content routinely breaks).
+      writeHashPointer(payload, hash);
     }
 
     // #121/#170: fire task-aware retrieval on substantive, non-trivial prompts, deduped per
