@@ -99,15 +99,47 @@ test('checkRoutingLog: file with only malformed lines IS blind', () => {
   assert.match(result.reason, /0 parsed as valid JSON/);
 });
 
-test('checkRoutingLog: parsed records that never join (#351 audit case) ARE blind', () => {
-  const rows = [
-    { ts: 't1', promptHash: 'h1', hint: 'infra', agentHint: 'Friday' },
-    { ts: 't2', promptHash: 'h2', agent: 'Leo' }, // different hash — never joins
-  ];
+// #351 real regression: both sides populated (hints AND actuals present, well above the sample
+// floor) but minted with different promptHashes for the same turn, so nothing ever joins.
+test('checkRoutingLog: both sides populated, zero overlap (#351 audit case) ARE blind', () => {
+  const rows = [];
+  for (let i = 0; i < 10; i++) {
+    rows.push({ ts: `h${i}`, promptHash: `hint${i}`, hint: 'infra', agentHint: 'Friday' });
+  }
+  for (let i = 0; i < 10; i++) {
+    rows.push({ ts: `a${i}`, promptHash: `actual${i}`, agent: 'Leo' }); // disjoint hashes — never joins
+  }
   const p = tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n');
   const result = checkRoutingLog(p);
   assert.equal(result.blind, true);
   assert.match(result.reason, /0 hint\/actual pairs share a promptHash/);
+});
+
+// #466: a headless CI host (e.g. baselyserver) logs hints via memory-router.js but never runs an
+// interactive session, so sona-writeback-hook.js never writes an actual-agent record. Actuals is
+// permanently empty — that's not the #351 minting-mismatch failure, there's nothing to join.
+test('checkRoutingLog: hints only, no actuals (headless host, #466) is NOT blind', () => {
+  const rows = [];
+  for (let i = 0; i < 20; i++) {
+    rows.push({ ts: `h${i}`, promptHash: `hint${i}`, hint: 'infra', agentHint: 'Friday' });
+  }
+  const p = tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+  const result = checkRoutingLog(p);
+  assert.equal(result.blind, false);
+  assert.match(result.reason, /headless host, not drift/);
+});
+
+// #466: below the sample floor, a zero-join result is inconclusive either way — too few records
+// to tell "empty by construction" apart from a real minting mismatch.
+test('checkRoutingLog: below sample floor with zero join is NOT blind', () => {
+  const rows = [
+    { ts: 't1', promptHash: 'h1', hint: 'infra', agentHint: 'Friday' },
+    { ts: 't2', promptHash: 'h2', agent: 'Leo' }, // different hash, but only 2 records total
+  ];
+  const p = tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+  const result = checkRoutingLog(p);
+  assert.equal(result.blind, false);
+  assert.match(result.reason, /below the .*-record floor/);
 });
 
 test('checkRoutingLog: at least one joined pair is NOT blind', () => {
@@ -119,4 +151,19 @@ test('checkRoutingLog: at least one joined pair is NOT blind', () => {
   const result = checkRoutingLog(p);
   assert.equal(result.blind, false);
   assert.equal(result.joinedRecords, 1);
+});
+
+// #466 audit: joinRecords() classifies with `hint` winning over `agent` (else-if), so a record
+// carrying BOTH fields is filed under hints alone and can never produce a pair. If the side
+// counts used independent hasOwnProperty checks they would report both sides populated, and a
+// log made only of such records would be declared drift no operator could act on.
+test('checkRoutingLog: records carrying BOTH hint and agent are one-sided, not drift (#466)', () => {
+  const rows = [];
+  for (let k = 0; k < 20; k += 1) {
+    rows.push(JSON.stringify({ promptHash: `h${k}`, hint: 'Friday', agent: 'Friday' }));
+  }
+  const r = checkRoutingLog(tmpLog(rows.join('\n') + '\n'));
+  assert.equal(r.joinedRecords, 0, 'join is empty: hint wins, so nothing lands on the actual side');
+  assert.equal(r.blind, false, 'one-sided by construction, so not reportable as drift');
+  assert.match(r.reason, /only one side of the join is populated \(20 hint, 0 actual\)/);
 });
