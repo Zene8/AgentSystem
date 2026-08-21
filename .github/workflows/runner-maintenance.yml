@@ -619,6 +619,48 @@ jobs:
 
           echo "watchdog liveness report changed nothing."
 
+      # ── routing-log diagnostics (#475) ──────────────────────────────────────────────────────
+      #
+      # enforcement-drift-check runs `routing-report.js --check` and only ever prints one summary
+      # line — "N record(s) parsed (H hint, A actual) but 0 hint/actual pairs share a promptHash"
+      # on this host. That line cannot say WHY the join is empty: whether the actuals are simply
+      # old (minted before #474's promptHash fix landed) and can never join no matter how correct
+      # today's minting is, or something else. `--diagnose` (#124) exists exactly to answer that,
+      # printing per-record timestamps, truncated hashes and the nearest hint/actual pairing — but
+      # it has never been reachable without a shell on a host `ssh` refuses. This step is that
+      # missing read path: it changes nothing, same as every other step in this job, and prints
+      # only what `--diagnose` already prints — truncated promptHash prefixes, hint/agent labels
+      # and timestamps, never prompt text (routing-log.jsonl never stores prompt text to begin
+      # with; see routing-report.js).
+      - name: Report routing-log diagnostics (read-only)
+        shell: bash
+        run: |
+          # Same reason as every other step here: GitHub runs this as `bash -e -o pipefail {0}`,
+          # and this step's own `set -uo pipefail` does not clear that inherited `-e` (#457, #460).
+          # `--diagnose` already handles a missing log and a below-floor sample size gracefully
+          # and always exits 0, but this step must never fail the job even if that changes.
+          set +e
+          set -uo pipefail
+          WS="$GITHUB_WORKSPACE"
+
+          out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          out ""
+          out "### routing-log diagnostics (#475)"
+          out ""
+          out "<details><summary>routing-report --diagnose --limit=25</summary>"
+          out ""
+          out '```'
+          NODE_BIN="$(command -v node 2>/dev/null || echo /usr/bin/node)"
+          DIAG_OUT="$("$NODE_BIN" "$WS/tools/routing-report.js" --diagnose --limit=25 2>&1)"
+          DIAG_RC=$?
+          printf '%s\n' "${DIAG_OUT:-<no output>}" | tee -a "$GITHUB_STEP_SUMMARY"
+          out '```'
+          out "(exit $DIAG_RC)"
+          out "</details>"
+
+          echo "routing-log diagnostics report changed nothing."
+
   # ── repair-brain ───────────────────────────────────────────────────────────────────────────
   #
   # The dangerous one. The runner's ~/agent-memory may hold commits that exist on NO other host —
