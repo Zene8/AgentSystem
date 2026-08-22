@@ -88,15 +88,37 @@ jobs:
             // ready_for_review may BLOCK, and an approval left over from draft state would sit in
             // the review list next to it (#271).
             core.setOutput('approve', 'false');
+            // #450: distinguished from the other skip paths because it is the only one that
+            // approves code the audit was supposed to read. Later steps use it to leave a record.
+            core.setOutput('bypass', 'false');
             if (pr.draft) {
               core.setOutput('skip', 'true');
               core.setOutput('skip_reason', 'draft PR — audit runs on ready_for_review');
               return;
             }
+            // Hoisted above the label checks so the bypass path can name what it waved through.
+            // One extra paginated call on the bypass/spec paths; the audit it replaces costs orders
+            // of magnitude more.
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
             const labels = pr.labels.map(l => l.name);
             if (labels.includes('bypass-sam-audit') || labels.includes('bypass-audit')) {
               core.setOutput('skip', 'true');
               core.setOutput('approve', 'true');
+              core.setOutput('bypass', 'true');
+              // Capped: the record has to be readable in an issue body, and a 300-file PR would
+              // bury the point. The count is always exact even when the list is elided.
+              const names = files.map(f => f.filename);
+              const shown = names.slice(0, 40).join(', ');
+              core.setOutput('bypass_files',
+                names.length === 0 ? '(no files)'
+                  : names.length > 40 ? `${shown}, and ${names.length - 40} more`
+                  : shown);
+              core.setOutput('bypass_file_count', String(names.length));
               core.setOutput('skip_reason', 'Bypassed via PR label (bypass-sam-audit/bypass-audit)');
               return;
             }
@@ -106,12 +128,6 @@ jobs:
               core.setOutput('skip_reason', 'spec-labeled PR (design/spec discussion, not mergeable code audit)');
               return;
             }
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              per_page: 100,
-            });
             const docsOnly = files.length > 0 && files.every(f =>
               f.filename.startsWith('docs/') || f.filename.endsWith('.md'));
             core.setOutput('skip', docsOnly ? 'true' : 'false');
@@ -137,17 +153,29 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const reason = ${{ toJSON(steps.precheck.outputs.skip_reason) }};
+            const bypassed = ${{ toJSON(steps.precheck.outputs.bypass) }} === 'true';
+            const files = ${{ toJSON(steps.precheck.outputs.bypass_files) }};
+            // Both bodies keep the `Sam (CSO)` + `APPROVED:` markers pr-guard.js gates on — that
+            // is the one definition of "Sam approved this" and the bypass must stay mergeable.
+            // What differs is the claim: "no model audit required" is true of docs-only and spec,
+            // and false of a label bypass, where an audit WAS required and did not happen (#450).
+            const body = bypassed
+              ? `⚠️ **Sam (CSO) — APPROVED WITHOUT AUDIT**\n\nAPPROVED: ${reason}.\n\nNo model audit ran on this diff. If this merges, unaudited code reaches \`main\`. Files: ${files}`
+              : `✅ **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: ${reason} — no model audit required.`;
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
-              body: `✅ **Sam (CSO) — Automated Security Audit**\n\nAPPROVED: ${reason} — no model audit required.`,
+              body,
               // COMMENT, not APPROVE: GitHub blocks the built-in GITHUB_TOKEN from approving PRs.
               event: 'COMMENT',
             });
 
       - name: Resolve gh/claude absolute paths for runner service context
-        if: steps.precheck.outputs.skip != 'true'
+        # Also runs on the label-bypass path, which skips the audit but still has to shell out to
+        # node for the bypass record below. Pure path resolution — nothing here can fail, and the
+        # claude path it resolves goes unused on that path.
+        if: steps.precheck.outputs.skip != 'true' || steps.precheck.outputs.bypass == 'true'
         id: tools
         shell: bash
         # The self-hosted runner runs as a systemd service whose PATH does not
@@ -634,12 +662,58 @@ jobs:
           NODE="${{ steps.tools.outputs.node_path }}"
           "$NODE" "${{ github.workspace }}/tools/human-needed.js" raise sam-audit-cannot-run \
             --title "Sam pre-merge audit cannot run" \
-            --why "\`sam-audit.yml\` could not produce a verdict on PR #${{ github.event.pull_request.number }} (claude CLI exit \`${{ steps.audit.outputs.exit_code }}\`). Every PR to \`main\` is unmergeable until this clears — the required check fails closed. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})." \
+            --why "\`sam-audit.yml\` could not produce a verdict on PR #${{ github.event.pull_request.number }} (claude CLI exit \`${{ steps.audit.outputs.exit_code }}\`). Any PR that needs a real audit is unmergeable until this clears — the required check fails closed. Docs-only, spec-labeled and \`bypass-sam-audit\`-labeled PRs still pass without touching the CLI, so a green check elsewhere is not evidence this is fixed. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})." \
             --action "Open the run log and read the captured claude output. Usual causes: Anthropic spend limit reached (raise it, or wait for the monthly reset), the \`claude\` CLI missing from the self-hosted runner's service PATH, or no network. Re-run the workflow from the Actions UI once fixed; a passing audit is what closes this alert." \
             || echo "::warning::could not raise the sam-audit-cannot-run alert"
           echo "Sam's audit could not run — failing closed. This PR is UNAUDITED, not blocked on a finding."
           exit 1
 
+      # #450: the bypass label is a deliberate escape hatch and stays one — but before this step
+      # a bypassed merge left no trace anywhere a person looks. Measured on PR #444: the audit
+      # failed, the label went on, the required check went green, ten files including
+      # `hooks/claude-hooks/guard-git.sh` and `tools/sync-agents.js` merged unaudited, and the only
+      # record was one line inside a workflow log nobody reads.
+      #
+      # The key is per-PR, not a single shared `sam-audit-bypassed`. human-needed de-dupes by key
+      # and comments at most once per 20h, so a shared key would silently swallow a second bypass
+      # on a different PR inside that window — the exact invisibility being fixed. Same reasoning
+      # as the per-host `brain-sync-conflict-<hostname>` keys: two bypassed PRs are two separate
+      # review tasks, and closing one must not close the other. Re-running this PR's audit reuses
+      # the key, so a re-run comments rather than duplicating.
+      - name: Record that a label bypass approved unaudited code
+        if: steps.precheck.outputs.bypass == 'true'
+        shell: bash
+        # GH_TOKEN deliberately unset — same #gh-token-shadow reasoning as the raise step above:
+        # human-needed.js needs issue-write, which the job's GITHUB_TOKEN does not have.
+        #
+        # FILES and COUNT come in through `env:`, never through `${{ }}` inside the script. The file
+        # list is derived from the PR's own filenames, so it is attacker-controlled text: a branch
+        # carrying a file named `a";id;"` would be interpolated INTO the shell source and run.
+        # Every other expression in this step is a number or a repo-owned string; these two are not.
+        env:
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          FILES: ${{ steps.precheck.outputs.bypass_files }}
+          COUNT: ${{ steps.precheck.outputs.bypass_file_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          NODE="${{ steps.tools.outputs.node_path }}"
+          "$NODE" "${{ github.workspace }}/tools/human-needed.js" \
+            raise "sam-audit-bypassed-pr$PR" \
+            --title "Unaudited code approved via bypass label on PR #$PR" \
+            --why "PR #$PR carries \`bypass-sam-audit\`/\`bypass-audit\`, so \`Security Audit (Sam CSO)\` reported success without running the model audit. $COUNT changed file(s) were approved unread: $FILES. See [run $GITHUB_RUN_ID]($RUN_URL)." \
+            --action "Review those files by hand, or remove the bypass label and re-run the audit from the Actions UI. Close this alert once the code has actually been audited — nothing closes it automatically, because nothing else can know that it was." \
+            || echo "::warning::could not raise the sam-audit-bypassed alert for this PR"
+          echo "Bypass recorded: PR #$PR approved without audit ($COUNT files)."
+
+      # Deliberately gated on a REAL verdict and nothing else. No precheck-skip path may resolve
+      # this alert, because none of them execute the claude CLI — and the alert is a claim about
+      # the CLI, not about any one PR's mergeability. Resolving it from a docs-only or spec skip
+      # would close a live outage on the evidence of a PR that changed only `*.md`, and resolving
+      # it from the label bypass is worse still: the bypass is what people reach for *because* the
+      # audit is broken, so it would erase the outage record at the exact moment it mattered — that
+      # is the shape of #444/#445. The alert staying open until a real audit runs is correct, not a
+      # leak; the false part was the `--why` overclaiming total unmergeability, fixed above.
       - name: Clear the cannot-run alert once an audit completes
         if: steps.review.outputs.status == 'approved' || steps.review.outputs.status == 'blocked'
         shell: bash
