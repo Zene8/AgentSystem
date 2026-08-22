@@ -148,6 +148,14 @@ const MIN_SAMPLE = 15;
 // existed, there's nothing to fail to join — and reporting it as drift paged every single day
 // with no fix available. Same logic applies below MIN_SAMPLE: too few records to tell "empty by
 // construction" apart from "minting mismatch" with any confidence, so treat it as inconclusive.
+//
+// #480: "the actual side is populated" now means populated with actuals whose promptHash came from
+// the #473 pointer file (`hashSource: 'pointer'`). Actuals hashed by the pre-#473 transcript-text
+// fallback — including every untagged record written before the tag existed — were minted by the
+// mechanism #351 already proved unreliable, so they can never be evidence that the join SHOULD be
+// working. routing-log.jsonl is append-only real user data and cannot be migrated, so a host whose
+// only actuals are legacy ones reported drift forever with no available fix. They still count in
+// stats and still join if they happen to match; they just don't arm the drift verdict.
 export function checkRoutingLog(logPath) {
   const path = logPath || ROUTING_LOG_PATH;
   if (!existsSync(path)) {
@@ -188,10 +196,14 @@ export function checkRoutingLog(logPath) {
   // act on. The two must agree or this predicate is measuring a different log than the join is.
   let hintCount = 0;
   let actualCount = 0;
+  let pointerActualCount = 0;
   for (const r of records) {
     if (!r || !r.promptHash) continue;
     if (Object.prototype.hasOwnProperty.call(r, 'hint')) hintCount += 1;
-    else if (Object.prototype.hasOwnProperty.call(r, 'agent')) actualCount += 1;
+    else if (Object.prototype.hasOwnProperty.call(r, 'agent')) {
+      actualCount += 1;
+      if (r.hashSource === 'pointer') pointerActualCount += 1;
+    }
   }
   if (hintCount === 0 || actualCount === 0) {
     return {
@@ -201,9 +213,19 @@ export function checkRoutingLog(logPath) {
       joinedRecords: 0,
     };
   }
+  // #480: actuals exist but none was minted from the #473 pointer — pre-fix data only, expected to
+  // self-heal as pointer-tagged actuals accumulate. Not drift, and not silently "OK" either.
+  if (pointerActualCount === 0) {
+    return {
+      blind: false,
+      reason: `${records.length} record(s) parsed (${hintCount} hint, ${actualCount} actual) but 0 actual(s) carry hashSource=pointer — pre-#473 legacy actuals only, self-heals as new sessions log, not drift`,
+      totalRecords: records.length,
+      joinedRecords: 0,
+    };
+  }
   return {
     blind: true,
-    reason: `${records.length} record(s) parsed (${hintCount} hint, ${actualCount} actual) but 0 hint/actual pairs share a promptHash`,
+    reason: `${records.length} record(s) parsed (${hintCount} hint, ${actualCount} actual, ${pointerActualCount} pointer-tagged) but 0 hint/actual pairs share a promptHash`,
     totalRecords: records.length,
     joinedRecords: 0,
   };
