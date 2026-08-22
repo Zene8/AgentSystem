@@ -22,17 +22,28 @@ on:
     - cron: '0 0 * * 0'
     # Note: enforcement-drift-check (daily 3am UTC) moved to its own workflow file (enforcement-drift-check.yml)
     # to avoid GitHub Actions' multiple-cron-in-one-workflow issue where github.event.schedule becomes unreliable.
-    # daily-triage (Life OS stage 2): TWICE daily, anchored to Pacific.
-    #   13:00 UTC = 06:00 PDT (morning run)
-    #   05:00 UTC = 22:00 PDT (evening run, the PREVIOUS Pacific day)
-    # GitHub cron is UTC-only and DST-blind, so in winter (PST, UTC-8) these land at 05:00 and 21:00
-    # Pacific instead. Shift both by an hour in November and March if that matters.
+    # daily-triage (Life OS stage 2): TWICE daily.
+    #   15:00 UTC = 08:00 PDT (morning run) — #452: stage 1 (Grok Tasks) archives the day's brief
+    #     at ~14:05-14:21 UTC in practice, not the documented 06:00. The old 13:00 UTC slot fired
+    #     BEFORE that, so it always missed the freshness window (age <= 3h) and reported the
+    #     degraded fallback sweep every single day by construction — same defect the issue named
+    #     for the 05:00 slot, just unnoticed because 13:00 "looked" late enough. 15:00 UTC leaves
+    #     ~40-55min of margin after the latest observed stage-1 fire and comfortably inside the 3h
+    #     window.
+    #   05:00 UTC = 22:00 PDT (evening run, the PREVIOUS Pacific day) — this slot can NEVER see a
+    #     same-day fresh brief: stage 1 runs once, in the morning, and 05:00 UTC is ~15h later by
+    #     design (it is the evening Pacific check-in, not a second freshness check). It always
+    #     falls back to the degraded sweep, which is expected and not itself a signal of a missed
+    #     stage 1 — kept anyway because the fallback sweep still covers Beeper/Discord/GitHub
+    #     independent of brief freshness.
+    # GitHub cron is UTC-only and DST-blind, so in winter (PST, UTC-8) these land an hour earlier
+    # Pacific (07:00 and 21:00). Shift both by an hour in November and March if that matters.
     #
     # Both runs fall on the SAME UTC date — 22:00 PDT is 05:00 UTC the next morning — so they share a
     # closeout filename. STEP 6 of the skill appends a run section rather than overwriting, because
     # Mission Control's /briefing filter is strictly /^\d{4}-\d{2}-\d{2}\.md$/ and would not see a
     # slot-suffixed file at all.
-    - cron: '0 13 * * *'
+    - cron: '0 15 * * *'
     - cron: '0 5 * * *'
     # weekly-agent-review: Saturday 9am UTC
     - cron: '0 9 * * 6'
@@ -90,7 +101,7 @@ jobs:
     runs-on: [self-hosted, Linux]
     # Generous: 10 items x up to 30min each, batched 4 at a time, plus the gather pass.
     timeout-minutes: 180
-    # #337: a manual workflow_dispatch landing mid-cron (or the 13:00/05:00 crons ever firing
+    # #337: a manual workflow_dispatch landing mid-cron (or the 15:00/05:00 crons ever firing
     # close together) would otherwise fan out a second full Jarvis session on top of one already
     # spending. Queue, don't cancel: this job runs per-item subagents and writes a closeout file
     # partway through, so killing a live run loses real work rather than just re-running it.
@@ -249,7 +260,7 @@ jobs:
       #
       # Retry ONLY on signals that are actually transient. A permissions rejection, a missing skill
       # or a bad agent name is deterministic; retrying those burns the window and delays the alert.
-      # The 13:00/05:00 schedule leaves roughly 16h, so 60s + 300s of backoff costs nothing.
+      # The 15:00/05:00 schedule leaves roughly 14h, so 60s + 300s of backoff costs nothing.
       - name: Run Life OS daily triage (Jarvis)
         shell: bash
         env:
