@@ -101,18 +101,82 @@ test('checkRoutingLog: file with only malformed lines IS blind', () => {
 
 // #351 real regression: both sides populated (hints AND actuals present, well above the sample
 // floor) but minted with different promptHashes for the same turn, so nothing ever joins.
+// #480: the actuals must be pointer-tagged for this to still read as drift — an untagged actual
+// was minted by the mechanism #351 discredited, so it cannot evidence a working join.
 test('checkRoutingLog: both sides populated, zero overlap (#351 audit case) ARE blind', () => {
   const rows = [];
   for (let i = 0; i < 10; i++) {
     rows.push({ ts: `h${i}`, promptHash: `hint${i}`, hint: 'infra', agentHint: 'Friday' });
   }
   for (let i = 0; i < 10; i++) {
-    rows.push({ ts: `a${i}`, promptHash: `actual${i}`, agent: 'Leo' }); // disjoint hashes — never joins
+    // disjoint hashes — never joins
+    rows.push({ ts: `a${i}`, promptHash: `actual${i}`, agent: 'Leo', hashSource: 'pointer' });
   }
   const p = tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n');
   const result = checkRoutingLog(p);
   assert.equal(result.blind, true);
   assert.match(result.reason, /0 hint\/actual pairs share a promptHash/);
+});
+
+// #480 the real-log case: the 7 actuals in routing-log.jsonl all predate the #473 pointer fix, so
+// they carry no hashSource and were hashed by the discredited transcript-text path. They can never
+// join, the log is append-only user data that cannot be migrated, and the old predicate reported
+// drift forever with no fix available.
+test('checkRoutingLog: actuals present but all untagged legacy is NOT blind (#480)', () => {
+  const rows = [];
+  for (let i = 0; i < 21; i++) {
+    rows.push({ ts: `h${i}`, promptHash: `hint${i}`, hint: 'infra', agentHint: 'Friday' });
+  }
+  for (let i = 0; i < 7; i++) {
+    rows.push({ ts: `a${i}`, promptHash: `legacy${i}`, agent: 'Leo' }); // no hashSource — pre-#473
+  }
+  const result = checkRoutingLog(tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n'));
+  assert.equal(result.blind, false, 'legacy-only actuals are stale data, not a live regression');
+  assert.match(result.reason, /0 actual\(s\) carry hashSource=pointer/);
+  assert.match(result.reason, /self-heals/);
+});
+
+// A 'fallback' tag is the #473 pointer read having failed, so the hash came from the same
+// discredited transcript reconstruction as an untagged record. It must not arm drift either.
+test('checkRoutingLog: actuals tagged hashSource=fallback do not arm drift (#480)', () => {
+  const rows = [];
+  for (let i = 0; i < 15; i++) {
+    rows.push({ ts: `h${i}`, promptHash: `hint${i}`, hint: 'infra', agentHint: 'Friday' });
+  }
+  for (let i = 0; i < 5; i++) {
+    rows.push({ ts: `a${i}`, promptHash: `fb${i}`, agent: 'Leo', hashSource: 'fallback' });
+  }
+  const result = checkRoutingLog(tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n'));
+  assert.equal(result.blind, false);
+  assert.match(result.reason, /0 actual\(s\) carry hashSource=pointer/);
+});
+
+// One pointer-tagged actual among legacy ones is enough to arm the verdict again: the reliable
+// mechanism is now producing data, so a persistent zero join really is a defect.
+test('checkRoutingLog: a single pointer-tagged actual re-arms drift (#480)', () => {
+  const rows = [];
+  for (let i = 0; i < 15; i++) {
+    rows.push({ ts: `h${i}`, promptHash: `hint${i}`, hint: 'infra', agentHint: 'Friday' });
+  }
+  for (let i = 0; i < 4; i++) {
+    rows.push({ ts: `a${i}`, promptHash: `legacy${i}`, agent: 'Leo' });
+  }
+  rows.push({ ts: 'p1', promptHash: 'nomatch', agent: 'Leo', hashSource: 'pointer' });
+  const result = checkRoutingLog(tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n'));
+  assert.equal(result.blind, true);
+  assert.match(result.reason, /5 actual, 1 pointer-tagged/);
+});
+
+// Legacy actuals are excluded from the blind determination only — they still join if they happen
+// to match, so no telemetry is discarded by the #480 tag.
+test('checkRoutingLog: an untagged legacy actual still joins when it matches (#480)', () => {
+  const rows = [
+    { ts: 't1', promptHash: 'h1', hint: 'infra', agentHint: 'Friday' },
+    { ts: 't2', promptHash: 'h1', agent: 'Friday' }, // untagged, but matches
+  ];
+  const result = checkRoutingLog(tmpLog(rows.map(r => JSON.stringify(r)).join('\n') + '\n'));
+  assert.equal(result.joinedRecords, 1);
+  assert.equal(result.blind, false);
 });
 
 // #466: a headless CI host (e.g. baselyserver) logs hints via memory-router.js but never runs an

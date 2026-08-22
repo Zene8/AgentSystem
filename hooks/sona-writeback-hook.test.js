@@ -7,6 +7,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+// #480: point HOME at a throwaway dir BEFORE requiring memory-router.js, which resolves
+// ROUTING_LOG_PATH from os.homedir() at require time. These tests call logRoutingActual for real,
+// so until now every `npm test` run appended synthetic records to the operator's actual
+// ~/agent-memory/nexus/routing-log.jsonl — append-only user data. Harmless while nothing read the
+// shape of it; not harmless now that --check keys its verdict on whether a pointer-tagged actual
+// exists, since a test-injected one would report drift on a host that was merely never tested.
+process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sona-writeback-home-'));
+if (process.env.USERPROFILE) process.env.USERPROFILE = process.env.HOME;
+
 const { promptHash, hashPointerPath, writeHashPointer } = require('./memory-router.js');
 const {
   extractFirstUserPromptText, extractLastUserPromptText, logRoutingActual, extractEpisodicFacts,
@@ -192,6 +202,9 @@ test('logRoutingActual: uses the pointer hash verbatim when present, ignoring tr
   const match = lines.find(l => l.promptHash === 'pointerhash012345');
   assert.ok(match, 'expected logRoutingActual to log the pointer hash verbatim');
   assert.equal(match.agent, 'Friday');
+  // #480: routing-report.js --check counts only pointer-tagged actuals as evidence the join
+  // should be working, so the tag has to be written here or every actual reads as legacy.
+  assert.equal(match.hashSource, 'pointer');
 });
 
 test('logRoutingActual: falls back to transcript extraction when no pointer exists (never worse than today)', () => {
@@ -209,6 +222,9 @@ test('logRoutingActual: falls back to transcript extraction when no pointer exis
   const match = lines.find(l => l.promptHash === expectedHash);
   assert.ok(match, 'expected logRoutingActual to fall back to extractLastUserPromptText hash');
   assert.equal(match.agent, 'Friday');
+  // #480: a fallback hash must say so — it came from the transcript reconstruction #351
+  // discredited, and must not count as evidence the join mechanism is healthy.
+  assert.equal(match.hashSource, 'fallback');
 });
 
 // #155: no-signal transcripts must not produce a degenerate all-"unknown" episodic entry.

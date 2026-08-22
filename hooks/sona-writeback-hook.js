@@ -288,7 +288,13 @@ function logRoutingActual(facts, transcriptPath) {
     // Fall back to the #351 last-user-prompt extraction only when the pointer is missing,
     // stale, or unreadable, so this change can never make the join worse than it is today.
     let hash = readHashPointer(transcriptPath);
+    // #480: tag WHICH mechanism minted the hash. routing-report.js --check counts only 'pointer'
+    // actuals as evidence the join should be working: a 'fallback' hash comes from the
+    // transcript-text reconstruction #351 proved unreliable, and untagged records predate #473
+    // entirely. The log is append-only user data, so the tag is the only way to tell them apart.
+    let hashSource = 'pointer';
     if (!hash) {
+      hashSource = 'fallback';
       // #351: hash the LAST user prompt (the turn that just completed), not the first — see
       // extractLastUserPromptText's comment for why that's the one memory-router.js's hint
       // record for this turn actually shares a promptHash with.
@@ -300,6 +306,7 @@ function logRoutingActual(facts, transcriptPath) {
       ts: new Date().toISOString(),
       promptHash: hash,
       agent: (facts && facts.agent) || 'unknown',
+      hashSource,
     });
   } catch {
     // Non-fatal.
