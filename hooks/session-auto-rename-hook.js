@@ -371,7 +371,7 @@ function runHook() {
     __filename, '--worker',
     `--session=${sessionId}`,
     `--transcript=${transcriptPath}`,
-  ], { detached: true, stdio: 'ignore' });
+  ], { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
 }
 

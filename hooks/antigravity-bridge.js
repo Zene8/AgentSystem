@@ -117,7 +117,8 @@ function runHookAsync(scriptName, args, payload, workspacePath) {
     const child = spawn(cmd, cmdArgs, {
       cwd: workspacePath,
       detached: true,
-      stdio: ['pipe', 'ignore', 'ignore']
+      stdio: ['pipe', 'ignore', 'ignore'],
+      windowsHide: true,
     });
     child.stdin.write(JSON.stringify(payload));
     child.stdin.end();
