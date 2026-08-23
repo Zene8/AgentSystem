@@ -60,7 +60,13 @@ function appendJsonl(file, obj) {
 // Validation at the publish boundary (CLI + programmatic callers, including the
 // webhook-server producer): type must be a known handler id, payload must be a
 // plain object under a size cap. Keeps attacker-shaped input out of the queue.
-export const KNOWN_TYPES = ['run-tool', 'spawn-agent', 'noop'];
+// `inbound-item` carries one normalized envelope from tools/inbound/ (see
+// docs/superpowers/specs/2026-08-22-inbound-event-triage-design.md). It is deliberately a separate
+// type from `spawn-agent`: an inbound item has to pass a classifier gate first, and only an
+// `action` verdict publishes a `spawn-agent` — which is also how it inherits the existing
+// concurrency cap, dedupe and overflow-requeue path that POST /github bypasses by calling
+// spawnAgent() directly.
+export const KNOWN_TYPES = ['run-tool', 'spawn-agent', 'noop', 'inbound-item'];
 let publishSeq = 0;
 export const MAX_PAYLOAD_BYTES = 64 * 1024;
 
