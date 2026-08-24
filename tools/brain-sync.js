@@ -18,6 +18,10 @@
 //
 // Exit codes: 0 synced (or nothing to do), 1 conflict or corruption needing a human, 2 usage/setup
 // error.
+//
+// Staging is NOT a bare `git add -A`: PER_HOST_LOG_DENYLIST below is excluded by pathspec, because
+// the brain's own .gitignore is in a repo this one cannot fix and a name missing from it (#482:
+// visits.log) means a permanent, every-host, every-sync merge conflict.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -70,6 +74,90 @@ export function classifyCorruption(raw) {
     return { side: 'remote', text };
   }
   return null;
+}
+
+/**
+ * Per-host append-only logs that must NEVER be staged into the brain (#482).
+ *
+ * These are matched by **basename, at any depth**, and the guard lives here — in this repo — on
+ * purpose. The brain's own `.gitignore` already excludes most of them and its comment states the
+ * reason exactly: "every sync would conflict on every line of every file, and none of it is a
+ * durable fact." But `.gitignore` lives in `~/agent-memory`, a *separate private repo* that this
+ * one cannot fix, and a name missing from it is unrecoverable by construction: `git add -A` tracks
+ * the file on the first host to sync, after which every other host appends to its own copy and
+ * every subsequent merge conflicts on it forever.
+ *
+ * That is not hypothetical. `visits.log` was never added to that ignore list, so the Sunday
+ * `weekly-memory-decay` pass on baselyserver died in `Push the decayed brain` on a merge conflict in
+ * `nexus/personal-brain/visits.log` — a file whose entire content is one JSONL line per node access
+ * on one machine. It is written by `tools/graph/graph-query.js` (`--record-access`) and
+ * `hooks/injection-feedback-hook.js`, i.e. on essentially every session, on every host.
+ *
+ * A repo-side denylist protects every host including one whose `.gitignore` is stale or absent, and
+ * it survives a re-clone of the brain from a remote that predates the ignore fix.
+ *
+ * What is deliberately NOT here: `nexus/events/done.jsonl` and `dead-letter.jsonl`. Those are
+ * append-only too, but they are the triage record the reconciler reads, tracked on purpose, and the
+ * brain's `.gitignore` says so.
+ */
+export const PER_HOST_LOG_DENYLIST = Object.freeze([
+  // The #482 file. Absent from the brain's .gitignore, which is why this list exists at all.
+  'visits.log',
+  // Already ignored in the brain today. Re-asserted here so a host with a stale .gitignore (or a
+  // clone from before those lines landed) cannot start tracking them either.
+  'injection-log.jsonl',
+  'injection-feedback.jsonl',
+  'routing-log.jsonl',
+  'session-log.jsonl',
+  'session-registry.jsonl',
+  'auto-capture.log',
+  'session-autorename.log',
+  'routine-compliance.jsonl',
+  'continuous-sync.log',
+  'alerts.jsonl',
+]);
+
+/**
+ * Positive pathspecs matching the denylist at any depth.
+ *
+ * A leading `*` and no `:(glob)` magic on purpose: git's default pathspec matching runs wildmatch
+ * *without* WM_PATHNAME, so `*` crosses `/`. `:(glob)**` would work too but changes the semantics
+ * of every other character in the pattern, and these are plain basenames.
+ */
+export function denyMatchPathspecs(list = PER_HOST_LOG_DENYLIST) {
+  return list.map((name) => `*${name}`);
+}
+
+/** The same set as exclusions, for `git add -- . :(exclude)*visits.log …`. */
+export function denyExcludePathspecs(list = PER_HOST_LOG_DENYLIST) {
+  return denyMatchPathspecs(list).map((p) => `:(exclude)${p}`);
+}
+
+/** True when this path's basename is denylisted. Accepts either slash style. */
+export function isPerHostLog(p, list = PER_HOST_LOG_DENYLIST) {
+  const base = String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop();
+  return list.includes(base);
+}
+
+/**
+ * The path out of one `git status --porcelain` line, unquoted, rename-aware.
+ *
+ * `R  old -> new` reports two paths and the interesting one is the destination; a path with a
+ * special character comes back double-quoted and C-escaped, and only the quotes matter here since
+ * the denylist is plain ASCII basenames.
+ */
+export function porcelainPath(line) {
+  // NOT a fixed slice(3). `git status --porcelain` writes a two-char XY field then a space, but the
+  // caller trims the whole command output, which eats the leading space of an unstaged-only line
+  // (` M path`) and shifted the path by one character -- so a TRACKED dirty log read as a different
+  // path, missed the tracked-set carve-out, and was left unstaged. That is a permanently dirty tree,
+  // which is the total-sync-outage failure this file's comments warn about. `??` lines have no
+  // leading space, which is why only the tracked case broke.
+  const m = /^\s*([A-Z?!.]{1,2})\s+(.*)$/.exec(String(line || ''));
+  let rest = m ? m[2] : String(line || '').slice(3);
+  const arrow = rest.indexOf(' -> ');
+  if (arrow >= 0) rest = rest.slice(arrow + 4);
+  return rest.replace(/^"|"$/g, '');
 }
 
 function main() {
@@ -160,7 +248,50 @@ const HOST = os.hostname();
 
 // ---------------------------------------------------------------------------- status
 
-const dirty = git(['status', '--porcelain']).out;
+const dirtyAll = git(['status', '--porcelain']).out;
+const dirtyAllLines = dirtyAll ? dirtyAll.split('\n') : [];
+
+// Already tracked? Then the denylist alone can no longer help — this is exactly the state
+// baselyserver was in when the decay pass died (#482). Report it every run, loudly, in --status
+// too, and do NOT fix it here: `git rm --cached` rewrites the index of a private user-data repo,
+// which is a person's decision, not a scheduled job's.
+const trackedPerHost = git(['ls-files', '--', ...denyMatchPathspecs()], { allowFail: true })
+  .out.split('\n').filter(Boolean);
+const trackedPaths = new Set(trackedPerHost);
+
+// The exclusion applies only to names git is NOT already tracking, and that asymmetry is deliberate.
+// Refusing to stage a *tracked* file whose content changed leaves the working tree permanently
+// dirty, and `git pull` then refuses the merge outright — turning a conflict on one worthless log
+// into a total sync outage on that host, which is strictly worse than the bug. So: an untracked
+// per-host log is kept out of git forever (the fix), and an already-tracked one keeps syncing
+// exactly as before while the warning below tells a human the one command that ends it.
+// Path-exact, NOT by basename: `visits.log` is written per brain, so the same name exists at
+// nexus/personal-brain/visits.log and nexus/agent-brain/<agent>/visits.log. Carving the whole
+// NAME out because one copy is tracked would start committing every still-untracked sibling —
+// seeding the exact conflict this denylist exists to prevent, on the hosts already suffering it.
+function isExcludedPerHostPath(q, tracked = trackedPaths) {
+  // Both sides are git output (porcelain and ls-files), so both use forward slashes;
+  // isPerHostLog normalises either style for its own basename check.
+  return isPerHostLog(q) && !tracked.has(String(q || ''));
+}
+const perHostDirty = dirtyAllLines.filter((l) => isExcludedPerHostPath(porcelainPath(l)));
+const dirty = dirtyAllLines
+  .filter((l) => !isExcludedPerHostPath(porcelainPath(l))).join('\n');
+
+function reportTrackedPerHostLogs() {
+  if (!trackedPerHost.length) return;
+  process.stderr.write(
+    `brain-sync: WARNING — ${trackedPerHost.length} per-host append-only log(s) are TRACKED in `
+    + `${opt.root}:\n${trackedPerHost.map((f) => `  ${f}`).join('\n')}\n`
+    + `\nEvery host appends to its own copy, so every sync conflicts on these and none of it is a\n`
+    + `durable fact (that is #482: the weekly decay pass died pushing nexus/personal-brain/visits.log).\n`
+    + `They are still being staged, because leaving a tracked file dirty makes \`git pull\` refuse\n`
+    + `to merge at all. Untracking is a human's call — on this host:\n`
+    + `  git -C ${opt.root} rm --cached ${trackedPerHost.map((f) => `'${f}'`).join(' ')}\n`
+    + `then add the name(s) to ${opt.root}/.gitignore, commit, and push. Not done automatically:\n`
+    + `that writes the index of a private user-data repo.\n`);
+}
+
 git(['fetch', '--quiet', 'origin']);
 const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).out;
 const counts = git(['rev-list', '--left-right', '--count', `origin/${branch}...HEAD`], { allowFail: true });
@@ -172,6 +303,12 @@ if (opt.status) {
   log(`branch    ${branch} (${ahead} ahead, ${behind} behind origin)`);
   log(`local     ${changed} uncommitted change(s)`);
   if (dirty) log(dirty.split('\n').map((l) => `          ${l}`).join('\n'));
+  // Reported separately, not folded into the count above, because the two need different actions:
+  // the count is what the next sync will commit, this is what it will deliberately leave alone.
+  log(`per-host  ${perHostDirty.length} append-only log(s) excluded from sync`);
+  if (perHostDirty.length) log(perHostDirty.map((l) => `          ${l}`).join('\n'));
+  log(`tracked   ${trackedPerHost.length} per-host log(s) TRACKED (should be 0)`);
+  reportTrackedPerHostLogs();
   process.exit(0);
 }
 
@@ -239,16 +376,39 @@ if (!opt.status) {
 // by staging `git add -A` and writing a commit, so an editor left mid-thought or a half-finished
 // merge became a permanent commit that the next non-pull-only run pushed everywhere. The pull below
 // can still fail on a dirty tree; that is the honest outcome, and it stops rather than committing.
+reportTrackedPerHostLogs();
+if (perHostDirty.length) {
+  log(`${perHostDirty.length} per-host append-only log(s) excluded from staging`);
+}
+
 if (dirty && opt.pullOnly) {
   log(`${dirty.split('\n').length} local change(s) left uncommitted (--pull-only)`);
 } else if (dirty) {
-  git(['add', '-A']);
-  // Host in the subject on purpose: when a conflict does show up, knowing which machine wrote
-  // which side is the whole diagnosis.
-  git([...IDENT, 'commit', '--quiet', '-m',
-    `brain: sync from ${HOST}`,
-    '-m', `${dirty.split('\n').length} path(s) changed. Written by tools/brain-sync.js.`]);
-  log(`committed ${dirty.split('\n').length} local change(s)`);
+  // NOT a bare `git add -A`. The exclusions are the #482 fix: a per-host append-only log that the
+  // brain's .gitignore happens to miss would otherwise be tracked by the first host to sync, and
+  // conflict on every host's every sync from then on.
+  git(['add', '-A', '--', '.', ...denyExcludePathspecs()]);
+  // Those exclusions are name globs, and a git pathspec exclusion beats any positive pattern
+  // beside it — so an ALREADY-TRACKED log must be re-added by its exact path in a second call.
+  // Leaving it unstaged while dirty is what makes the next `git pull` refuse the merge.
+  if (trackedPerHost.length) git(['add', '--', ...trackedPerHost], { allowFail: true });
+  // Belt and braces around the porcelain parsing above: `git status` collapses an untracked
+  // *directory* to one entry, so a directory holding nothing but denylisted logs reads as a real
+  // local change and then stages nothing. Committing an empty index fails with a bare exit 1, which
+  // brain-sync-run.js correctly classifies as "error" — a red run over a file we chose to skip.
+  const staged = git(['diff', '--cached', '--name-only'], { allowFail: true })
+    .out.split('\n').filter(Boolean);
+  if (!staged.length) {
+    log(`${dirty.split('\n').length} local change(s) resolved to nothing stageable ` +
+        `(per-host logs only) — nothing committed`);
+  } else {
+    // Host in the subject on purpose: when a conflict does show up, knowing which machine wrote
+    // which side is the whole diagnosis.
+    git([...IDENT, 'commit', '--quiet', '-m',
+      `brain: sync from ${HOST}`,
+      '-m', `${staged.length} path(s) changed. Written by tools/brain-sync.js.`]);
+    log(`committed ${staged.length} local change(s)`);
+  }
 }
 
 // ---------------------------------------------------------------------------- pull
