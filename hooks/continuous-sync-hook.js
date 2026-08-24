@@ -150,6 +150,7 @@ function runHook(phase) {
   const child = spawn(process.execPath, [__filename, '--worker', `--phase=${phase}`], {
     detached: true,
     stdio: 'ignore',
+    windowsHide: true,
   });
   child.unref();
 }
