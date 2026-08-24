@@ -31,6 +31,7 @@ import { publish } from '../event-bus.js';
 import { SOURCES } from './envelope.js';
 import { loadPolicy, sourcesForCadence, CADENCE_TIERS } from './policy.js';
 import { readCursor, advanceCursor, dropSeen } from './cursor.js';
+import { withTriageLock, deferredMessage } from './with-lock.js';
 import * as githubAdapter from './github.js';
 
 // Adapters land here as they are built. A source with a policy section but no adapter yet is a
@@ -108,7 +109,11 @@ export function pollSource(source, {
   const publishedIds = [];
   try {
     for (const envelope of fresh) {
-      publisher({ type: 'inbound-item', source: `inbound/${source}`, payload: { envelope } });
+      // `_sensitive` is what makes event-bus.js redact this payload out of done.jsonl and
+      // dead-letter.jsonl. The queue file keeps the full body — the classifier needs it — but those
+      // two logs sync to every host through the brain repo, and an email body has no business
+      // there. The handler's own record (verdict, url, actor) is what lands instead.
+      publisher({ type: 'inbound-item', source: `inbound/${source}`, payload: { _sensitive: true, envelope } });
       publishedIds.push(envelope.externalId);
     }
   } catch (err) {
@@ -199,14 +204,31 @@ async function main() {
     return;
   }
 
-  const results = [];
-  for (const source of sources) {
-    try {
-      results.push(pollSource(source, { dryRun: opts.dryRun }));
-    } catch (err) {
-      // Thrown, not returned: a corrupt cursor or an unset $LIFE_REPO. Both are hard stops.
-      results.push({ source, status: 'error', reason: err.message, published: 0 });
+  // A dry run reads and prints; it advances no cursor and publishes nothing, so it does not need
+  // the lock and must stay usable for diagnosis while a stage-2 run is mid-flight.
+  const pass = () => {
+    const results = [];
+    for (const source of sources) {
+      try {
+        results.push(pollSource(source, { dryRun: opts.dryRun }));
+      } catch (err) {
+        // Thrown, not returned: a corrupt cursor or an unset $LIFE_REPO. Both are hard stops.
+        results.push({ source, status: 'error', reason: err.message, published: 0 });
+      }
     }
+    return results;
+  };
+
+  let results;
+  if (opts.dryRun) {
+    results = pass();
+  } else {
+    const held = withTriageLock(pass);
+    if (!held.ran) {
+      console.log(deferredMessage(held.holder));
+      return;
+    }
+    results = held.result;
   }
 
   if (opts.json) {

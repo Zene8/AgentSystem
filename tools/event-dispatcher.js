@@ -4,6 +4,7 @@
 // Built-in handlers:
 //   run-tool     payload: { script, args? }  — run a Node script from tools/ (path-confined)
 //   spawn-agent  payload: { agent, prompt, cwd? } — spawn `claude --bg --agent <agent> <prompt>`
+//   inbound-item payload: { envelope } — classify a polled item and act on the verdict
 //   noop         payload: anything — completes immediately (testing/heartbeat)
 //
 // Run modes:
@@ -19,6 +20,8 @@ import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import * as bus from './event-bus.js';
 import { claudeBgArgs } from './mission-control/claude-args.js';
+import { inboundItemHandler } from './inbound/dispatch.js';
+import { withTriageLock, deferredMessage } from './inbound/with-lock.js';
 import { isMainModule } from './is-main.js';
 
 const TOOLS_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -80,16 +83,17 @@ export function spawnAgentHandler(payload) {
 export const HANDLERS = {
   'run-tool': runToolHandler,
   'spawn-agent': spawnAgentHandler,
+  'inbound-item': inboundItemHandler,
   'noop': () => 'ok',
 };
 
 // One drain pass. opts: { root, handlers, max, now, staleMs }.
-// Returns { processed, completed, requeued, dead, recovered }.
+// Returns { processed, completed, requeued, dead, recovered, released }.
 export function drain(opts) {
   const o = opts || {};
   const handlers = { ...HANDLERS, ...(o.handlers || {}) };
   const recovered = bus.recoverStale(o.root, o.staleMs, o.now);
-  const summary = { processed: 0, completed: 0, requeued: 0, dead: 0, recovered };
+  const summary = { processed: 0, completed: 0, requeued: 0, dead: 0, released: 0, recovered };
   const max = Number.isInteger(o.max) ? o.max : 100;
   while (summary.processed < max) {
     const claim = bus.claimNext(o.root, o.now);
@@ -102,6 +106,16 @@ export function drain(opts) {
       bus.complete(claim, o.root, result);
       summary.completed++;
     } catch (err) {
+      // A `deferred` error means "not now", not "this failed" — the inbound kill switch is the
+      // caller. Release puts the event back untouched (no attempt spent, no backoff) and we STOP
+      // the pass: whatever deferred one event defers every event of its kind, so continuing would
+      // claim and release the whole backlog for nothing.
+      if (err && err.deferred === true) {
+        bus.release(claim, o.root);
+        summary.released++;
+        summary.deferredReason = err.message;
+        break;
+      }
       const outcome = bus.fail(claim, err, o.root, o.now);
       if (outcome === 'dead') summary.dead++; else summary.requeued++;
     }
@@ -113,10 +127,22 @@ export function drain(opts) {
 function main() {
   const args = process.argv.slice(2);
   const maxArg = args.find(a => a.startsWith('--max='));
-  const summary = drain({ max: maxArg ? parseInt(maxArg.slice(6), 10) : 100 });
+  const max = maxArg ? parseInt(maxArg.slice(6), 10) : 100;
+
+  // Under the daily-triage lock: a drain can spawn agents and spend the per-source daily cap, and
+  // the stage-2 triage run writes both of those too. One arbiter, or neither side knows it has a
+  // peer (see inbound/with-lock.js). Standing down is exit 0 — the queue is durable and the timer
+  // fires again shortly.
+  const held = withTriageLock(() => drain({ max }));
+  if (!held.ran) {
+    console.log(`event-dispatcher: ${deferredMessage(held.holder)}`);
+    process.exit(0);
+  }
+  const summary = held.result;
   const s = bus.stats();
   console.log(`event-dispatcher: processed=${summary.processed} completed=${summary.completed} ` +
-    `requeued=${summary.requeued} dead=${summary.dead} recovered=${summary.recovered} ` +
+    `requeued=${summary.requeued} dead=${summary.dead} released=${summary.released} ` +
+    `recovered=${summary.recovered} ` +
     `| queue: pending=${s.pending} dead=${s.dead}`);
   process.exit(0);
 }
