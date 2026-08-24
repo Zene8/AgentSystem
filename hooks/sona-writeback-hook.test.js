@@ -189,9 +189,17 @@ test('logRoutingActual: uses the pointer hash verbatim when present, ignoring tr
   const realLog = path.join(os.homedir(), 'agent-memory', 'nexus', 'routing-log.jsonl');
   const raw = fs.readFileSync(realLog, 'utf8');
   const lines = raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
-  const match = lines.find(l => l.promptHash === 'pointerhash012345');
+  // #480 (test hazard, not a hook bug): 'pointerhash012345' is a literal reused across every
+  // run of this suite against the real, append-only, never-truncated routing-log.jsonl, so
+  // OLDER runs' records (written before this test existed / before hashSource existed) share
+  // the same hash. findLast picks the record THIS run just appended, not a stale one.
+  const match = lines.findLast(l => l.promptHash === 'pointerhash012345');
   assert.ok(match, 'expected logRoutingActual to log the pointer hash verbatim');
   assert.equal(match.agent, 'Friday');
+  // #480: pointer-sourced hashes must be tagged hashSource: 'pointer' — this is what lets
+  // routing-report.js's checkRoutingLog() treat this record as reliable evidence the join
+  // mechanism works, distinguishing it from pre-#473 legacy/fallback-hashed records.
+  assert.equal(match.hashSource, 'pointer');
 });
 
 test('logRoutingActual: falls back to transcript extraction when no pointer exists (never worse than today)', () => {
@@ -209,6 +217,9 @@ test('logRoutingActual: falls back to transcript extraction when no pointer exis
   const match = lines.find(l => l.promptHash === expectedHash);
   assert.ok(match, 'expected logRoutingActual to fall back to extractLastUserPromptText hash');
   assert.equal(match.agent, 'Friday');
+  // #480: a fallback-derived hash must be tagged hashSource: 'fallback' — routing-report.js
+  // must NOT count this record as evidence the pointer-hash join mechanism works.
+  assert.equal(match.hashSource, 'fallback');
 });
 
 // #155: no-signal transcripts must not produce a degenerate all-"unknown" episodic entry.

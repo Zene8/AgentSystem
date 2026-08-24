@@ -4,8 +4,8 @@ import { test } from 'node:test';
 import { targetDate } from './watchdog-target-date.js';
 
 // Issue #254: watchdog fired at 2026-08-07T00:49Z (4h49m late past midnight) and judged
-// 2026-08-07 — a day whose 05:00/13:00 triage slots hadn't run yet — instead of 2026-08-06,
-// whose window had actually closed.
+// 2026-08-07 — a day whose 05:00/15:00 triage slots hadn't run yet — instead of 2026-08-06,
+// whose window had actually closed. (Later slot moved 13:00 -> 15:00 UTC by #452.)
 test('late fire past midnight evaluates the previous day', () => {
   assert.equal(targetDate(new Date('2026-08-07T00:49:00Z')), '2026-08-06');
 });
@@ -21,12 +21,12 @@ test('late but same-day fire evaluates the same day', () => {
   assert.equal(targetDate(new Date('2026-08-07T23:00:00Z')), '2026-08-07');
 });
 
-// Exactly at the 13:00 UTC boundary: that slot has just closed, so today counts.
-test('fire exactly at 13:00 UTC evaluates the same day', () => {
-  assert.equal(targetDate(new Date('2026-08-07T13:00:00Z')), '2026-08-07');
+// Exactly at the 15:00 UTC boundary: that slot has just closed, so today counts.
+test('fire exactly at 15:00 UTC evaluates the same day', () => {
+  assert.equal(targetDate(new Date('2026-08-07T15:00:00Z')), '2026-08-07');
 });
 
-// Just before the boundary: the 13:00 slot has not closed yet, so yesterday counts.
-test('fire just before 13:00 UTC evaluates the previous day', () => {
-  assert.equal(targetDate(new Date('2026-08-07T12:59:59Z')), '2026-08-06');
+// Just before the boundary: the 15:00 slot has not closed yet, so yesterday counts.
+test('fire just before 15:00 UTC evaluates the previous day', () => {
+  assert.equal(targetDate(new Date('2026-08-07T14:59:59Z')), '2026-08-06');
 });
