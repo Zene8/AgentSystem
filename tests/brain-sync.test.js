@@ -15,7 +15,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { classifyCorruption, CORRUPT_MARK, REMOTE_CORRUPT_MARK } from '../tools/brain-sync.js';
+import {
+  classifyCorruption, CORRUPT_MARK, REMOTE_CORRUPT_MARK,
+  PER_HOST_LOG_DENYLIST, denyExcludePathspecs, isPerHostLog, porcelainPath,
+} from '../tools/brain-sync.js';
 
 const TOOL = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'brain-sync.js');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t'];
@@ -378,4 +381,119 @@ test('the two sentinel phrases are disjoint, and neither is the conflict phrase'
   for (const m of [CORRUPT_MARK, REMOTE_CORRUPT_MARK]) {
     assert.ok(!m.includes('merge conflict needs a human'));
   }
+});
+
+// --- Per-host append-only logs must never enter the shared history (#482) -------------------
+//
+// The weekly decay job died pushing `nexus/personal-brain/visits.log`. That file is written by
+// nearly every graph query on every host, it holds no durable fact, and it is absent from the brain
+// repo's .gitignore -- a repo this one cannot edit. So the first host to sync tracked it, and from
+// then on every host's own appends conflicted with every other host's, on every sync, forever. The
+// exclusion has to live here, in the tool, because that is the only side of the problem this repo
+// owns.
+
+test('an untracked per-host log is excluded from staging while real changes still sync', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    fs.writeFileSync(path.join(a, 'nexus', 'personal-brain', 'visits.log'), 'a\tb\t1\n');
+    fs.writeFileSync(path.join(a, 'nexus', 'personal-brain', 'nodes', 'fact.md'), 'durable\n');
+
+    const r = sync(a);
+    assert.equal(r.code, 0, r.err);
+
+    const tracked = git(a, ['ls-files']).split('\n');
+    assert.ok(tracked.includes('nexus/personal-brain/nodes/fact.md'),
+      'the authored node is the whole point of the sync and must be committed');
+    assert.ok(!tracked.some((f) => f.endsWith('visits.log')),
+      'visits.log entered the shared history -- #482 recurs on the next host that syncs');
+    // Still on disk: this is a live per-host log, not garbage to delete.
+    assert.ok(fs.existsSync(path.join(a, 'nexus', 'personal-brain', 'visits.log')));
+    assert.match(r.out, /per-host append-only log\(s\) excluded from staging/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('every denylisted name is excluded, at any depth, and nothing else is', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    for (const name of PER_HOST_LOG_DENYLIST) {
+      fs.writeFileSync(path.join(a, 'nexus', 'personal-brain', name), 'x\n');
+    }
+    // Depth matters: the pathspecs are `*name`, and git's default wildmatch lets `*` cross `/`.
+    fs.mkdirSync(path.join(a, 'nexus', 'agent-brain', 'leo'), { recursive: true });
+    fs.writeFileSync(path.join(a, 'nexus', 'agent-brain', 'leo', 'visits.log'), 'x\n');
+    // Deliberately NOT denylisted: the event ledgers are tracked on purpose, per the brain's own
+    // .gitignore comment. A denylist that swallowed these would silently stop syncing real state.
+    fs.mkdirSync(path.join(a, 'nexus', 'events'), { recursive: true });
+    fs.writeFileSync(path.join(a, 'nexus', 'events', 'done.jsonl'), '{}\n');
+
+    assert.equal(sync(a).code, 0);
+    const tracked = git(a, ['ls-files']).split('\n');
+    for (const name of PER_HOST_LOG_DENYLIST) {
+      assert.ok(!tracked.some((f) => f.endsWith(`/${name}`) || f === name), `${name} was tracked`);
+    }
+    assert.ok(tracked.includes('nexus/events/done.jsonl'),
+      'the event ledger is shared state and must keep syncing');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('a sync whose only changes are per-host logs commits nothing and still exits 0', () => {
+  // `git status --porcelain` collapses an untracked directory to a single entry, so a directory
+  // holding nothing but denylisted logs reads as a real change and then stages nothing. Committing
+  // an empty index exits 1, which brain-sync-run.js classifies as `error` -> exit 2 -> a red weekly
+  // run and no alert, over a file we chose to skip.
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    fs.mkdirSync(path.join(a, 'nexus', 'fresh-brain'), { recursive: true });
+    fs.writeFileSync(path.join(a, 'nexus', 'fresh-brain', 'visits.log'), 'x\n');
+
+    const before = git(a, ['rev-parse', 'HEAD']);
+    const r = sync(a);
+    assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+    assert.equal(git(a, ['rev-parse', 'HEAD']), before, 'an empty commit was created');
+    assert.match(r.out, /nothing committed/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('an ALREADY-TRACKED per-host log keeps syncing, and is reported loudly, not fixed', () => {
+  // Two halves, both load-bearing.
+  //
+  // Reported, not fixed: untracking is an index write against a private user-data repo. A tool that
+  // does that unasked, from a cron job, is a change nobody approved.
+  //
+  // Keeps syncing: refusing to stage a tracked file whose content changed leaves the tree
+  // permanently dirty, and the next pull then refuses to merge at all -- turning a conflict on one
+  // worthless log into a total sync outage. Strictly worse than the bug.
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    const p = path.join(a, 'nexus', 'personal-brain', 'visits.log');
+    fs.writeFileSync(p, 'first\n');
+    git(a, ['add', '-f', 'nexus/personal-brain/visits.log']);
+    git(a, ['commit', '-q', '-m', 'the mistake this test describes']);
+
+    fs.appendFileSync(p, 'second\n');
+    const r = sync(a);
+    assert.equal(r.code, 0, r.err);
+
+    assert.match(r.err, /WARNING/);
+    assert.match(r.err, /nexus\/personal-brain\/visits\.log/);
+    assert.match(r.err, /rm --cached/,
+      'the operator must be handed the exact command; a warning with no remedy is noise');
+    assert.match(r.err, /#482/);
+
+    assert.equal(git(a, ['status', '--porcelain']), '',
+      'a tracked denylisted log left dirty makes the next pull refuse the merge');
+    const status = sync(a, ['--status']);
+    assert.match(status.out, /tracked {3}1 per-host log\(s\) TRACKED/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('pathspec and basename helpers agree, and the exclusions are real git syntax', () => {
+  assert.deepEqual(denyExcludePathspecs(['visits.log']), [':(exclude)*visits.log']);
+  assert.ok(isPerHostLog('nexus/personal-brain/visits.log'));
+  assert.ok(isPerHostLog('nexus\\personal-brain\\visits.log'));
+  assert.ok(!isPerHostLog('nexus/personal-brain/nodes/visits.log.md'));
+  assert.ok(!isPerHostLog('nexus/events/done.jsonl'));
+  // Rename lines are `R  old -> new`; classifying on the OLD path would stage the new one.
+  assert.equal(porcelainPath('R  a.md -> nexus/b/visits.log'), 'nexus/b/visits.log');
+  assert.equal(porcelainPath('?? nexus/personal-brain/visits.log'), 'nexus/personal-brain/visits.log');
 });
