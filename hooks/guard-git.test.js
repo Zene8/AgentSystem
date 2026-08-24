@@ -3,7 +3,7 @@
 // skills/daily-triage/SKILL.md lists "Never push to `main` in any repo" among its hard limits, but
 // until #220 that was prose the model was asked to honour with nothing behind it: the hook blocked
 // force-pushes to main and let a plain one through. That became load-bearing when the unattended
-// 05:00/13:00 run was cleared to dispatch code items against a CLIENT repo — an agent could have
+// 05:00/15:00 run was cleared to dispatch code items against a CLIENT repo — an agent could have
 // written straight to a client's default branch.
 //
 // Run: node --test hooks/guard-git.test.js
