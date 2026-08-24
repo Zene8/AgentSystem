@@ -117,7 +117,7 @@ export async function spawnAgyPersistent({ prompt, repoPath, model, agent, conti
 // session exited while the real agy process kept running. Null routes /stop to the pid.
 async function spawnDirect({ args, repoPath, model, logPath, sessionId }) {
   return new Promise((resolve) => {
-    const agy = spawn('agy', args, { cwd: repoPath, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME } });
+    const agy = spawn('agy', args, { cwd: repoPath, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME } });
     agy.unref();
     const pid = agy.pid;
 
