@@ -48,6 +48,7 @@ pipeline was installed-but-inert (`CLAUDE.md` → Hooks). Same failure, differen
 | Session status lifecycle | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `pr-status-detect.sh` on `PostToolUse`. |
 | Routine dispatch + compliance | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `routine-dispatch.js` and `routine-compliance-hook.js`. |
 | Git safety guard | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `guard-git.sh` on `PreToolUse`. |
+| Inlined-secret guard | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `guard-secrets.js` on `PreToolUse` (#508). The bridge honours its exit-2 deny through `runHookCapture`, since `runHookSync` returns `''` for any non-zero exit and cannot tell a deny from an empty allow. |
 | WIP checkpointing | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `wip-checkpoint.sh` on `PostToolUse`. |
 | Continuous sync — memory, session-triggered | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `hooks/continuous-sync-hook.js` on start/stop. |
 | Continuous sync — code checkout fast-forward | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` running checkout fast-forward on `PreInvocation` (start phase). |
