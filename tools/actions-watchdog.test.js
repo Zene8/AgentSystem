@@ -34,8 +34,8 @@ test('down when enabled but the newest run is past the budget — a dead runner 
 });
 
 test('the twice-daily job floor does not false-alarm', () => {
-  // Longest legitimate gap: daily-triage at 05:00 and 13:00 UTC leaves a ~16h quiet stretch.
-  assert.equal(decide({ enabled: true, newestRunAt: hoursAgo(16), now: NOW }).down, false);
+  // Longest legitimate gap: daily-triage at 05:00 and 15:00 UTC leaves a ~14h quiet stretch.
+  assert.equal(decide({ enabled: true, newestRunAt: hoursAgo(14), now: NOW }).down, false);
 });
 
 test('down when there are no runs at all', () => {

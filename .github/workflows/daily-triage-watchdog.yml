@@ -1,6 +1,6 @@
 name: Daily Triage Watchdog
 
-# The daily-triage job (13:00 and 05:00 UTC) runs on the self-hosted runner. When that runner is offline the job
+# The daily-triage job (15:00 and 05:00 UTC) runs on the self-hosted runner. When that runner is offline the job
 # never starts at all: no run, no failure, no notification — the exact condition that let four
 # consecutive missed triages pass unnoticed. This workflow runs on GitHub-hosted infra so it can
 # see that absence from outside, the same way runner-health-check.yml does for the runner itself.
@@ -14,11 +14,12 @@ name: Daily Triage Watchdog
 
 on:
   schedule:
-    # 20:00 UTC. daily-triage now runs twice, at 05:00 and 13:00 UTC, and GitHub's scheduler
-    # regularly fires 1-4 hours late under load (observed here: a `0 7 * * *` schedule firing at
-    # 09:00, 10:32 and 11:21). 20:00 leaves the later run ~7h of slack before this calls it missing,
-    # which is what prevents false outage reports. Only ONE of the day's runs needs to have
-    # succeeded, so an early success already covers a drifting later one.
+    # 20:00 UTC. daily-triage now runs twice, at 05:00 and 15:00 UTC (moved from 13:00 by #452),
+    # and GitHub's scheduler regularly fires 1-4 hours late under load (observed here: a
+    # `0 7 * * *` schedule firing at 09:00, 10:32 and 11:21). 20:00 leaves the later run ~5h of
+    # slack before this calls it missing, which is what prevents false outage reports. Only ONE of
+    # the day's runs needs to have succeeded, so an early success already covers a drifting later
+    # one.
     - cron: '0 20 * * *'
   workflow_dispatch: {}
 
@@ -49,7 +50,7 @@ jobs:
           set +e -uo pipefail
           # NOT `date -u +%F`: that breaks the moment this run fires late enough to cross
           # midnight UTC (issue #254 — see tools/watchdog-target-date.js for the full story and
-          # the regression test). This asks "what's the most recent day whose 13:00 UTC triage
+          # the regression test). This asks "what's the most recent day whose 15:00 UTC triage
           # slot has already closed" instead of "what UTC date is it right now".
           today=$(node tools/watchdog-target-date.js)
 

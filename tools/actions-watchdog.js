@@ -31,9 +31,10 @@ import { agentMemoryRoot } from './graph/graph-lib.js';
 
 export const ALERT_KEY = 'actions-down';
 
-// Quiet-period budget. The repo's own floor is the twice-daily `daily-triage` job (13:00 and 05:00
-// UTC), so the longest legitimate gap between runs is ~16h. 24h clears that with margin — a real
-// outage is caught within a day, and an ordinary quiet weekend never pages anyone.
+// Quiet-period budget. The repo's own floor is the twice-daily `daily-triage` job (15:00 and 05:00
+// UTC, moved from 13:00 by #452), so the longest legitimate gap between runs is ~14h. 24h clears
+// that with margin — a real outage is caught within a day, and an ordinary quiet weekend never
+// pages anyone.
 export const DEFAULT_MAX_AGE_HOURS = 24;
 
 // #313: the watchdog only ever spoke when it raised an alert, so a dead hourly timer and a healthy

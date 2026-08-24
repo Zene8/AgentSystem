@@ -136,3 +136,35 @@ test('publish: rejects unknown types, non-object payloads, and oversized payload
   assert.throws(() => bus.publish({ type: 'noop', payload: 'a string' }, root), /plain object/);
   assert.throws(() => bus.publish({ type: 'noop', payload: { big: 'x'.repeat(70000) } }, root), /too large/);
 });
+
+test('inbound-item: publishes, round-trips its envelope, and drains like any other type', () => {
+  const root = tmpRoot();
+  const envelope = {
+    source: 'github',
+    externalId: 'notification-12345',
+    ts: '2026-08-22T10:00:00.000Z',
+    actor: 'Zene8/AgentSystem',
+    subject: 'CI failed on main',
+    body: 'sam-audit.yml failed',
+    url: 'https://github.com/Zene8/AgentSystem/actions/runs/1',
+  };
+  const evt = bus.publish({ type: 'inbound-item', source: 'inbound/github', payload: { envelope } }, root);
+  assert.equal(evt.type, 'inbound-item');
+
+  const claim = bus.claimNext(root);
+  assert.equal(claim.event.type, 'inbound-item');
+  assert.deepEqual(claim.event.payload.envelope, envelope);
+  bus.complete(claim, root, { verdict: 'action' });
+  assert.equal(bus.stats(root).done, 1);
+});
+
+test('inbound-item: a failing classifier backs off and dead-letters, it does not vanish', () => {
+  const root = tmpRoot();
+  bus.publish({ type: 'inbound-item', payload: { envelope: { source: 'gmail' } }, maxAttempts: 2 }, root);
+  assert.equal(bus.fail(bus.claimNext(root), 'classifier timeout', root), 'requeued');
+  // Backoff means it is not immediately eligible again — that is what stops a poll storm.
+  assert.equal(bus.claimNext(root), null);
+  const later = Date.now() + bus.BACKOFF_BASE_MS * 2;
+  assert.equal(bus.fail(bus.claimNext(root, later), 'classifier timeout', root, later), 'dead');
+  assert.equal(bus.stats(root).dead, 1);
+});

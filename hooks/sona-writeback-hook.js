@@ -287,7 +287,15 @@ function logRoutingActual(facts, transcriptPath) {
     // UserPromptSubmit time — identical by construction, no transcript-text reconstruction.
     // Fall back to the #351 last-user-prompt extraction only when the pointer is missing,
     // stale, or unreadable, so this change can never make the join worse than it is today.
+    //
+    // #480: record WHICH path produced the hash as `hashSource`. The pointer path shares the
+    // exact hash memory-router.js minted for this turn, so it's the only mechanism trusted to
+    // join; the fallback re-derives from transcript text (the #351 failure mode) and is kept
+    // only so telemetry is never worse than before #473. routing-report.js's --check predicate
+    // uses hashSource to tell "reliable data that still doesn't join" (real regression) apart
+    // from "only legacy/fallback-hashed actuals exist yet" (expected, self-healing) — see #480.
     let hash = readHashPointer(transcriptPath);
+    let hashSource = 'pointer';
     if (!hash) {
       // #351: hash the LAST user prompt (the turn that just completed), not the first — see
       // extractLastUserPromptText's comment for why that's the one memory-router.js's hint
@@ -295,11 +303,13 @@ function logRoutingActual(facts, transcriptPath) {
       const lastPrompt = extractLastUserPromptText(transcriptPath);
       if (!lastPrompt) return;
       hash = promptHash(lastPrompt);
+      hashSource = 'fallback';
     }
     logRoutingEvent({
       ts: new Date().toISOString(),
       promptHash: hash,
       agent: (facts && facts.agent) || 'unknown',
+      hashSource,
     });
   } catch {
     // Non-fatal.

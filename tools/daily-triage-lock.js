@@ -26,8 +26,8 @@
 //
 // STALE_MS is set well above the skill's own 180-minute run cap (see the Caps table in
 // skills/daily-triage/SKILL.md) so an in-progress run is never mistaken for abandoned, and well
-// below the ~8h gap between scheduled runs (05:00/13:00 UTC), so a crashed run cannot block the
-// next legitimate one for long.
+// below the ~10h gap between scheduled runs (05:00/15:00 UTC, moved from 13:00 by #452), so a
+// crashed run cannot block the next legitimate one for long.
 //
 // #418: this lock is meant to be the SOLE arbiter of "is another run in progress" (the durable
 // fix from #402's own issue), but the arbiter is only correct if it can tell "another run" apart
@@ -46,7 +46,7 @@ import { isMainModule } from './is-main.js';
 
 export const LOCK_FILE = process.env.DAILY_TRIAGE_LOCK_FILE
   || join(tmpdir(), 'agentsystem-daily-triage.lock');
-export const STALE_MS = 200 * 60 * 1000; // 180min cap + slack, well under the ~8h schedule gap
+export const STALE_MS = 200 * 60 * 1000; // 180min cap + slack, well under the ~10h schedule gap
 
 export function acquire(lockFile = LOCK_FILE, staleMs = STALE_MS) {
   const runId = process.env.GITHUB_RUN_ID || null;
