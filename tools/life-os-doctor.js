@@ -22,8 +22,8 @@
 // degrade coverage, or stayed silent about them forever.
 
 import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { join, resolve, delimiter } from 'node:path';
+import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { isMainModule } from './is-main.js';
 
@@ -116,7 +116,78 @@ function listInstalledAgents() {
   } catch { return null; }
 }
 
+/**
+ * Resolve the claude binary to an absolute path. On Unix, tries a login shell first
+ * (since ~/.local/bin is added by shell rc in login context only). On Windows,
+ * consults PATH first with appropriate extensions. Falls back to well-known locations.
+ * Returns the absolute path or null.
+ * Used by both the presence check and the MCP probe so they agree on the binary location.
+ */
+export function resolveClaude() {
+  const isWin32 = platform() === 'win32';
+
+  // On Unix-like systems, try a login shell first — ~/.local/bin is added by shell rc only.
+  if (!isWin32) {
+    try {
+      if (existsSync('/bin/bash')) {
+        const path = execFileSync('bash', ['-lc', 'command -v claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+        if (path) return path;
+      }
+    } catch { /* fall through */ }
+  }
+
+  // On Windows, consult PATH with appropriate extensions before falling back.
+  if (isWin32) {
+    const pathDirs = (process.env.PATH || '').split(delimiter);
+    const candidates = ['claude.exe', 'claude.cmd', 'claude.bat', 'claude'];
+    for (const dir of pathDirs) {
+      if (!dir) continue;
+      for (const name of candidates) {
+        const path = join(dir, name);
+        if (existsSync(path)) return path;
+      }
+    }
+  }
+
+  // Fall back to well-known locations, checking existence explicitly.
+  // On Windows, include extensions; on Unix, use bare name.
+  const wellKnown = isWin32
+    ? [
+        resolve(HOME, '.local', 'bin', 'claude.exe'),
+        resolve(HOME, '.local', 'bin', 'claude.cmd'),
+        resolve(HOME, '.local', 'bin', 'claude.bat'),
+        resolve(HOME, '.local', 'bin', 'claude'),
+        resolve(HOME, '.cargo', 'bin', 'claude.exe'),
+        resolve(HOME, '.cargo', 'bin', 'claude.cmd'),
+        resolve(HOME, '.cargo', 'bin', 'claude.bat'),
+        resolve(HOME, '.cargo', 'bin', 'claude'),
+        resolve(HOME, 'bin', 'claude.exe'),
+        resolve(HOME, 'bin', 'claude.cmd'),
+        resolve(HOME, 'bin', 'claude.bat'),
+        resolve(HOME, 'bin', 'claude'),
+      ]
+    : [
+        resolve(HOME, '.local', 'bin', 'claude'),
+        resolve(HOME, '.cargo', 'bin', 'claude'),
+        resolve(HOME, 'bin', 'claude'),
+        '/usr/local/bin/claude',
+        '/usr/bin/claude',
+        '/opt/homebrew/bin/claude',
+      ];
+
+  for (const path of wellKnown) {
+    if (existsSync(path)) return path;
+  }
+
+  return null;
+}
+
 function which(bin) {
+  // Use the resolved absolute path for claude to match the probe's behavior.
+  if (bin === 'claude') {
+    return resolveClaude() !== null;
+  }
+  // For other binaries, use the original logic.
   try { execFileSync('command', ['-v', bin], { shell: '/bin/bash', stdio: 'pipe' }); return true; }
   catch { /* fall through */ }
   try { execFileSync('bash', ['-lc', `command -v ${bin}`], { stdio: 'pipe' }); return true; }
@@ -151,8 +222,14 @@ export function parseMcpList(text) {
 }
 
 function probeConnectors() {
+  const claudePath = resolveClaude();
+  if (!claudePath) {
+    // Binary not found. Return null to signal "CLI could not be run", which is different from
+    // "nothing is connected". This matches the semantic of the which() check above.
+    return null;
+  }
   try {
-    const out = execFileSync('claude', ['mcp', 'list'], { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync(claudePath, ['mcp', 'list'], { encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] });
     return parseMcpList(out);
   } catch (err) {
     // Partial output on timeout is still worth parsing.
