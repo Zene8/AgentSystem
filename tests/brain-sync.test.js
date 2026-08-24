@@ -496,4 +496,53 @@ test('pathspec and basename helpers agree, and the exclusions are real git synta
   // Rename lines are `R  old -> new`; classifying on the OLD path would stage the new one.
   assert.equal(porcelainPath('R  a.md -> nexus/b/visits.log'), 'nexus/b/visits.log');
   assert.equal(porcelainPath('?? nexus/personal-brain/visits.log'), 'nexus/personal-brain/visits.log');
+  // The caller trims the whole `git status --porcelain` output, so an unstaged-only first line
+  // arrives WITHOUT its leading space. A fixed slice(3) shifted the path by one character, the
+  // tracked-set lookup then missed, and a tracked dirty log was left unstaged -- a permanently
+  // dirty tree, i.e. the next pull refuses to merge at all.
+  assert.equal(porcelainPath('M nexus/personal-brain/visits.log'), 'nexus/personal-brain/visits.log');
+  assert.equal(porcelainPath(' M nexus/personal-brain/visits.log'), 'nexus/personal-brain/visits.log');
+  assert.equal(porcelainPath('MM nexus/a/visits.log'), 'nexus/a/visits.log');
+});
+
+// A tracked copy must not drag its untracked SIBLINGS into the history (#482, audit finding).
+//
+// `visits.log` is written once per brain, so the same basename lives at
+// nexus/personal-brain/visits.log AND nexus/agent-brain/<agent>/visits.log. The first version of
+// this fix carved the whole NAME out of the exclusion set as soon as any one copy was tracked —
+// which means the hosts already suffering from #482 would have started committing every other
+// brain's still-clean visits.log, seeding new permanent conflicts. The carve-out is path-exact.
+test('a tracked per-host log does not un-exclude its untracked siblings', () => {
+  const { base, hosts: [a] } = makeWorld();
+  try {
+    const tracked = path.join(a, 'nexus', 'personal-brain', 'visits.log');
+    fs.writeFileSync(tracked, 'first\n');
+    git(a, ['add', '-f', 'nexus/personal-brain/visits.log']);
+    git(a, ['commit', '-q', '-m', 'the pre-existing mistake']);
+
+    // Same basename, different brain, never tracked.
+    fs.mkdirSync(path.join(a, 'nexus', 'agent-brain', 'leo'), { recursive: true });
+    fs.writeFileSync(path.join(a, 'nexus', 'agent-brain', 'leo', 'visits.log'), 'x\n');
+    fs.appendFileSync(tracked, 'second\n');
+    fs.writeFileSync(path.join(a, 'nexus', 'personal-brain', 'nodes', 'fact.md'), 'durable\n');
+
+    const r = sync(a);
+    assert.equal(r.code, 0, r.err);
+
+    const files = git(a, ['ls-files']).split('\n');
+    assert.ok(files.includes('nexus/personal-brain/nodes/fact.md'), 'the authored node must sync');
+    assert.ok(!files.includes('nexus/agent-brain/leo/visits.log'),
+      'the untracked sibling was committed — #482 spreads to another path');
+    // The already-tracked one still syncs, or the tree stays dirty and the next pull refuses.
+    assert.ok(files.includes('nexus/personal-brain/visits.log'));
+    // The tracked copy must end STAGED (an unstaged tracked change is the dirty tree that makes the
+    // next pull refuse to merge). The sibling's directory legitimately stays untracked, and
+    // `git status` collapses it to one `?? nexus/agent-brain/` entry -- that entry IS the fix
+    // working, so asserting a totally clean tree here would assert the bug back in.
+    const left = git(a, ['status', '--porcelain']).split(/\s*[\r\n]+\s*/).filter(Boolean);
+    assert.deepEqual(left.filter((l) => !/^\?\?/.test(l)), [],
+      'tracked-and-dirty must end staged; a dirty tracked file makes the next pull refuse the merge');
+    assert.deepEqual(left, ['?? nexus/agent-brain/'],
+      'the only thing left may be the deliberately-excluded sibling');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
