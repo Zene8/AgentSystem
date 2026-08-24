@@ -140,15 +140,46 @@ export function claimNext(root, now) {
   return null;
 }
 
+// Strip a sensitive payload before it reaches an append-only log.
+//
+// done.jsonl and dead-letter.jsonl live under ~/agent-memory/nexus/events/, and that repo — private
+// though it is — syncs to every host. An inbound item's payload carries mail and chat bodies, which
+// belong in the classifier call and nowhere durable (see the "Privacy boundary" section of
+// docs/superpowers/specs/2026-08-22-inbound-event-triage-design.md). A producer opts in by setting
+// `_sensitive: true` on the payload; the queue file itself keeps the full payload, because the
+// dispatcher has to read it, and queue/ + processing/ are gitignored in the brain for that reason.
+//
+// The keys are listed rather than dropped silently, so a record still shows what was held.
+export function redactPayload(payload) {
+  if (!payload || typeof payload !== 'object' || payload._sensitive !== true) return payload;
+  return { _sensitive: true, redactedKeys: Object.keys(payload).filter(k => k !== '_sensitive').sort() };
+}
+
 // Mark a claimed event done: append to done.jsonl, remove the claim file.
 export function complete(claim, root, result) {
   const d = dirs(root);
   appendJsonl(d.done, {
     ...claim.event,
+    payload: redactPayload(claim.event.payload),
     completedAt: new Date().toISOString(),
     result: result === undefined ? null : result,
   });
   try { fs.unlinkSync(claim.claimFile); } catch { /* already gone */ }
+}
+
+// Put a claimed event back on the queue UNCHANGED: no attempt spent, no backoff.
+//
+// This is not a failure. It is "not now" — the kill switch (inbound PAUSED) is the caller. Routing
+// a pause through fail() would spend all three attempts and dead-letter the backlog, which is the
+// opposite of what a pause is for: the items must be waiting, intact, when it is lifted.
+export function release(claim, root) {
+  const d = ensureDirs(root);
+  const file = path.join(d.queue, path.basename(claim.claimFile));
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(claim.event, null, 2));
+  fs.renameSync(tmp, file);
+  try { fs.unlinkSync(claim.claimFile); } catch { /* already gone */ }
+  return 'released';
 }
 
 // Mark a claimed event failed. Below maxAttempts: requeue with exponential
@@ -162,7 +193,7 @@ export function fail(claim, err, root, now) {
 
   if (event.attempts >= event.maxAttempts) {
     const deadAt = new Date(nowMs).toISOString();
-    appendJsonl(d.dead, { ...event, deadAt });
+    appendJsonl(d.dead, { ...event, payload: redactPayload(event.payload), deadAt });
     appendJsonl(d.alerts, {
       ts: deadAt,
       level: 'error',

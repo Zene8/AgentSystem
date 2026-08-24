@@ -566,6 +566,10 @@ const OPS_TIMEOUT_MS = 60_000;
 // supply at most ONE extra argument, only where `argPattern` says so, and only if it matches —
 // so there is no path by which a caller composes a command of their own.
 const OP_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;   // routine ids, alert keys, agent names
+// A pause reason is free text written by the operator, so it is bounded by charset and length
+// rather than by shape. It is passed as one execFile argument and only ever written to a local
+// sentinel file — no shell, no interpolation.
+const OP_REASON = /^[\w][\w .,:'\"()\/-]{0,199}$/;
 const OPS = {
   'routines.list':      { group: 'Routines', label: 'List routines', script: 'routines.js', args: ['list'] },
   'routines.verify':    { group: 'Routines', label: 'Verify cron wiring', script: 'routines.js', args: ['verify'] },
@@ -588,6 +592,12 @@ const OPS = {
   'hooks.check':        { group: 'Fleet', label: 'Hooks — check drift', script: 'deploy-hooks.js', args: ['--check'] },
   'hooks.deploy':       { group: 'Fleet', label: 'Hooks — deploy + register', script: 'deploy-hooks.js', args: [], mutates: true },
   'cost.today':         { group: 'Fleet', label: 'Session cost', script: 'session-cost.js', args: [] },
+  // Inbound triage. The kill switch is here on purpose: the whole point of a one-file pause is
+  // that it can be thrown from a phone when automated triage starts acting wrong, with no ssh
+  // and no deploy. `inbound.status` is the read that tells you whether it took.
+  'inbound.status':     { group: 'Inbound', label: 'Kill switch — status', script: 'inbound/pause.js', args: ['status'] },
+  'inbound.pause':      { group: 'Inbound', label: 'Kill switch — PAUSE dispatch', script: 'inbound/pause.js', args: ['pause'], argPattern: OP_REASON, argHint: 'reason', mutates: true },
+  'inbound.resume':     { group: 'Inbound', label: 'Kill switch — resume dispatch', script: 'inbound/pause.js', args: ['resume'], mutates: true },
 };
 
 // Ops run as a child node process, never through a shell, and always with a hard timeout —

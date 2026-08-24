@@ -168,3 +168,72 @@ test('inbound-item: a failing classifier backs off and dead-letters, it does not
   assert.equal(bus.fail(bus.claimNext(root, later), 'classifier timeout', root, later), 'dead');
   assert.equal(bus.stats(root).dead, 1);
 });
+
+// --- release: "not now" without spending an attempt (kill switch) ---
+
+test('release: returns a claimed event to the queue unchanged, immediately re-claimable', () => {
+  const root = tmpRoot();
+  bus.publish({ type: 'inbound-item', payload: { n: 1 } }, root);
+  const claim = bus.claimNext(root);
+  const attemptsAtClaim = claim.event.attempts;
+
+  assert.equal(bus.release(claim, root), 'released');
+  assert.equal(fs.existsSync(claim.claimFile), false, 'processing claim is gone');
+
+  const pending = bus.listPending(root);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].event.id, claim.event.id);
+  assert.equal(pending[0].event.attempts, attemptsAtClaim,
+    'release must not spend an attempt — only fail() does');
+  assert.equal(pending[0].event.nextAttemptAt, claim.event.nextAttemptAt,
+    'release must not impose backoff — a pause is not a failure');
+
+  // And it is claimable right now, not after a backoff window.
+  assert.equal(bus.claimNext(root).event.id, claim.event.id);
+});
+
+test('release: a paused event never reaches the dead-letter or done logs', () => {
+  const root = tmpRoot();
+  bus.publish({ type: 'inbound-item', payload: { n: 1 } }, root);
+  for (let i = 0; i < bus.DEFAULT_MAX_ATTEMPTS + 2; i += 1) {
+    bus.release(bus.claimNext(root), root);
+  }
+  const s = bus.stats(root);
+  assert.equal(s.pending, 1);
+  assert.equal(s.dead, 0);
+  assert.equal(s.done, 0);
+});
+
+// --- redactPayload: bodies must not reach the synced append-only logs ---
+
+test('redactPayload: leaves an ordinary payload alone', () => {
+  const p = { a: 1, b: 'two' };
+  assert.equal(bus.redactPayload(p), p);
+  assert.equal(bus.redactPayload(null), null);
+  assert.equal(bus.redactPayload('str'), 'str');
+});
+
+test('redactPayload: a _sensitive payload keeps only its key names', () => {
+  const out = bus.redactPayload({ _sensitive: true, body: 'private email text', url: 'u' });
+  assert.deepEqual(out, { _sensitive: true, redactedKeys: ['body', 'url'] });
+  assert.equal(JSON.stringify(out).includes('private email text'), false);
+});
+
+test('complete: a _sensitive payload is redacted in done.jsonl', () => {
+  const root = tmpRoot();
+  bus.publish({ type: 'inbound-item', payload: { _sensitive: true, body: 'SECRET-BODY' } }, root);
+  bus.complete(bus.claimNext(root), root, { verdict: 'notify' });
+  const done = fs.readFileSync(path.join(root, 'done.jsonl'), 'utf8');
+  assert.equal(done.includes('SECRET-BODY'), false, 'body must never land in a synced log');
+  assert.equal(JSON.parse(done.trim()).payload.redactedKeys[0], 'body');
+});
+
+test('fail: a _sensitive payload is redacted in dead-letter.jsonl too', () => {
+  const root = tmpRoot();
+  bus.publish({ type: 'inbound-item', payload: { _sensitive: true, body: 'SECRET-BODY' }, maxAttempts: 1 }, root);
+  const outcome = bus.fail(bus.claimNext(root), new Error('classifier down'), root);
+  assert.equal(outcome, 'dead');
+  const dead = fs.readFileSync(path.join(root, 'dead-letter.jsonl'), 'utf8');
+  assert.equal(dead.includes('SECRET-BODY'), false);
+  assert.deepEqual(JSON.parse(dead.trim()).payload, { _sensitive: true, redactedKeys: ['body'] });
+});
