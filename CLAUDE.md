@@ -223,7 +223,7 @@ See `docs/memory-and-routing-redesign.md` → "Routines engine".
 ## Life OS daily cadence
 
 Two stages. **Stage 1 (~14:05 UTC)** is a Grok Task, external to this repo: it triages mail/calendar and
-archives a brief with a machine-readable `handoff:` block. **Stage 2 (13:00 and 05:00 UTC — 06:00 and 22:00 Pacific)** is the `daily-triage`
+archives a brief with a machine-readable `handoff:` block. **Stage 2 (15:00 and 05:00 UTC — 08:00 and 22:00 Pacific)** is the `daily-triage`
 job in `scheduled-tasks.yml` — Jarvis reads that handoff, covers Beeper/Discord/GitHub, executes
 AI-actionable items as **draft PRs only**, and writes `$LIFE_REPO/closeouts/YYYY-MM-DD.md`, which
 Mission Control's `GET /briefing` serves.
@@ -249,8 +249,12 @@ Mission Control's `GET /briefing` serves.
   `YYYY-MM-DD.md`. The on-disk copy at `$LIFE_REPO/briefings/YYYY-MM-DD.md` is a different,
   correctly-suffixed file; do not conflate the two. Stage 2 searching Drive for `<date>.md` matches
   nothing and reads as "stage 1 never ran." Stage 1 also actually fires ~14:05 UTC, not the
-  documented 06:00, so the 05:00 UTC stage-2 run can never see a same-day brief inside its 3h
-  freshness window regardless of the naming bug. (2) **Intermittent missing archive** (#233 —
+  documented 06:00 — see #452, which moved the 13:00 UTC stage-2 slot to 15:00 UTC because it had
+  the identical defect the issue named for 05:00, just less obviously (13:00 is also before
+  14:05). The 05:00 UTC slot itself is unfixable by rescheduling: it is the evening Pacific
+  check-in, ~15h after stage 1's single daily run, so it can never see a same-day brief inside its
+  3h freshness window by design and always falls back — that is expected, not a signal of a missed
+  stage 1, and is independent of the naming bug below. (2) **Intermittent missing archive** (#233 —
   its premise is corroborated, not false): on 2026-08-16, confirmed by the `noreply@x.ai` Gmail
   digest arriving on schedule, stage 1 ran and archived nothing to Drive under any name; the same
   gap shape recurs on 2026-08-14 and every date 08-04 through 08-10, per a folder listing

@@ -184,3 +184,26 @@ test('weekly-trust-scores does not pass --allow-empty, so a missing run-log fail
       'this job — it stays green forever even if agent-dispatch.yml stops writing run-log (#405).'
   );
 });
+
+test('a daily-triage cron slot lands inside the 3h freshness window after stage 1 (#452)', () => {
+  // Stage 1 (Grok Tasks, external) archives the day's brief at ~14:05-14:21 UTC in practice, not
+  // the documented 06:00 (observed Drive createdTime across five days). The daily-triage skill
+  // only accepts a handoff whose age <= 3h, so a stage-2 slot that fires before stage 1 has run
+  // can NEVER see a fresh brief and reports the degraded fallback sweep every day by construction
+  // — the exact defect #452 named for the old 13:00 UTC slot (13:00 < 14:05, always stale) as well
+  // as the 05:00 one it was filed against. This asserts at least one cron fires after 14:05 UTC
+  // and within the 3h window (i.e. before 17:05 UTC), so the fix can't silently regress.
+  const STAGE1_FIRE_HOUR = 14 + 21 / 60; // latest observed fire, 14:21 UTC
+  const FRESHNESS_HOURS = 3;
+  const src = read('scheduled-tasks.yml');
+  const schedule = src.slice(src.indexOf('  schedule:'), src.indexOf('  workflow_dispatch:'));
+  const hours = [...schedule.matchAll(/cron:\s*'0\s+(\d{1,2})\s+\*\s+\*\s+\*'/g)].map((m) => Number(m[1]));
+  assert.ok(hours.length >= 2, 'expected at least the two daily-triage crons — parse is stale');
+  const fresh = hours.some((h) => h >= STAGE1_FIRE_HOUR && h <= STAGE1_FIRE_HOUR + FRESHNESS_HOURS);
+  assert.ok(
+    fresh,
+    `no daily-triage cron hour (${hours.join(', ')}) falls within [${STAGE1_FIRE_HOUR}, ` +
+      `${STAGE1_FIRE_HOUR + FRESHNESS_HOURS}] UTC — every stage-2 run will report a stale/missing ` +
+      `handoff and fall back, hiding a genuinely missed stage 1 (#452).`
+  );
+});

@@ -148,39 +148,39 @@ const MIN_SAMPLE = 15;
 // existed, there's nothing to fail to join — and reporting it as drift paged every single day
 // with no fix available. Same logic applies below MIN_SAMPLE: too few records to tell "empty by
 // construction" apart from "minting mismatch" with any confidence, so treat it as inconclusive.
+// #480: on 2026-08-22, --check reported blind on the real log even though the join mechanism
+// itself is fine: all 7 existing actual-agent records predate commit 63ad978 (#473/#474), which
+// made sona-writeback-hook.js reuse memory-router.js's exact pointer-minted promptHash instead of
+// re-deriving one from transcript text. Those legacy actuals were hashed by the old,
+// already-known-unreliable mechanism and can NEVER join under the new one — that's stale pre-fix
+// data, not an ongoing defect, and the data-integrity constraint on this log (append-only, never
+// rewrite/delete/migrate) means it can't be fixed up. sona-writeback-hook.js now tags each actual
+// record with `hashSource` ('pointer' when it reused memory-router.js's pointer hash, 'fallback'
+// when re-derived from transcript text); only 'pointer' records count as "the actual side is
+// reliably populated" below. Legacy/untagged actuals still count toward totalRecords/actualCount
+// and are still allowed to join if they happen to match (joinRecords never filters on
+// hashSource) — they simply stop being treated as proof the join mechanism should be working.
 export function checkRoutingLog(logPath) {
   const path = logPath || ROUTING_LOG_PATH;
   if (!existsSync(path)) {
-    return { blind: false, reason: null, totalRecords: 0, joinedRecords: 0 };
+    return { blind: false, reason: null, notice: null, totalRecords: 0, joinedRecords: 0 };
   }
   let raw;
   try {
     raw = readFileSync(path, 'utf8');
   } catch {
-    return { blind: false, reason: null, totalRecords: 0, joinedRecords: 0 };
+    return { blind: false, reason: null, notice: null, totalRecords: 0, joinedRecords: 0 };
   }
   const lines = raw.split('\n').filter(l => l.trim());
   if (lines.length === 0) {
-    return { blind: false, reason: null, totalRecords: 0, joinedRecords: 0 };
+    return { blind: false, reason: null, notice: null, totalRecords: 0, joinedRecords: 0 };
   }
   const records = loadRecords(path);
   if (records.length === 0) {
-    return { blind: true, reason: `${lines.length} line(s) present but 0 parsed as valid JSON`, totalRecords: 0, joinedRecords: 0 };
+    return { blind: true, reason: `${lines.length} line(s) present but 0 parsed as valid JSON`, notice: null, totalRecords: 0, joinedRecords: 0 };
   }
   const joined = joinRecords(records);
-  if (joined.length > 0) {
-    return { blind: false, reason: null, totalRecords: records.length, joinedRecords: joined.length };
-  }
-  // Zero join from here down — the ambiguous case. Check the sample floor first: below it, there
-  // aren't enough records to distinguish "empty by construction" from "minting mismatch" at all.
-  if (records.length < MIN_SAMPLE) {
-    return {
-      blind: false,
-      reason: `only ${records.length} record(s) parsed — below the ${MIN_SAMPLE}-record floor to evaluate join health`,
-      totalRecords: records.length,
-      joinedRecords: 0,
-    };
-  }
+
   // Classify exactly as joinRecords() does -- `hint` wins, `agent` only as an else-if. Counting
   // the two sides with independent hasOwnProperty checks would put a record carrying BOTH fields
   // on both sides, so it would read as "both sides populated" while joinRecords filed it under
@@ -188,22 +188,58 @@ export function checkRoutingLog(logPath) {
   // act on. The two must agree or this predicate is measuring a different log than the join is.
   let hintCount = 0;
   let actualCount = 0;
+  let pointerActualCount = 0;
   for (const r of records) {
     if (!r || !r.promptHash) continue;
     if (Object.prototype.hasOwnProperty.call(r, 'hint')) hintCount += 1;
-    else if (Object.prototype.hasOwnProperty.call(r, 'agent')) actualCount += 1;
+    else if (Object.prototype.hasOwnProperty.call(r, 'agent')) {
+      actualCount += 1;
+      if (r.hashSource === 'pointer') pointerActualCount += 1;
+    }
+  }
+  // #480: hints exist, and every actual record present is legacy/untagged (hashSource !==
+  // 'pointer') — the join is not yet observable by construction, not evidence of drift. This is
+  // checked independent of MIN_SAMPLE and independent of whether a legacy record happens to join
+  // by coincidence: no volume of pre-#473 data makes the *current* mechanism's health observable.
+  const onlyLegacyActuals = hintCount > 0 && actualCount > 0 && pointerActualCount === 0;
+  const legacyNotice = () => `${hintCount} hint record(s), ${actualCount} actual record(s) parsed, ` +
+    `but 0 are hashSource:'pointer' — every actual record predates the #473 pointer-hash fix ` +
+    `(commit 63ad978), so the hint/actual join is not yet observable. Not drift — self-heals as ` +
+    `pointer-tagged actuals accumulate.`;
+
+  if (joined.length > 0) {
+    if (onlyLegacyActuals) {
+      return { blind: false, reason: null, notice: legacyNotice(), totalRecords: records.length, joinedRecords: joined.length };
+    }
+    return { blind: false, reason: null, notice: null, totalRecords: records.length, joinedRecords: joined.length };
+  }
+  // Zero join from here down — the ambiguous case. Check the sample floor first: below it, there
+  // aren't enough records to distinguish "empty by construction" from "minting mismatch" at all.
+  if (records.length < MIN_SAMPLE) {
+    return {
+      blind: false,
+      reason: `only ${records.length} record(s) parsed — below the ${MIN_SAMPLE}-record floor to evaluate join health`,
+      notice: null,
+      totalRecords: records.length,
+      joinedRecords: 0,
+    };
   }
   if (hintCount === 0 || actualCount === 0) {
     return {
       blind: false,
       reason: `${records.length} record(s) parsed but only one side of the join is populated (${hintCount} hint, ${actualCount} actual) — headless host, not drift`,
+      notice: null,
       totalRecords: records.length,
       joinedRecords: 0,
     };
   }
+  if (onlyLegacyActuals) {
+    return { blind: false, reason: null, notice: legacyNotice(), totalRecords: records.length, joinedRecords: 0 };
+  }
   return {
     blind: true,
-    reason: `${records.length} record(s) parsed (${hintCount} hint, ${actualCount} actual) but 0 hint/actual pairs share a promptHash`,
+    reason: `${records.length} record(s) parsed (${hintCount} hint, ${actualCount} actual, ${pointerActualCount} pointer-hashed) but 0 hint/actual pairs share a promptHash`,
+    notice: null,
     totalRecords: records.length,
     joinedRecords: 0,
   };
@@ -287,6 +323,14 @@ function main() {
     if (result.blind) {
       console.error(`routing-report --check: FAILED — ${result.reason}`);
       process.exitCode = 1;
+      return;
+    }
+    // #480: only-legacy-actuals is exit 0 (there is no action a human can take — rewriting the
+    // append-only log is forbidden and waiting is the fix) but still surfaced loudly as a GitHub
+    // Actions notice annotation, not silently folded into the plain "OK" line, so the condition
+    // stays visible without paging enforcement-drift-check's human-needed alert every day.
+    if (result.notice) {
+      console.log(`::notice::routing-report --check: OK — ${result.notice}`);
       return;
     }
     // #466: a non-blind result can now carry a reason (headless host, below the sample floor).
