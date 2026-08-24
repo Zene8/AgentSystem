@@ -263,6 +263,29 @@ Mission Control's `GET /briefing` serves.
   since a wrongly-named file still shows up in a listing. The Gmail digest is a ran/didn't-run
   signal only, nothing more: its body is truncated after a few hundred characters and ends in a
   "Continue reading" link to grok.com, so it cannot substitute for the archived brief.
+- **The handoff contract can break even when the archive write succeeds (#417).** A brief can land
+  in Drive on schedule, readable, and still carry no `handoff:` block at all — distinct from #233
+  (the write itself failing) and from staleness (the block present but `generated_at` too old).
+  `skills/daily-briefing/handoff-schema.md` is the contract both stages read; `portable-prompt.md`
+  STEP 4 is what's supposed to emit it. Because those files are gitignored (#187) and stage 1 runs
+  outside this repo's git history on Grok Tasks, a drifted copy of the prompt can silently stop
+  emitting the block with nothing here to catch it. Two changes close the loop:
+  - **Provenance marker.** `portable-prompt.md` STEP 0 stamps `<!-- life-os-stage1
+    prompt_version=<version> slot=<slot> -->` as the literal first line of every brief,
+    unconditionally — before any other content, so it survives a run that never reaches STEP 4.
+    The same values are duplicated into `handoff.provenance` (STEP 4) when the block is written at
+    all. `skills/daily-triage/SKILL.md` STEP 1 reads the first-line marker regardless of whether
+    the handoff block parses, and reports it (or its absence) in the closeout's Coverage section —
+    an out-of-date or missing marker on a post-2026-08-23 brief means a stale/drifted copy of
+    `portable-prompt.md` ran, not just "the block was missing."
+  - **Three-way closeout status**, not one word. `SKILL.md` STEP 2 reports exactly one of
+    `fallback (no brief found)`, `fallback (brief has no handoff block)`, or `fallback (brief age
+    > 3h)` — the first is a scheduling problem external to this repo, the second is the contract
+    break this issue is about, the third is normal staleness (see the 05:00 UTC slot note above).
+    A missing-block brief still degrades gracefully: stage 2 derives `date` from the filename/title
+    and `generated_at` from the Drive file's `createdTime`, extracts items from the Markdown
+    headers, and still runs the fallback sweep and reports the contract break — degrading, not
+    silently treating a broken contract as equivalent to a clean handoff.
 
 ## Human-needed alerts
 
