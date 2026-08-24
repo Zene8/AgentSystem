@@ -451,34 +451,107 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Memory decay (every brain under ~/agent-memory/nexus)
+        id: decay
         shell: bash
         run: |
           node "${{ github.workspace }}/tools/memory-decay.js" --all
 
-      # The decayed graphs are only on this runner's disk until they are pushed. Same reasoning as
-      # the trust-scores push below; brain-sync.js is the one supported way to write to the brain
-      # repo (see its header for why git rather than a synced drive, and how it resolves the
-      # generated-graph.json conflict without hand-merging).
+      # The decayed graphs are only on this runner's disk until they are pushed. brain-sync.js is
+      # the one supported way to write to the brain repo (see its header for why git rather than a
+      # synced drive, and how it resolves the generated-graph.json conflict without hand-merging) —
+      # but it is invoked through tools/brain-sync-run.js, NOT directly, and that distinction is the
+      # #482 fix.
+      #
+      # This step used to be `run: node .../tools/brain-sync.js`. On 2026-08-23 the decay pass itself
+      # succeeded (`13 brain(s) processed, 0 edge(s) archived, 831 edge(s) active`) and this step
+      # died on a merge conflict in `nexus/personal-brain/visits.log`. brain-sync.js printed its
+      # sentinel `merge conflict needs a human` and exited 1 — and the raw call threw away
+      # everything that phrase exists for. brain-sync-run.js supplies three things a raw call cannot:
+      #
+      #   1. the sync lock (tools/sync-lock.js), so the host's own 15-minute brain-sync timer firing
+      #      mid-job cannot run a second brain-sync in the same working tree;
+      #   2. classification — the conflict phrase becomes exit 3 rather than an anonymous exit 1,
+      #      and a corrupt object database is told apart from a merge that needs finishing;
+      #   3. the correctly-keyed alert: `brain-sync-conflict-<hostname>`, per host, whose body names
+      #      the conflicting paths and the exact commands to resolve them.
+      #
+      # Exit-code handling follows the #467 precedent (a correct refusal must not read as a broken
+      # runner), with the same trap #467 identified and the same answer: exit 0 here makes success()
+      # true, so `Clear the human-needed alert` is gated on the DECAY step's own outcome rather than
+      # on the job's, and cannot be made true by a push that never happened.
+      #
+      #   0  synced, up to date, or another sync held the lock              -> pass
+      #   3  conflict or corruption; brain-sync-run ALREADY raised a
+      #      correctly-keyed, correctly-worded human-needed alert           -> pass, with a warning
+      #      Failing here would be a second red run and a second alert about one problem, and the
+      #      one it raises describes the brain checkout, which is what a person actually has to fix.
+      #   2  anything else — a real error, or no ~/agent-memory checkout
+      #      on this host                                                   -> FAIL
+      #      "could not tell" stays red. Exit 2 is precisely the bucket where nothing was diagnosed
+      #      and nobody was alerted, so a green run there is an outage nothing reports.
+      #
+      # `set +e` is not optional: Actions runs step bash with `-e`, so the non-zero exit would abort
+      # the step before this can classify it (#460).
       - name: Push the decayed brain
+        id: push
         shell: bash
-        run: node "${{ github.workspace }}/tools/brain-sync.js"
+        run: |
+          set -uo pipefail
+          set +e
+          node "${{ github.workspace }}/tools/brain-sync-run.js"
+          rc=$?
+          set -e
+          echo "brain-sync-run exit: $rc"
+          case "$rc" in
+            0)
+              echo "brain-sync-run: pushed, up to date, or skipped on the lock"
+              ;;
+            3)
+              echo "::warning::brain-sync-run could not sync ~/agent-memory: merge conflict or corrupt object database. It raised the per-host alert (brain-sync-conflict-$(hostname | tr '[:upper:]' '[:lower:]') / brain-sync-corrupt-...), which is the issue to act on. The decay pass itself succeeded; the decayed graphs stay on this host until the brain checkout is unblocked."
+              {
+                echo "### Decay pushed: NO — brain sync blocked"
+                echo
+                echo "The decay pass succeeded. \`brain-sync-run.js\` exited 3: the \`~/agent-memory\`"
+                echo "checkout on \`$(hostname)\` has a merge conflict or a damaged object database."
+                echo "It raised the per-host \`brain-sync-conflict-*\` / \`brain-sync-corrupt-*\` alert."
+                echo "That is the issue to act on — **not** \`memory-decay-down\`, which is about the"
+                echo "decay pass and is not failing."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::brain-sync-run.js exited $rc — not a classified conflict, so nothing was alerted. This is either a genuine error or there is no ~/agent-memory checkout on this host."
+              exit "$rc"
+              ;;
+          esac
 
+      # Gated on the decay step, not on the job. A conflict-classified push exits 0 (above), which
+      # makes success() true — resolving $ALERT_KEY off that would be the #467 trap: an alert closed
+      # by a run that proved nothing about it. steps.decay.outcome is the one thing this key means.
       - name: Clear the human-needed alert
-        if: success()
+        if: success() && steps.decay.outcome == 'success'
         shell: bash
         run: |
           node "${{ github.workspace }}/tools/human-needed.js" resolve "$ALERT_KEY" \
-            --comment "Weekly memory decay completed successfully at $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
+            --comment "Weekly memory decay pass completed successfully at $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
             || echo "::warning::could not clear the human-needed alert"
 
-      - name: Raise the human-needed alert (run failed)
+      # $ALERT_KEY is now about the DECAY PASS and nothing else.
+      #
+      # It used to also claim the push/sync failure mode, and on 2026-08-23 that made it lie: the
+      # body told a human `no brains found` means ~/agent-memory/nexus/ has no brain, run
+      # bootstrap-repo --all — on a run whose log said `13 brain(s) processed, 831 edge(s) active`.
+      # It sent someone to re-bootstrap 13 healthy brains over a merge conflict in a different repo
+      # (#482). With per-run failure emails off, a human-needed issue is the only signal there is, so
+      # a misdiagnosing alert is worse than no alert. The push failure now belongs to
+      # brain-sync-conflict-<host>, raised by brain-sync-run.js, which names the real paths.
+      - name: Raise the human-needed alert (decay pass failed)
         if: failure()
         shell: bash
         run: |
           node "${{ github.workspace }}/tools/human-needed.js" raise "$ALERT_KEY" \
             --title "[CI]: the weekly memory decay is failing" \
-            --why "The Sunday decay pass failed on \`$(hostname)\`. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). Note this job spent months reporting nothing at all, so a failure here is the alerting working, not a regression." \
-            --action "Read the run log. \`no brains found\` means ~/agent-memory/nexus/ has no brain with a graph.json — run \`node tools/bootstrap-repo.js --all ~/dev\` on \`$(hostname)\` to initialise personal-brain and agent-brain. A push failure means the ~/agent-memory checkout needs attention: \`node tools/brain-sync.js --status\`. Re-run with \`gh workflow run scheduled-tasks.yml -f job=weekly-memory-decay\`; this issue closes itself on the next successful run." \
+            --why "The Sunday decay pass failed on \`$(hostname)\`. See [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). This key covers **only** \`tools/memory-decay.js --all\` and the push step's unclassified errors. A merge conflict or a corrupt object database in \`~/agent-memory\` is NOT this issue: \`brain-sync-run.js\` classifies those itself and raises \`brain-sync-conflict-<host>\` or \`brain-sync-corrupt-<host>\` with the conflicting paths, and does not fail this job." \
+            --action "Open the run log and read which step failed. If **Memory decay** failed: \`no brains found\` means ~/agent-memory/nexus/ has no brain with a graph.json — run \`node tools/bootstrap-repo.js --all ~/dev\` on \`$(hostname)\`. Any other decay error names the brain and the graph file in the log. If **Push the decayed brain** failed, it exited with something other than 0 or 3, so nothing was diagnosed: run \`node ~/dev/AgentSystem/tools/brain-sync.js --status\` on \`$(hostname)\` and check the checkout exists at all. Re-run with \`gh workflow run scheduled-tasks.yml -f job=weekly-memory-decay\`; this issue closes itself on the next run whose decay pass succeeds." \
             || echo "::warning::could not raise the human-needed alert"
 
   # compute-trust-scores.js reads ~/agent-memory/nexus/run-log/* — local machine state.
