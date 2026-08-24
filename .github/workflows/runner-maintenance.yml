@@ -619,6 +619,48 @@ jobs:
 
           echo "watchdog liveness report changed nothing."
 
+      # ── routing-log diagnostics (#475) ──────────────────────────────────────────────────────
+      #
+      # enforcement-drift-check runs `routing-report.js --check` and only ever prints one summary
+      # line — "N record(s) parsed (H hint, A actual) but 0 hint/actual pairs share a promptHash"
+      # on this host. That line cannot say WHY the join is empty: whether the actuals are simply
+      # old (minted before #474's promptHash fix landed) and can never join no matter how correct
+      # today's minting is, or something else. `--diagnose` (#124) exists exactly to answer that,
+      # printing per-record timestamps, truncated hashes and the nearest hint/actual pairing — but
+      # it has never been reachable without a shell on a host `ssh` refuses. This step is that
+      # missing read path: it changes nothing, same as every other step in this job, and prints
+      # only what `--diagnose` already prints — truncated promptHash prefixes, hint/agent labels
+      # and timestamps, never prompt text (routing-log.jsonl never stores prompt text to begin
+      # with; see routing-report.js).
+      - name: Report routing-log diagnostics (read-only)
+        shell: bash
+        run: |
+          # Same reason as every other step here: GitHub runs this as `bash -e -o pipefail {0}`,
+          # and this step's own `set -uo pipefail` does not clear that inherited `-e` (#457, #460).
+          # `--diagnose` already handles a missing log and a below-floor sample size gracefully
+          # and always exits 0, but this step must never fail the job even if that changes.
+          set +e
+          set -uo pipefail
+          WS="$GITHUB_WORKSPACE"
+
+          out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
+          out ""
+          out "### routing-log diagnostics (#475)"
+          out ""
+          out "<details><summary>routing-report --diagnose --limit=25</summary>"
+          out ""
+          out '```'
+          NODE_BIN="$(command -v node 2>/dev/null || echo /usr/bin/node)"
+          DIAG_OUT="$("$NODE_BIN" "$WS/tools/routing-report.js" --diagnose --limit=25 2>&1)"
+          DIAG_RC=$?
+          printf '%s\n' "${DIAG_OUT:-<no output>}" | tee -a "$GITHUB_STEP_SUMMARY"
+          out '```'
+          out "(exit $DIAG_RC)"
+          out "</details>"
+
+          echo "routing-log diagnostics report changed nothing."
+
   # ── repair-brain ───────────────────────────────────────────────────────────────────────────
   #
   # The dangerous one. The runner's ~/agent-memory may hold commits that exist on NO other host —
@@ -865,6 +907,8 @@ jobs:
           set -uo pipefail
           BRAIN="$HOME/agent-memory"
 
+          out() { printf '%s\n' "$*" | tee -a "$GITHUB_STEP_SUMMARY"; }
+
           HEAD_OK=1
           git -C "$BRAIN" rev-parse HEAD >/dev/null 2>&1 || HEAD_OK=0
           OLD_HEAD="$(git -C "$BRAIN" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -883,16 +927,62 @@ jobs:
 
           echo "$reasons"
 
+          # ── REFUSAL, not a fault (#466) ──────────────────────────────────────────────────────
+          # This exited 1 until #466 and it was the single largest source of red Runner
+          # Maintenance runs — 5 of the last 12 failures, and the ones inspected were guards
+          # working exactly as designed. Run 32202379825 is the specimen: dispatched by a human
+          # off the still-open #433, which described corruption that was real on 2026-08-16 and
+          # had since healed. The brain on baselyserver was `branch main, behind/ahead 0 0`
+          # (confirmed in run 32203586238). The guard was RIGHT, the host was healthy, and the
+          # channel emailed a failure anyway. A red run for "I checked, and correctly declined to
+          # act" trains the reader to ignore the channel, which is how a real outage gets missed.
+          #
+          # So this specific shape — precondition checked, proven NOT met, nothing attempted,
+          # host byte-for-byte as it was found — is a warning and exit 0. It is NOT a licence to
+          # green anything else in this job: the header's safety argument is unchanged, and a
+          # path that could not PROVE safety is still a fault that exits nonzero. Refusal is
+          # "proved the precondition is absent"; fault is everything else, including "could not
+          # tell".
+          #
+          # `refused=true` is load-bearing, not decoration. Exiting 0 makes the job SUCCESS, and
+          # "Clear the human-needed alert" is gated `if: success()` — so without this output that
+          # step would resolve $ALERT_KEY on a run that repaired nothing, trading an unwanted
+          # email for the loss of a real human-needed signal. Every step after this one is gated
+          # on it. Note we neither clear NOR raise on refusal: whatever alert stood before this
+          # dispatch (e.g. #433) is left exactly as it was, for a human to close on the merits.
           if [ "$HEAD_OK" -eq 1 ] && [ "$FSCK_RC" -eq 0 ]; then
-            echo "::error::$BRAIN does not look corrupt (HEAD resolves, fsck --full is clean). Use mode=repair-brain for ordinary conflicts, or mode=status to inspect first."
-            exit 1
+            echo "refused=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::$BRAIN does not look corrupt, so reclone-brain refused to act and changed nothing. Use mode=repair-brain for ordinary conflicts, or mode=status to inspect first."
+            out ""
+            out "## reclone-brain REFUSED — nothing was done, nothing was broken"
+            out ""
+            out "**Checked:** whether \`$BRAIN\` shows the object-store damage this mode exists for —"
+            out "\`git rev-parse HEAD\` resolving, and \`git fsck --full\` for \`missing\`/\`empty\`/\`corrupt\`/\`error:\`."
+            out ""
+            out "**Found:** HEAD resolves (\`$OLD_HEAD\`) and \`fsck --full\` is clean. This checkout is healthy."
+            out ""
+            out "**Therefore:** this job stopped before its first mutation. The pre-refusal backup was already"
+            out "taken and is retained at \`${BACKUP:-<not taken>}\`; \`$BRAIN\` itself was not touched, not moved"
+            out "and not cloned over. No human-needed alert was raised or cleared by this run."
+            out ""
+            out "**Dispatch instead:**"
+            out "- \`mode=status\` — read-only; report the brain, canon and watchdog state first."
+            out "- \`mode=repair-brain\` — for ordinary conflicts and committed conflict markers, which is"
+            out "  the fault this checkout could plausibly have. reclone-brain is the escalation for a"
+            out "  damaged object store ONLY, and is not a shortcut around it."
+            out ""
+            out "_This run is green on purpose (#466): a guard that correctly declined to act is not a failure._"
+            exit 0
           fi
 
           echo "OLD_HEAD_OK=$HEAD_OK" >> "$GITHUB_ENV"
           echo "OLD_HEAD=$OLD_HEAD" >> "$GITHUB_ENV"
           echo "confirmed corrupt — proceeding to clone-and-prove"
 
+      # Every step below is gated on the #466 refusal output. `detect` exiting 0 without it would
+      # otherwise let the whole reclone sequence run against a checkout it just proved healthy.
       - name: Clone origin fresh, side-by-side — does not touch ~/agent-memory
+        if: steps.detect.outputs.refused != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -908,6 +998,7 @@ jobs:
           echo "cloned $SAFE_URL into $NEW"
 
       - name: Prove nothing local-only would be lost, then swap
+        if: steps.detect.outputs.refused != 'true'
         shell: bash
         run: |
           # `set +e` first and deliberately, same reason as the `status` probe (#457): GitHub
@@ -1038,8 +1129,10 @@ jobs:
 
           echo "reclone-brain completed. Corrupted checkout preserved at $CORRUPTED. Backup retained at ${BACKUP:-<not taken>}"
 
+      # `always()` so a failed swap is still photographed — but a refusal recloned nothing, so
+      # there is no "post-reclone" state to report and the refusal summary already said so (#466).
       - name: Post-reclone status
-        if: always()
+        if: always() && steps.detect.outputs.refused != 'true'
         shell: bash
         run: |
           set -uo pipefail
@@ -1047,14 +1140,22 @@ jobs:
           git -C "$BRAIN" log --oneline -5 2>/dev/null || true
           git -C "$BRAIN" fsck --full 2>&1 | head -20 || true
 
+      # The #466 trap, stated plainly: a refusal now exits 0, which makes the JOB succeed, which
+      # makes `success()` true. Ungated, this step would resolve $ALERT_KEY on a run that proved
+      # the brain healthy and repaired precisely nothing — turning a cosmetic email fix into the
+      # silent loss of a human-needed signal, which is strictly worse than the extra email. The
+      # alert may only be cleared by a reclone that actually completed.
       - name: Clear the human-needed alert
-        if: success()
+        if: success() && steps.detect.outputs.refused != 'true'
         shell: bash
         run: |
           node "$GITHUB_WORKSPACE/tools/human-needed.js" resolve "$ALERT_KEY" \
             --comment "runner-maintenance reclone-brain completed on $(hostname) at $(date -u +%Y-%m-%dT%H:%M:%SZ). Origin was cloned fresh after proving no local-only work would be lost. The corrupted checkout is preserved at ~/agent-memory-corrupted-$STAMP, not deleted." \
             || echo "::warning::could not clear the human-needed alert"
 
+      # Deliberately NOT gated on `refused` (#466): a refusal exits 0, so `failure()` is already
+      # false and this cannot fire. That is the intended outcome — on refusal this run neither
+      # raises nor clears, leaving whatever alert stood before the dispatch exactly as it was.
       - name: Raise the human-needed alert (reclone stopped)
         if: failure()
         shell: bash
@@ -2156,6 +2257,13 @@ jobs:
           # ── nothing to preserve is repair-install's case, not this one ───────────────────────
           DIRTY="$(git -C "$CANON" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
           if [ "$DIRTY" = "0" ]; then
+            # Already exit 0 before #466 — this only adds the ::warning:: so the refusal shows as
+            # an annotation on the run rather than living solely in the step summary. Same shape
+            # as reclone-brain's detect guard: precondition checked, proven absent, nothing done.
+            # No alert steps exist in this job, so there is nothing here that could be cleared.
+            echo "::warning::heal-canon refused to act and changed nothing: canon has no local edits to preserve. Dispatch repair-install instead."
+            out ""
+            out "## heal-canon REFUSED — nothing was done, nothing was broken"
             out ""
             out "canon has NO local edits — there is nothing for this mode to preserve."
             out "Dispatch \`repair-install\`: its bounded self-heal already handles the clean case"
