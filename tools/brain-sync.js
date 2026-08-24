@@ -147,7 +147,14 @@ export function isPerHostLog(p, list = PER_HOST_LOG_DENYLIST) {
  * the denylist is plain ASCII basenames.
  */
 export function porcelainPath(line) {
-  let rest = String(line || '').slice(3);
+  // NOT a fixed slice(3). `git status --porcelain` writes a two-char XY field then a space, but the
+  // caller trims the whole command output, which eats the leading space of an unstaged-only line
+  // (` M path`) and shifted the path by one character -- so a TRACKED dirty log read as a different
+  // path, missed the tracked-set carve-out, and was left unstaged. That is a permanently dirty tree,
+  // which is the total-sync-outage failure this file's comments warn about. `??` lines have no
+  // leading space, which is why only the tracked case broke.
+  const m = /^\s*([A-Z?!.]{1,2})\s+(.*)$/.exec(String(line || ''));
+  let rest = m ? m[2] : String(line || '').slice(3);
   const arrow = rest.indexOf(' -> ');
   if (arrow >= 0) rest = rest.slice(arrow + 4);
   return rest.replace(/^"|"$/g, '');
@@ -250,7 +257,7 @@ const dirtyAllLines = dirtyAll ? dirtyAll.split('\n') : [];
 // which is a person's decision, not a scheduled job's.
 const trackedPerHost = git(['ls-files', '--', ...denyMatchPathspecs()], { allowFail: true })
   .out.split('\n').filter(Boolean);
-const trackedBases = new Set(trackedPerHost.map((p) => p.split('/').pop()));
+const trackedPaths = new Set(trackedPerHost);
 
 // The exclusion applies only to names git is NOT already tracking, and that asymmetry is deliberate.
 // Refusing to stage a *tracked* file whose content changed leaves the working tree permanently
@@ -258,10 +265,18 @@ const trackedBases = new Set(trackedPerHost.map((p) => p.split('/').pop()));
 // into a total sync outage on that host, which is strictly worse than the bug. So: an untracked
 // per-host log is kept out of git forever (the fix), and an already-tracked one keeps syncing
 // exactly as before while the warning below tells a human the one command that ends it.
-const excludeNames = PER_HOST_LOG_DENYLIST.filter((n) => !trackedBases.has(n));
-const perHostDirty = dirtyAllLines.filter((l) => isPerHostLog(porcelainPath(l), excludeNames));
+// Path-exact, NOT by basename: `visits.log` is written per brain, so the same name exists at
+// nexus/personal-brain/visits.log and nexus/agent-brain/<agent>/visits.log. Carving the whole
+// NAME out because one copy is tracked would start committing every still-untracked sibling —
+// seeding the exact conflict this denylist exists to prevent, on the hosts already suffering it.
+function isExcludedPerHostPath(q, tracked = trackedPaths) {
+  // Both sides are git output (porcelain and ls-files), so both use forward slashes;
+  // isPerHostLog normalises either style for its own basename check.
+  return isPerHostLog(q) && !tracked.has(String(q || ''));
+}
+const perHostDirty = dirtyAllLines.filter((l) => isExcludedPerHostPath(porcelainPath(l)));
 const dirty = dirtyAllLines
-  .filter((l) => !isPerHostLog(porcelainPath(l), excludeNames)).join('\n');
+  .filter((l) => !isExcludedPerHostPath(porcelainPath(l))).join('\n');
 
 function reportTrackedPerHostLogs() {
   if (!trackedPerHost.length) return;
@@ -372,7 +387,11 @@ if (dirty && opt.pullOnly) {
   // NOT a bare `git add -A`. The exclusions are the #482 fix: a per-host append-only log that the
   // brain's .gitignore happens to miss would otherwise be tracked by the first host to sync, and
   // conflict on every host's every sync from then on.
-  git(['add', '-A', '--', '.', ...denyExcludePathspecs(excludeNames)]);
+  git(['add', '-A', '--', '.', ...denyExcludePathspecs()]);
+  // Those exclusions are name globs, and a git pathspec exclusion beats any positive pattern
+  // beside it — so an ALREADY-TRACKED log must be re-added by its exact path in a second call.
+  // Leaving it unstaged while dirty is what makes the next `git pull` refuse the merge.
+  if (trackedPerHost.length) git(['add', '--', ...trackedPerHost], { allowFail: true });
   // Belt and braces around the porcelain parsing above: `git status` collapses an untracked
   // *directory* to one entry, so a directory holding nothing but denylisted logs reads as a real
   // local change and then stages nothing. Committing an empty index fails with a bare exit 1, which
