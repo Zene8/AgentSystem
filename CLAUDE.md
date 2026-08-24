@@ -314,7 +314,7 @@ bash tools/install-actions-watchdog.sh --check  # exit 1 on drift; names WHICH f
 node tools/actions-watchdog.js --dry-run        # verdict only, changes nothing
 ```
 Living off Actions does not mean it cannot be **installed** by Actions, and that distinction is
-what #361 turned on: the timer had no repair channel on the host that refuses ssh, so the daily
+what #361 turned on: the timer had no repair channel on a host CI cannot reach, so the daily
 drift check reported a missing heartbeat for weeks with no way to act on it. `repair-install`
 (`runner-maintenance.yml -f mode=repair-install`) now installs it from the canonical checkout
 `$HOME/dev/AgentSystem` — never the runner workspace, whose path `actions/checkout` rewrites, which
@@ -322,6 +322,16 @@ would bake a rotting `ExecStart=` into the unit — and then gates on `--check`.
 disk, systemd `--user` bus unreachable) and exit 5 (`gh` missing or unauthenticated, nothing
 written) both fail the job and print the exact console command, because a repair that reports
 success for a timer that will never fire is the failure it was built to end.
+
+**"There is no ssh to that host" was false and load-bearing (#439).** It sat in
+`runner-maintenance.yml`'s header and in several alert bodies, and it justified filing host-state
+tasks as console-only when one ssh would have fixed them. A human reaches the runner host with
+`ssh basely@100.73.130.84` — plain ssh over the tailnet. The old claim named a different address
+and a wrong user, so the refusal was the address, not a closed port. `tailscale ssh` to this host
+fails host-key verification; use plain ssh. And `/home/basely/dev/AgentSystem` is a **symlink** to
+`/home/basely/AgentSystem` — one checkout, not two; reading it as two is the #362-class misread
+about which revision a unit executes. `runner-maintenance.yml` is still the right channel for
+AUTOMATION, which has no tailnet and no key — only its stated reason was wrong.
 
 **The installer refuses to install against an unauthenticated `gh`, and no caller may hand it a
 token.** Both watchdogs shell out to `gh`; the unit runs later with only `PATH` and `HOME`, so a

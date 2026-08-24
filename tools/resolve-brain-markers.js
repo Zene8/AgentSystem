@@ -8,15 +8,24 @@
 //   node tools/resolve-brain-markers.js --json          machine-readable report on stdout
 //   node tools/resolve-brain-markers.js --quiet         suppress the per-file lines
 //
-// Exit codes: 0 clean (or fully repaired) · 1 markers found (--check) or unresolvable · 2 bad usage.
+// Exit codes: 0 clean (or fully repaired) · 1 markers found (--check), unresolvable, or an
+//              unmerged path whose merge result cannot be proved lossless (#494) · 2 bad usage.
 //
 // ── Why this exists ──────────────────────────────────────────────────────────────────────────
 //
 // brain-sync.js runs `git add -A` BEFORE it pulls (#344). A half-merged working tree is just file
 // content to `add -A`, so `<<<<<<<` / `=======` / `>>>>>>>` get committed and pushed as data. It
 // hit 128 files in the brain repo. The one-off script that repaired them is promoted here so the
-// repair is reviewable, tested, and runnable from the dispatchable maintenance workflow — there is
-// no SSH to the runner that holds the affected checkout.
+// repair is reviewable, tested, and runnable from the dispatchable maintenance workflow.
+//
+// That last clause used to end "— there is no SSH to the runner that holds the affected
+// checkout", which is FALSE and was load-bearing (#439): ssh to baselyserver works, as
+// basely@100.73.130.84 over the tailnet. The usernames tried and failed in #439 were natha@,
+// nathan@, zene8@, ubuntu@ and nathanj@; the account is basely (/home/basely). `tailscale ssh`
+// does still fail host-key verification, so use plain ssh to the tailnet IP. The workflow remains
+// the right channel — it is auditable and needs no key on the calling host — but the reason is
+// convenience, not impossibility, and several alerts were wrongly filed as console-only human
+// tasks on the strength of the old wording.
 //
 // ── The two resolution rules (both lossless by construction) ─────────────────────────────────
 //
@@ -338,6 +347,144 @@ export function findCandidateFiles(root) {
   return walk(root, root, []);
 }
 
+// ── Unmerged-path guard (#494) ────────────────────────────────────────────────────────────────
+//
+// `findCandidateFiles` searches for the CONFLICT TOKEN, which makes "this path is unmerged" and
+// "this path carries markers" two different questions. The gap between them is a data-loss hole.
+//
+// On 2026-08-24 baselyserver's brain held `nexus/personal-brain/visits.log` as `UU` with all three
+// stages present, ZERO markers, and 25 lines: a process had truncated and restarted the log after
+// the merge stalled, and those 25 lines were disjoint from both merge sides (497 and 501 lines).
+// This tool reported `candidates=0` and exited 0 — entirely honestly, there were no markers to
+// repair. `repair-brain` then ran `git add -A` + `commit --no-edit`, which adopts whatever the
+// working tree holds as the merge result, so a 25-entry log would have replaced a 502-entry one on
+// every host, with a green exit code and an auto-closed alert.
+//
+// Two assertions close it. Both REFUSE rather than guess, and a refusal is a genuine fault that
+// exits non-zero: we could not prove the result is lossless. Per the #467 convention that is RED,
+// not a `::warning::` exit 0 — a warning here is indistinguishable from success to every caller.
+
+/** A checkout, as far as this tool is concerned. Also true for a worktree, where `.git` is a file. */
+export function isCheckout(root) {
+  return existsSync(join(root, '.git'));
+}
+
+/**
+ * Paths git reports as unmerged (`UU`, `AA`, `DU`, `UD`, …), repo-relative with forward slashes.
+ *
+ * Throws on a git failure rather than returning `[]`. "No unmerged paths" and "I could not ask"
+ * must never render as the same answer — that is the false green this whole guard exists to end.
+ */
+export function unmergedPaths(root) {
+  if (!isCheckout(root)) return [];
+  const out = execFileSync('git', ['-C', root, 'diff', '--name-only', '--diff-filter=U'], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return out.split('\n').filter(Boolean);
+}
+
+/**
+ * One merge stage of a path: 1 = common ancestor, 2 = ours/HEAD, 3 = theirs/incoming.
+ *
+ * An absent stage is normal (add/add conflicts have no `:1:`, delete/modify has no `:2:` or `:3:`)
+ * and is reported as `present: false`, which the superset check then has nothing to prove about.
+ * A binary stage is reported separately, because a line-wise proof is meaningless for one and
+ * silently skipping it would be a hole of exactly the shape being closed here.
+ */
+export function readStage(root, stage, rel) {
+  let buf;
+  try {
+    buf = execFileSync('git', ['-C', root, 'show', `:${stage}:${rel}`], {
+      maxBuffer: MAX_FILE_BYTES,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    return { present: false, binary: false, text: '' };
+  }
+  if (looksBinary(buf)) return { present: true, binary: true, text: '' };
+  return { present: true, binary: false, text: buf.toString('utf8') };
+}
+
+/** Non-blank lines, with conflict-marker lines dropped. The unit every proof here is stated in. */
+export function contentLines(text) {
+  return text
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== '')
+    .filter((l) => !RE_START.test(l) && !RE_BASE.test(l) && !RE_SEP.test(l) && !RE_END.test(l));
+}
+
+/**
+ * Prove the working-tree copy of an unmerged path lost nothing, line-wise.
+ *
+ * Required to be present in the result: every content line of stage :2: (ours), stage :3:
+ * (theirs), and — when supplied — the copy that was on disk BEFORE this tool rewrote it. That
+ * third source is the one that matters for #494: the truncated `visits.log` content existed
+ * nowhere else, so a union of ours and theirs alone would have dropped it silently.
+ *
+ * Stage :1: (the common ancestor) is deliberately NOT required, and asserting it would be a bug.
+ * A legitimate merge routinely drops a base line — one side edits `salience: 0.3` to `0.5` and the
+ * base value is correctly gone from the result. Requiring base ⊆ result would refuse ordinary
+ * edits, which is worse than useless: a guard that cries wolf on healthy merges gets bypassed.
+ * (Base ⊆ ours and base ⊆ theirs did hold for `visits.log`, and that is what proved it append-only
+ * by hand — but it is evidence about one file, not an invariant to enforce on every file.)
+ *
+ * @param {string} root
+ * @param {string} rel  repo-relative path
+ * @param {string|null} priorText  the on-disk copy before this run rewrote it, if it did
+ */
+export function verifySuperset(root, rel, priorText = null) {
+  const abs = join(root, rel);
+  if (!existsSync(abs)) {
+    return { ok: false, reason: 'the working-tree copy is missing, so the merge result cannot be proved lossless' };
+  }
+  let text;
+  try {
+    text = readFileSync(abs, 'utf8');
+  } catch (err) {
+    return { ok: false, reason: `unreadable, so the merge result cannot be proved lossless: ${err.message}` };
+  }
+
+  const have = new Set(contentLines(text));
+  const missing = [];
+  const checked = [];
+
+  for (const stage of [2, 3]) {
+    const s = readStage(root, stage, rel);
+    if (!s.present) continue;
+    if (s.binary) {
+      return { ok: false, reason: `stage :${stage}: is binary — a line-wise superset cannot be proved` };
+    }
+    const lines = contentLines(s.text);
+    const gone = lines.filter((l) => !have.has(l));
+    checked.push({ source: stage === 2 ? 'ours' : 'theirs', lines: lines.length, missing: gone.length });
+    for (const l of gone) missing.push({ source: stage === 2 ? 'ours' : 'theirs', line: l });
+  }
+
+  if (typeof priorText === 'string') {
+    const lines = contentLines(priorText);
+    const gone = lines.filter((l) => !have.has(l));
+    checked.push({ source: 'worktree-before-repair', lines: lines.length, missing: gone.length });
+    for (const l of gone) missing.push({ source: 'worktree-before-repair', line: l });
+  }
+
+  if (missing.length) {
+    const sample = missing.slice(0, 3).map((m) => `${m.source}: ${m.line.slice(0, 120)}`);
+    return {
+      ok: false,
+      reason:
+        `the resolved file is missing ${missing.length} content line(s) that exist on a merge side ` +
+        `or in the pre-repair working tree — refusing rather than commit a lossy merge. ` +
+        `First: ${sample.join(' | ')}`,
+      missing: missing.length,
+      checked,
+    };
+  }
+
+  return { ok: true, checked };
+}
+
 // ── Repair driver ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -353,6 +500,30 @@ export function repair(root, { check = false } = {}) {
   let repaired = 0;
   let blocks = 0;
 
+  // Ask git which paths are unmerged BEFORE touching anything. A failure here is fatal to the
+  // guard, so it is reported as unresolved (exit 1) rather than swallowed into an empty list.
+  /** @type {string[]} */
+  let unmerged = [];
+  let unmergedKnown = true;
+  try {
+    unmerged = unmergedPaths(root);
+  } catch (err) {
+    unmergedKnown = false;
+    unresolved.push({
+      file: '(repository)',
+      reason:
+        `cannot list unmerged paths, so no merge result can be proved lossless: ${err.message}`,
+    });
+  }
+  const unmergedSet = new Set(unmerged);
+
+  // What each unmerged path held on disk before this run rewrote it. Only that pre-repair copy can
+  // witness content that exists on neither merge side — the #494 shape.
+  /** @type {Map<string,string>} */
+  const priorText = new Map();
+  /** @type {Map<string,object>} */
+  const handled = new Map();
+
   for (const filePath of candidates) {
     let text;
     try {
@@ -363,6 +534,7 @@ export function repair(root, { check = false } = {}) {
     }
 
     const rel = relative(root, filePath).split(sep).join('/');
+    if (unmergedSet.has(rel)) priorText.set(rel, text);
 
     if (isGeneratedGraph(filePath)) {
       const parsed = parseSegments(text);
@@ -388,7 +560,9 @@ export function repair(root, { check = false } = {}) {
         });
         continue;
       }
-      files.push({ file: rel, strategy: 'generated', side: picked.side, blocks: conflictCount });
+      const entry = { file: rel, strategy: 'generated', side: picked.side, blocks: conflictCount };
+      files.push(entry);
+      handled.set(rel, entry);
       rebuildBrains.add(relative(root, join(filePath, '..')).split(sep).join('/'));
       if (!check) {
         writeFileSync(filePath, picked.text, 'utf8');
@@ -400,16 +574,74 @@ export function repair(root, { check = false } = {}) {
     const result = resolveText(text);
     if (!result.changed) continue; // token present but no complete block: leave it alone
     blocks += result.blocks;
-    files.push({
+    const entry = {
       file: rel,
       strategy: 'lines',
       blocks: result.blocks,
       dateBlocks: result.dateBlocks,
       unionBlocks: result.unionBlocks,
-    });
+    };
+    files.push(entry);
+    handled.set(rel, entry);
     if (!check) {
       writeFileSync(filePath, result.text, 'utf8');
       repaired++;
+    }
+  }
+
+  // ── The #494 guard, over every unmerged path ────────────────────────────────────────────────
+  //
+  // Runs AFTER the repair loop so the superset proof sees the content a caller is about to
+  // `git add`. In --check mode nothing was written, so there is nothing to prove about a file we
+  // would have rewritten; the "unmerged but marker-free" half still applies, because that verdict
+  // is about git's index and not about anything this tool wrote.
+  /** @type {Array<object>} */
+  const mergeChecks = [];
+  if (unmergedKnown) {
+    for (const rel of unmerged) {
+      const entry = handled.get(rel);
+
+      if (!entry) {
+        // THE HOLE. Unmerged, yet no complete conflict block was found — so nothing here knows what
+        // the merge result should be, and `git add -A` would adopt the working-tree copy verbatim.
+        mergeChecks.push({ file: rel, verdict: 'refused', reason: 'unmerged with no conflict markers' });
+        unresolved.push({
+          file: rel,
+          reason:
+            'unmerged in the index but carries no complete conflict block, so the merge result ' +
+            'cannot be determined. Do NOT `git add` it: the working-tree copy may be unrelated to ' +
+            'either merge side (this is #494 — a truncated log presented exactly this way). ' +
+            `Inspect the three stages with: git show :1:${rel} / :2:${rel} / :3:${rel}`,
+        });
+        continue;
+      }
+
+      if (entry.strategy === 'generated') {
+        // One side is kept on purpose, so a superset proof is meaningless here — graph.json is
+        // generated and `graph-init.js` rebuilds it from nodes/. Recorded, not asserted.
+        mergeChecks.push({ file: rel, verdict: 'exempt-generated' });
+        continue;
+      }
+
+      if (entry.dateBlocks > 0) {
+        // Rule 1 drops a line by design: two `created:` values collapse to the earlier one. That is
+        // the intended resolution, so the strict proof cannot apply. Recorded so it is visible.
+        mergeChecks.push({ file: rel, verdict: 'exempt-date-rule', dateBlocks: entry.dateBlocks });
+        continue;
+      }
+
+      if (check) {
+        mergeChecks.push({ file: rel, verdict: 'not-proved-check-mode' });
+        continue;
+      }
+
+      const proof = verifySuperset(root, rel, priorText.get(rel) ?? null);
+      if (!proof.ok) {
+        mergeChecks.push({ file: rel, verdict: 'refused', reason: proof.reason, checked: proof.checked });
+        unresolved.push({ file: rel, reason: proof.reason });
+        continue;
+      }
+      mergeChecks.push({ file: rel, verdict: 'proved-lossless', checked: proof.checked });
     }
   }
 
@@ -420,6 +652,9 @@ export function repair(root, { check = false } = {}) {
     repaired,
     blocks,
     unresolved,
+    unmerged,
+    unmergedKnown,
+    mergeChecks,
     rebuildBrains: [...rebuildBrains].sort(),
   };
 }
@@ -459,12 +694,20 @@ export function main(argv) {
             : `${f.blocks} block(s): ${f.dateBlocks} date, ${f.unionBlocks} union`;
         process.stdout.write(`${check ? 'would repair' : 'repaired'}  ${f.file}  [${detail}]\n`);
       }
+      for (const m of report.mergeChecks || []) {
+        const detail = m.checked
+          ? m.checked.map((c) => `${c.source}=${c.lines} missing=${c.missing}`).join(' ')
+          : m.reason || '';
+        process.stdout.write(`merge-check  ${m.file}  ${m.verdict}${detail ? `  [${detail}]` : ''}
+`);
+      }
       for (const u of report.unresolved) {
         process.stdout.write(`UNRESOLVED  ${u.file}  ${u.reason}\n`);
       }
     }
     process.stdout.write(
       `resolve-brain-markers: root=${report.root} candidates=${report.scanned} ` +
+        `unmerged=${report.unmergedKnown ? report.unmerged.length : 'unknown'} ` +
         `files-with-conflicts=${report.files.length} blocks=${report.blocks} ` +
         `${check ? 'written=0 (--check)' : `written=${report.repaired}`} ` +
         `unresolved=${report.unresolved.length}\n`
