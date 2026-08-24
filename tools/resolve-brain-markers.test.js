@@ -11,6 +11,10 @@ import { join } from 'node:path';
 
 import {
   parseSegments,
+  unmergedPaths,
+  readStage,
+  contentLines,
+  verifySuperset,
   isDateBlock,
   earlierValue,
   resolveDateBlock,
@@ -301,4 +305,175 @@ test('the search never builds a shell string — markers must not reach cmd.exe 
 
 test('an empty or missing root is a usage error, not a silent clean report', () => {
   assert.equal(main(['--root=/definitely/not/here/at/all', '--quiet']), 2);
+});
+
+// ── #494: an unmerged path is a separate question from "carries markers" ─────────────────────
+
+// Build a repo whose HEAD and MERGE_HEAD both append to the same append-only log, so the merge
+// leaves exactly one `UU` path. Returns { root, rel }.
+function midMerge(root, {
+  base = 'base-a\nbase-b\n',
+  ours = 'base-a\nbase-b\nours-only\n',
+  theirs = 'base-a\nbase-b\ntheirs-only\n',
+} = {}) {
+  const g = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', ['-C', root, 'init', '-q', '-b', 'main'], { stdio: 'ignore' });
+  g('config', 'user.email', 't@t');
+  g('config', 'user.name', 't');
+  g('config', 'core.autocrlf', 'false');
+  const rel = 'nexus/personal-brain/visits.log';
+  mkdirSync(join(root, 'nexus', 'personal-brain'), { recursive: true });
+  const abs = join(root, rel);
+  writeFileSync(abs, base, 'utf8');
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  g('checkout', '-qb', 'theirs');
+  writeFileSync(abs, theirs, 'utf8');
+  g('commit', '-qam', 'theirs');
+  g('checkout', '-q', 'main');
+  writeFileSync(abs, ours, 'utf8');
+  g('commit', '-qam', 'ours');
+  try {
+    g('merge', '--no-edit', 'theirs');
+  } catch {
+    /* the conflict is the point */
+  }
+  return { rel, abs };
+}
+
+test('unmergedPaths asks git and distinguishes "none" from "could not ask"', () => {
+  const root = tempDir();
+  try {
+    const { rel } = midMerge(root);
+    assert.deepEqual(unmergedPaths(root).map((p) => p.replace(/\\/g, '/')), [rel]);
+    // A directory with no `.git` has no index, so "nothing unmerged" is a TRUE answer there,
+    // not a swallowed failure. `unmergedKnown:false` is reserved for "there IS a checkout and
+    // git would not answer" — the only case that must never render as a clean report.
+    const plain = tempDir();
+    try {
+      assert.deepEqual(unmergedPaths(plain), []);
+      const rep = repair(plain, { check: true });
+      assert.equal(rep.unmergedKnown, true);
+      assert.deepEqual(rep.unmerged, []);
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+    const broken = tempDir();
+    try {
+      writeFileSync(join(broken, '.git'), 'gitdir: /nowhere/at/all\n', 'utf8');
+      assert.throws(() => unmergedPaths(broken));
+      const rep = repair(broken, { check: true });
+      assert.equal(rep.unmergedKnown, false);
+      assert.equal(rep.unresolved.length, 1);
+      assert.match(rep.unresolved[0].reason, /cannot list unmerged paths/);
+      assert.equal(main([`--root=${broken}`, '--check', '--quiet']), 1);
+    } finally {
+      rmSync(broken, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readStage reaches the three merge stages, and contentLines ignores marker lines', () => {
+  const root = tempDir();
+  try {
+    const { rel } = midMerge(root);
+    assert.deepEqual(contentLines(readStage(root, 1, rel).text), ['base-a', 'base-b']);
+    assert.deepEqual(contentLines(readStage(root, 2, rel).text), ['base-a', 'base-b', 'ours-only']);
+    assert.deepEqual(contentLines(readStage(root, 3, rel).text), ['base-a', 'base-b', 'theirs-only']);
+    assert.equal(readStage(root, 2, 'no/such/file').present, false);
+    // Marker lines are structure, not content — a superset check must not require them.
+    assert.deepEqual(contentLines(conflict('a\n', 'b\n')), ['a', 'b']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#494 THE HOLE: unmerged with NO markers is refused, not adopted', () => {
+  const root = tempDir();
+  try {
+    const { rel, abs } = midMerge(root);
+    // This is the incident: a process rewrote the log from scratch, wiping the markers. The path
+    // is still `UU`, the worktree copy is disjoint from both sides, and the old resolver saw
+    // zero candidates, exited 0, and let `git add -A` adopt this as the merge result.
+    writeFileSync(abs, 'restarted-log-only\n', 'utf8');
+    assert.equal(readFileSync(abs, 'utf8').includes(CONFLICT_TOKEN), false, 'fixture must carry no markers');
+
+    const report = repair(root);
+    assert.equal(report.blocks, 0, 'nothing to rewrite — that is exactly why the hole was invisible');
+    assert.equal(report.unmergedKnown, true);
+    assert.deepEqual(report.unmerged.map((p) => p.replace(/\\/g, '/')), [rel]);
+    assert.equal(report.unresolved.length, 1, 'an unprovable merge result must be UNRESOLVED');
+    assert.match(report.unresolved[0].reason, /no complete conflict block/);
+    assert.match(report.unresolved[0].reason, /Do NOT `git add` it/);
+    assert.deepEqual(report.mergeChecks.map((c) => c.verdict), ['refused']);
+
+    // Per the #467 convention this is a genuine fault: RED, never a ::warning:: exit 0.
+    assert.equal(main([`--root=${root}`, '--quiet']), 1);
+    // And the file is left alone, so both parents stay recoverable from the index.
+    assert.equal(readFileSync(abs, 'utf8'), 'restarted-log-only\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#494: a resolved append-only merge is PROVED lossless before it may be staged', () => {
+  const root = tempDir();
+  try {
+    const { rel } = midMerge(root);
+    const report = repair(root);
+    assert.equal(report.unresolved.length, 0);
+    const check = report.mergeChecks.find((c) => c.file.replace(/\\/g, '/') === rel);
+    assert.equal(check.verdict, 'proved-lossless');
+    const text = readFileSync(join(root, rel), 'utf8');
+    for (const line of ['base-a', 'base-b', 'ours-only', 'theirs-only']) {
+      assert.ok(text.includes(line), `union dropped ${line}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#494: the superset assertion is NOT vacuous — a dropped line fails it', () => {
+  const root = tempDir();
+  try {
+    const { rel, abs } = midMerge(root);
+    // Hand-write a plausible-looking but LOSSY resolution: markers gone, `theirs-only` dropped.
+    // This is what "pick a side" produces, and it must not be accepted as a merge result.
+    writeFileSync(abs, 'base-a\nbase-b\nours-only\n', 'utf8');
+    const bad = verifySuperset(root, rel);
+    assert.equal(bad.ok, false);
+    assert.match(bad.reason, /theirs/);
+    assert.match(bad.reason, /theirs-only/, 'the refusal must name the line it would have lost');
+
+    // The honest union passes the same assertion.
+    writeFileSync(abs, 'base-a\nbase-b\nours-only\ntheirs-only\n', 'utf8');
+    assert.equal(verifySuperset(root, rel).ok, true);
+
+    // A line present only in the pre-repair worktree copy is also protected.
+    assert.equal(verifySuperset(root, rel, 'base-a\nworktree-only\n').ok, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#494: base (:1:) is deliberately NOT asserted — a legitimate edit drops base lines', () => {
+  const root = tempDir();
+  try {
+    // `salience: 0.3` is in the base and BOTH sides replaced it with `0.5`. Requiring
+    // base ⊆ result would refuse that ordinary edit, and a guard that cries wolf on healthy
+    // merges gets bypassed. So base is available for reporting and never asserted.
+    const { rel, abs } = midMerge(root, {
+      base: 'keep-me\nsalience: 0.3\n',
+      ours: 'keep-me\nsalience: 0.5\nours-only\n',
+      theirs: 'keep-me\nsalience: 0.5\ntheirs-only\n',
+    });
+    assert.ok(contentLines(readStage(root, 1, rel).text).includes('salience: 0.3'));
+    assert.ok(!contentLines(readStage(root, 2, rel).text).includes('salience: 0.3'));
+    writeFileSync(abs, 'keep-me\nsalience: 0.5\nours-only\ntheirs-only\n', 'utf8');
+    assert.equal(verifySuperset(root, rel).ok, true, 'base must not be part of the assertion');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

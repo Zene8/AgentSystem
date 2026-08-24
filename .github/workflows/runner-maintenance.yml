@@ -3,10 +3,27 @@
 #
 # ── Why this workflow exists ─────────────────────────────────────────────────────────────────
 #
-# `ssh 100.82.195.75` is refused (port 22, Connection refused), so there is no interactive path to
-# the box that holds ~/agent-memory, ~/.claude and the merge gate. The runner does execute every
-# job dispatched to it, which is a remote-execution channel this repo already trusts and is the
-# only one available. This file is that channel, deliberately narrowed.
+# The box that holds ~/agent-memory, ~/.claude and the merge gate is not reachable from CI: a
+# GitHub-hosted runner is not on the tailnet, and the self-hosted runner is the very host in
+# question. So automation gets at that host state through the one channel this repo already
+# trusts — dispatching a job to the runner itself. This file is that channel, deliberately
+# narrowed.
+#
+# CORRECTION (#439). This header used to read "`ssh 100.82.195.75` is refused (port 22,
+# Connection refused), so there is no interactive path to the box." That is FALSE, and it was
+# load-bearing: it justified filing several host-state alerts as console-only tasks that one ssh
+# would have fixed. A human CAN reach the host interactively:
+#
+#     ssh basely@100.73.130.84          # plain ssh over the tailnet — works
+#
+# The refusal came from the wrong address and the wrong user, not from a closed port. Two more
+# facts that cost time: `tailscale ssh` to this host FAILS host-key verification (use plain ssh),
+# and `/home/basely/dev/AgentSystem` is a SYMLINK to `/home/basely/AgentSystem` — one checkout,
+# not two. Reading it as a second checkout is exactly the misread that produces a #362-class
+# wrong conclusion about which revision a systemd unit is executing.
+#
+# This workflow is still the right channel for AUTOMATION, which has no tailnet and no key. Only
+# the stated reason for it was wrong.
 #
 # ── Why the input is `type: choice` and never a string ───────────────────────────────────────
 #
@@ -292,8 +309,8 @@ jobs:
           # enforcement-drift-check reports `FAILED: canon checkout is behind origin/main`, and
           # repair-install's self-heal correctly REFUSES to rewrite a dirty tree from a dispatch.
           # That leaves exactly one way forward: a human decides keep-or-discard on those edits.
-          # Until now this report printed the FILE NAMES only, and `ssh` to this host is refused,
-          # so there was no way to read them at all — which is why 2 dirty paths have sat in canon
+          # Until now this report printed the FILE NAMES only, and no AUTOMATED path could read them
+          # (a human can ssh — see the header correction for #439; a workflow cannot) — which is why 2 dirty paths have sat in canon
           # since 2026-08-10 failing a nightly job nobody could act on. Read-only by construction:
           # `diff`/`diff --stat`/`ls-files` compare the index and worktree against the local HEAD,
           # no fetch, no remote rev-spec, nothing written. `status` still mutates nothing.
@@ -627,7 +644,7 @@ jobs:
       # old (minted before #474's promptHash fix landed) and can never join no matter how correct
       # today's minting is, or something else. `--diagnose` (#124) exists exactly to answer that,
       # printing per-record timestamps, truncated hashes and the nearest hint/actual pairing — but
-      # it has never been reachable without a shell on a host `ssh` refuses. This step is that
+      # it has never been reachable from automation, which gets no shell here. This step is that
       # missing read path: it changes nothing, same as every other step in this job, and prints
       # only what `--diagnose` already prints — truncated promptHash prefixes, hint/agent labels
       # and timestamps, never prompt text (routing-log.jsonl never stores prompt text to begin
@@ -1212,8 +1229,8 @@ jobs:
   # The other half of #352. `enforcement-drift-check.yml` runs four --check tools daily and, on
   # 2026-08-09 (run 31337967555), reported 5 drifted hook files, 3 missing registrations, 4
   # drifted agent definitions and both brain-sync units absent. Every one of those is repaired by
-  # re-running the deployer that produced them — but there is no shell on this host (see the
-  # header), so the repair had no channel. This mode is that channel.
+  # re-running the deployer that produced them — but no scheduled job can get a shell here (see
+  # the header, incl. the #439 correction: a human can ssh, CI cannot), so the repair had no channel. This mode is that channel.
   #
   # It also installs the off-Actions watchdog timer (#361): enforcement-drift-check.yml reported
   # "actions-watchdog heartbeat missing or stale" on 2026-08-09 (run 31340529325) as the last
@@ -2164,7 +2181,7 @@ jobs:
   #
   # Both are right. `repair-install` may never start rewriting working trees as a side effect of
   # someone dispatching it to fix hooks, so that skip stays exactly as it is. But that leaves the
-  # host with no repair path at all, and `ssh` here is refused, so the drift has stood since
+  # host with no AUTOMATED repair path at all (see the #439 correction in the header), so the drift has stood since
   # 2026-08-10 failing a nightly job nobody could act on.
   #
   # This mode is the missing path, and it is a separate dispatch precisely so that touching a
