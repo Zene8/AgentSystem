@@ -1,0 +1,58 @@
+# inbound-policy.example.yml — SCHEMA ONLY. Do not put real data in this file.
+#
+# The live copy lives at $LIFE_REPO/inbound-policy.yml, in the PRIVATE Life OS repo, because it
+# holds sender addresses and chat names. Zene8/AgentSystem is public: a real allowlist committed
+# here, or passed as a workflow_dispatch input, is published — the same constraint that blocked
+# shipping the Life OS skills through Actions in #439.
+#
+# Loaded by tools/inbound/policy.js, FAIL CLOSED. A missing file, an unparseable file, an absent
+# section, an unknown key, a cadence that is not a real tier, or `enabled: false` all DISABLE that
+# source. Nothing here has a permissive default.
+#
+# Grammar is a deliberately tiny YAML subset (tools/ takes no npm deps): a top-level map of
+# sources, two-space-indented `key: value` under each, scalars and inline `[a, b]` lists, `#`
+# comments. No block sequences, no deeper nesting, no multi-line scalars. The parser THROWS on
+# anything else rather than skipping it.
+#
+# cadence: which timer tier polls this source.
+#   fast   — every 2 min.  Conversational sources, where latency is the point.
+#   medium — every 10 min. Repository activity.
+#   daily  — once a day.   Task lists, which do not need a 2-minute reaction.
+#
+# max_actions_per_day: hard ceiling on `action` verdicts per source per day. An item over the cap
+# is recorded as `notify` with reason `daily-cap` — degraded, never dropped silently.
+
+gmail:
+  enabled: true
+  cadence: fast
+  # An ALLOWLIST, not a blocklist. Gmail is the only source whose blast radius leaves your own
+  # machines, so an empty list here means nothing from Gmail is ever actioned.
+  senders_allow: [someone@example.com, alerts@example.com]
+  labels_ignore: [Promotions, Social]
+  max_actions_per_day: 12
+
+beeper:
+  enabled: true
+  cadence: fast
+  # Chat identifiers as Beeper reports them. Same allowlist semantics as senders_allow.
+  chats_allow: [example-chat-id]
+  max_actions_per_day: 12
+
+github:
+  enabled: true
+  cadence: medium
+  # GitHub notification `reason` values to consider. ci_activity covers failed workflow runs;
+  # assign covers issues assigned to you. Anything not listed is not looked at.
+  reasons: [ci_activity, assign, review_requested]
+  max_actions_per_day: 20
+
+notion:
+  enabled: true
+  cadence: daily
+  # Database ids to sweep for tasks. Notion is an OUTPUT first — agents create tasks through
+  # tools/outbound/notion-task.js — and only polled once a day.
+  databases: [example-database-id]
+  max_actions_per_day: 5
+
+# Calendar has no section on purpose. It is an output only: agents create events through
+# tools/outbound/calendar-event.js. It is never polled, so it has no cadence and no cursor.
