@@ -39,7 +39,7 @@ jobs:
           set -uo pipefail
           BRANCH="${HEAD_REF}"
           if [[ ! "$BRANCH" =~ issue-([0-9]+) ]]; then
-            echo "Branch '$BRANCH' carries no issue-<N> segment — nothing to autolink."
+            echo "::notice::Branch '$BRANCH' carries no issue-<N> segment — nothing to autolink."
             echo "issue_number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -49,13 +49,13 @@ jobs:
           # the type as well and accept only a real Issue. Same distinction pr-linked-issue-check.yml
           # draws, for the same reason: `Closes #<pr>` is a typo, not a link.
           if ! RESOLVED=$(gh api "repos/${REPO}/issues/${N}" --jq '.pull_request | if . then "pr" else "issue" end' 2>&1); then
-            echo "Issue #${N} from branch '$BRANCH' does not resolve in ${REPO} — skipping autolink."
+            echo "::notice::Issue #${N} from branch '$BRANCH' does not resolve in ${REPO} — skipping autolink."
             echo "  gh said: ${RESOLVED}"
             echo "issue_number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$RESOLVED" != "issue" ]; then
-            echo "#${N} resolves to a pull request, not an issue — skipping autolink."
+            echo "::notice::#${N} resolves to a pull request, not an issue — skipping autolink."
             echo "issue_number=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
