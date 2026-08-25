@@ -47,7 +47,7 @@ pipeline was installed-but-inert (`CLAUDE.md` → Hooks). Same failure, differen
 | Session registry bookkeeping | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `session-start.sh`, `user-prompt-submit.sh`, and `session-close.sh` during lifecycle. |
 | Session status lifecycle | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `pr-status-detect.sh` on `PostToolUse`. |
 | Routine dispatch + compliance | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `routine-dispatch.js` and `routine-compliance-hook.js`. |
-| Git safety guard | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `guard-git.sh` on `PreToolUse`. |
+| Git safety guard | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `guard-git.sh` on `PreToolUse` and denying on the child's **exit 2**. It was `supported` here and inert in practice until #514: the bridge threw away every non-zero exit status and sniffed stdout for `BLOCKED:`, which `guard-git.sh` writes to stderr. Asserted end to end by `hooks/antigravity-bridge.test.js`. |
 | WIP checkpointing | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `wip-checkpoint.sh` on `PostToolUse`. |
 | Continuous sync — memory, session-triggered | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` executing `hooks/continuous-sync-hook.js` on start/stop. |
 | Continuous sync — code checkout fast-forward | `supported` | `supported` | Supported via `hooks/antigravity-bridge.js` running checkout fast-forward on `PreInvocation` (start phase). |
@@ -65,6 +65,14 @@ pipeline was installed-but-inert (`CLAUDE.md` → Hooks). Same failure, differen
 `sync-agents.js` omits the key entirely and `agy` agents load with default tool access. The agent
 exists and works; its tool restrictions do not travel. Deliberate — see the comment at
 `tools/sync-agents.js:157`.
+
+**A crashing PreToolUse hook fails OPEN on `agy`, deliberately.** The bridge treats exit 2 as the
+only deny — that is the whole of the Claude Code hook protocol's deny signal — and lets every other
+non-zero status through with a debug-log line. A guard that dies for an environmental reason (`jq`
+absent, no `bash` on `PATH`, the 15s timeout) would otherwise block every tool call for the rest of
+the session, which is a worse outcome than one unguarded command. Do not "harden" this into
+fail-closed without a way for the user to see and clear the condition; see #514 for why the status
+and not the output text is the predicate.
 
 **Model IDs differ.** `agy` is a Gemini-family runtime, so the sync maps each agent to
 `MODELS.gemini`. Same roster, different model per host.

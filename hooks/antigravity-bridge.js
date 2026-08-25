@@ -7,7 +7,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync, spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 function logDebug(msg) {
   // Best-effort debugging log
@@ -66,34 +66,71 @@ function getToolCallAndInput(transcriptPath, stepIdx) {
   return null;
 }
 
-function runHookSync(scriptName, args, payload, workspacePath) {
+/**
+ * Runs a hook to completion and reports the child's EXIT STATUS alongside its output (#514).
+ *
+ * The old `runHookSync` returned `''` for every non-zero exit, so the one status that carries
+ * meaning in the Claude Code hook protocol -- exit 2, "deny this tool call" -- arrived here
+ * indistinguishable from an allow that printed nothing. `guard-git.sh` exits 2 and writes its
+ * BLOCKED line to stderr, and stderr was inherited rather than captured, so the deny was inert on
+ * `agy` twice over: no status to read and no text to sniff either.
+ *
+ * `spawnSync` replaces `execFileSync` because a non-zero exit is a normal, expected outcome here
+ * rather than an exception -- throwing on it is precisely what discarded the status.
+ *
+ * @returns {{status: number|null, stdout: string, stderr: string}} `status` is null when the child
+ *   could not be started, or was killed by a signal or the timeout -- i.e. when no exit code
+ *   exists at all.
+ */
+function runHookCaptured(scriptName, args, payload, workspacePath) {
   if (typeof args === 'object' && !Array.isArray(args)) {
     payload = args;
     args = [];
   }
   const isBash = scriptName.endsWith('.sh');
   const scriptPath = path.join(__dirname, scriptName);
-  
+
   let cmd = process.execPath;
   let cmdArgs = [scriptPath, ...args];
-  
+
   if (isBash) {
     cmd = 'bash';
     cmdArgs = [scriptPath, ...args];
   }
-  
+
   logDebug(`Executing sync hook: ${scriptName} (cwd: ${workspacePath})`);
-  try {
-    return execFileSync(cmd, cmdArgs, {
-      input: JSON.stringify(payload),
-      cwd: workspacePath,
-      encoding: 'utf8',
-      timeout: 15000
-    });
-  } catch (e) {
-    logDebug(`Failed sync hook ${scriptName}: ${e.message}`);
-    return '';
+  const res = spawnSync(cmd, cmdArgs, {
+    input: JSON.stringify(payload),
+    cwd: workspacePath,
+    encoding: 'utf8',
+    timeout: 15000
+  });
+
+  const stdout = res.stdout || '';
+  const stderr = res.stderr || '';
+  if (res.error) {
+    logDebug(`Failed sync hook ${scriptName}: ${res.error.message}`);
+    return { status: null, stdout, stderr };
   }
+  if (res.status === null) {
+    logDebug(`Sync hook ${scriptName} killed by ${res.signal || 'unknown signal'} (no exit code)`);
+    return { status: null, stdout, stderr };
+  }
+  if (res.status !== 0) {
+    logDebug(`Sync hook ${scriptName} exited ${res.status}: ${(stderr || stdout).trim()}`);
+  }
+  return { status: res.status, stdout, stderr };
+}
+
+/**
+ * stdout-only wrapper for the call sites that never wanted a status: the PreInvocation context
+ * injectors and the Stop-phase bookkeeping hooks. Their contract is deliberately unchanged -- a
+ * crashing bookkeeping hook must not turn into a blocked tool call, so failure still collapses to
+ * `''` and fails OPEN.
+ */
+function runHookSync(scriptName, args, payload, workspacePath) {
+  const { status, stdout } = runHookCaptured(scriptName, args, payload, workspacePath);
+  return status === 0 ? stdout : '';
 }
 
 function runHookAsync(scriptName, args, payload, workspacePath) {
@@ -187,16 +224,27 @@ function handlePreToolUse(payload, workspacePath) {
     };
     
     logDebug(`Running PreToolUse git-guard for command: ${cmdLine}`);
-    const result = runHookSync('claude-hooks/guard-git.sh', subPayload, workspacePath);
-    
-    // Check if the script printed BLOCKED on stderr/stdout
-    if (result && (result.includes('BLOCKED:') || result.includes('direct write to main'))) {
-      logDebug(`Blocked: ${result.trim()}`);
+    const { status, stdout, stderr } = runHookCaptured('claude-hooks/guard-git.sh', subPayload, workspacePath);
+
+    // Exit 2 is the ONLY deny code in the Claude Code hook protocol, and the status IS the whole
+    // decision: the reason text is a courtesy for the transcript, never the predicate. The old
+    // "does the output contain BLOCKED:" test could not have worked -- guard-git.sh writes that
+    // line to stderr, and stderr was not captured (#514).
+    //
+    // Every other non-zero status fails OPEN. A hook that crashes -- no `jq`, no `bash` on PATH, a
+    // syntax error, the 15s timeout -- would otherwise brick every tool call for the rest of the
+    // session, which is a much worse outcome than one unguarded command.
+    if (status === 2) {
+      const reason = stderr.trim() || stdout.trim() || 'blocked by guard-git.sh (exit 2)';
+      logDebug(`Blocked (exit 2): ${reason}`);
       console.log(JSON.stringify({
         decision: 'deny',
-        reason: result.trim()
+        reason
       }));
       return;
+    }
+    if (status !== 0) {
+      logDebug(`guard-git.sh exited ${status === null ? 'without a code' : status} - failing open`);
     }
   }
   
@@ -296,5 +344,7 @@ function main() {
     }
   });
 }
+
+module.exports = { runHookCaptured, runHookSync };
 
 if (require.main === module) main();
