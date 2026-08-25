@@ -97,6 +97,18 @@ jobs:
             echo "PASSED: brain-sync timer installed"
           fi
 
+          echo "=== Checking inbound event-triage poller timers (#483, phase 4) ==="
+          # The three tier timers (fast, medium, daily) are the only thing polling external sources
+          # for inbound events. An un-installed or stale timer is silent by construction: nothing
+          # fails, the poller just never runs, and latency becomes infinite.
+          if ! bash "${{ github.workspace }}/tools/install-inbound-timers.sh" --check; then
+            echo "FAILED: inbound-poller timer drift detected"
+            driftFound=1
+            results="${results}• Inbound event-triage poller timers missing or stale (tools/install-inbound-timers.sh --check)\n"
+          else
+            echo "PASSED: inbound-poller timers installed"
+          fi
+
           echo "=== Checking skill parity drift (#305) ==="
           # --require-install: this runner is supposed to have skills deployed, same reasoning as
           # the hook check above — a bare ~/.claude/skills here is the outage, not a clean skip.
