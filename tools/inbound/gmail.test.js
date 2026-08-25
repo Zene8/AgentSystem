@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 
 import {
   defaultCreateClient,
+  extractEmailAddress,
+  addressMatches,
   filterMessages,
   externalIdFor,
   urlFor,
@@ -67,6 +69,64 @@ function stubClient(searchResult = [], threadDetails = {}) {
   };
 }
 
+test('extractEmailAddress: bare address is lowercased', () => {
+  assert.equal(extractEmailAddress('alice@example.com'), 'alice@example.com');
+  assert.equal(extractEmailAddress('ALICE@EXAMPLE.COM'), 'alice@example.com');
+});
+
+test('extractEmailAddress: extracts from angle brackets and lowercases', () => {
+  assert.equal(extractEmailAddress('Alice Smith <alice@example.com>'), 'alice@example.com');
+  assert.equal(extractEmailAddress('Alice Smith <ALICE@EXAMPLE.COM>'), 'alice@example.com');
+});
+
+test('extractEmailAddress: returns empty on null, non-string, or empty', () => {
+  assert.equal(extractEmailAddress(null), '');
+  assert.equal(extractEmailAddress(undefined), '');
+  assert.equal(extractEmailAddress(''), '');
+  assert.equal(extractEmailAddress('   '), '');
+  assert.equal(extractEmailAddress(123), '');
+});
+
+test('extractEmailAddress: handles malformed brackets gracefully', () => {
+  assert.equal(extractEmailAddress('no brackets here'), 'no brackets here');
+  assert.equal(extractEmailAddress('incomplete <alice@example.com'), 'incomplete <alice@example.com');
+});
+
+test('addressMatches: exact address match (case-insensitive)', () => {
+  assert.equal(addressMatches('alice@example.com', 'alice@example.com'), true);
+  assert.equal(addressMatches('ALICE@EXAMPLE.COM', 'alice@example.com'), true);
+  assert.equal(addressMatches('alice@example.com', 'ALICE@EXAMPLE.COM'), true);
+  assert.equal(addressMatches('alice@example.com', 'bob@example.com'), false);
+});
+
+test('addressMatches: domain rule (@domain) matches addresses at that domain', () => {
+  assert.equal(addressMatches('alice@example.com', '@example.com'), true);
+  assert.equal(addressMatches('bob@example.com', '@example.com'), true);
+  assert.equal(addressMatches('ALICE@EXAMPLE.COM', '@example.com'), true);
+});
+
+test('addressMatches: domain rule does NOT match subdomain or lookalike', () => {
+  // example.com.evil.tld should NOT match @example.com
+  assert.equal(addressMatches('alice@example.com.evil.tld', '@example.com'), false);
+  // notexample.com should NOT match @example.com
+  assert.equal(addressMatches('alice@notexample.com', '@example.com'), false);
+  // Different domain entirely
+  assert.equal(addressMatches('alice@other.org', '@example.com'), false);
+});
+
+test('addressMatches: empty or missing inputs return false', () => {
+  assert.equal(addressMatches('', '@example.com'), false);
+  assert.equal(addressMatches('alice@example.com', ''), false);
+  assert.equal(addressMatches('', ''), false);
+  assert.equal(addressMatches(null, 'alice@example.com'), false);
+  assert.equal(addressMatches('alice@example.com', null), false);
+});
+
+test('addressMatches: @ alone (no domain) matches nothing', () => {
+  assert.equal(addressMatches('alice@example.com', '@'), false);
+  assert.equal(addressMatches('alice@example.com', '   @   '), false);
+});
+
 test('filterMessages: empty allowlist yields nothing (fail-closed)', () => {
   const policy = { sendersAllow: [], labelsIgnore: [] };
   const result = filterMessages([message()], policy);
@@ -77,6 +137,57 @@ test('filterMessages: allowlist match yields the item', () => {
   const result = filterMessages([message()], POLICY);
   assert.equal(result.length, 1);
   assert.equal(result[0].from, 'alice@example.com');
+});
+
+test('filterMessages: extracts address from From header with display name', () => {
+  const result = filterMessages(
+    [message({ from: 'Alice Smith <alice@example.com>' })],
+    POLICY
+  );
+  assert.equal(result.length, 1);
+  assert.equal(result[0].from, 'alice@example.com');
+});
+
+test('filterMessages: case-insensitive allowlist matching', () => {
+  const policy = {
+    sendersAllow: ['alice@example.com'],
+    labelsIgnore: [],
+  };
+  const result = filterMessages(
+    [message({ from: 'ALICE@EXAMPLE.COM' })],
+    policy
+  );
+  assert.equal(result.length, 1);
+});
+
+test('filterMessages: domain allowlist rule matches addresses at that domain', () => {
+  const policy = {
+    sendersAllow: ['@example.com'],
+    labelsIgnore: [],
+  };
+  const msgs = [
+    message({ from: 'alice@example.com' }),
+    message({ from: 'Bob Smith <bob@example.com>' }),
+    message({ from: 'charlie@other.org' }),
+  ];
+  const result = filterMessages(msgs, policy);
+  assert.equal(result.length, 2);
+  assert.deepEqual(
+    result.map((m) => m.from),
+    ['alice@example.com', 'bob@example.com']
+  );
+});
+
+test('filterMessages: malformed From header is skipped', () => {
+  const policy = {
+    sendersAllow: ['@example.com'],
+    labelsIgnore: [],
+  };
+  const result = filterMessages(
+    [message({ from: '' }), message({ from: null })],
+    policy
+  );
+  assert.equal(result.length, 0);
 });
 
 test('filterMessages: non-matching sender is dropped', () => {

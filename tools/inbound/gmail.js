@@ -19,6 +19,58 @@ const GMAIL_MCP_URL = 'https://gmailmcp.googleapis.com/mcp/v1';
 const PAGE_SIZE = 50;
 
 /**
+ * Extract email address from a From header.
+ * Gmail sends "Display Name <addr@example.com>" or just "addr@example.com".
+ * Extract the address, trim, normalize to lowercase.
+ * Return empty string on malformed input.
+ */
+export function extractEmailAddress(fromHeader) {
+  if (!fromHeader || typeof fromHeader !== 'string') return '';
+  const trimmed = fromHeader.trim();
+  if (trimmed === '') return '';
+
+  // Check for angle bracket format: "Name <addr@example.com>"
+  const match = trimmed.match(/<([^>]+)>/);
+  if (match && match[1]) {
+    return match[1].trim().toLowerCase();
+  }
+
+  // No brackets — assume it's a bare address
+  return trimmed.toLowerCase();
+}
+
+/**
+ * Check if an email address matches an allowlist entry.
+ * Allowlist entries can be:
+ *   - exact address: "addr@example.com" (case-insensitive)
+ *   - domain rule: "@example.com" (matches any address at that domain)
+ *
+ * @param {string} address - Extracted email address (normalized to lowercase)
+ * @param {string} allowlistEntry - Entry from senders_allow (normalized to lowercase)
+ * @returns {boolean} true if address matches the entry
+ */
+export function addressMatches(address, allowlistEntry) {
+  if (!address || !allowlistEntry) return false;
+
+  const addr = address.toLowerCase().trim();
+  const entry = allowlistEntry.toLowerCase().trim();
+
+  // Domain rule: entry starts with @
+  if (entry.startsWith('@')) {
+    const domain = entry.slice(1); // Remove the @
+    if (!domain) return false; // Just "@" matches nothing
+
+    // Address must end with the domain (case-insensitive)
+    // "@example.com" matches "user@example.com" but NOT "user@notexample.com"
+    // or "user@example.com.evil.tld"
+    return addr.endsWith(`@${domain}`);
+  }
+
+  // Exact match (case-insensitive, already lowercased)
+  return addr === entry;
+}
+
+/**
  * Create a default Gmail MCP client from the env var token.
  */
 export function defaultCreateClient() {
@@ -34,6 +86,7 @@ export function defaultCreateClient() {
  * Filter and flatten Gmail message search results.
  *
  * Checks senders_allow (allowlist, fails closed) and labels_ignore.
+ * Allowlist entries can be exact addresses or domain rules (prefixed with @).
  * Returns an array of { messageId, threadId, from, subject, timestamp, labels }.
  */
 export function filterMessages(messages, policy) {
@@ -49,11 +102,15 @@ export function filterMessages(messages, policy) {
   for (const msg of (messages || [])) {
     if (!msg || typeof msg !== 'object') continue;
 
-    const from = msg.from || '';
+    const fromHeader = msg.from || '';
     const labels = (msg.labels && Array.isArray(msg.labels)) ? msg.labels : [];
 
-    // Check allowlist.
-    if (!sendersAllow.includes(from)) continue;
+    // Extract and normalize the email address from the From header.
+    const address = extractEmailAddress(fromHeader);
+    if (!address) continue; // Malformed From header
+
+    // Check allowlist: address must match at least one entry.
+    if (!sendersAllow.some((entry) => addressMatches(address, entry))) continue;
 
     // Check ignore list.
     if (labels.some((l) => labelsIgnore.includes(l))) continue;
@@ -61,7 +118,7 @@ export function filterMessages(messages, policy) {
     out.push({
       messageId: msg.id || '',
       threadId: msg.threadId || msg.id || '',
-      from,
+      from: address,
       subject: msg.subject || '(no subject)',
       timestamp: msg.timestamp || new Date().toISOString(),
       labels,
