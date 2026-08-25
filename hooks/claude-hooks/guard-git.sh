@@ -1,13 +1,88 @@
 #!/bin/bash
 # PreToolUse hook: block destructive git ops on main/master without explicit user intent
 INPUT=$(cat)
-TOOL=$(echo "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
 
-if [ "$TOOL" != "Bash" ]; then
+# --- Payload parsing: jq fast path, node fallback (#516) ---------------------
+#
+# This was jq-only:
+#     TOOL=$(echo "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
+# With no jq on PATH — a freshly provisioned runner, or any host where it was
+# never installed — jq's stderr went to /dev/null, TOOL came back empty, the
+# `TOOL != Bash` check below matched, and the guard exited 0. Every git command
+# was allowed, `git push origin main` included, and nothing said so anywhere.
+# This is the only hook in the repo that MECHANICALLY blocks an action, so a
+# silent no-op here is the whole control gone.
+#
+# node is the fallback because it is already a hard dependency of this hook set:
+# every other hook under hooks/ IS a Node script, so a host that can run them
+# has node. It walks a dotted path over the parsed payload instead of eval'ing
+# an expression, so no part of the payload is ever executed.
+GUARD_LOG="${GUARD_GIT_LOG:-$HOME/agent-memory/nexus/guard-git.log}"
+
+# Uses `${VAR%/*}` rather than dirname, and swallows every failure: logging must
+# never break a hook.
+guard_log() {
+  {
+    # `${VAR%/*}` returns the string unchanged when it holds no `/` — mkdir'ing
+    # that would create a directory named after the log file itself.
+    _dir="${GUARD_LOG%/*}"
+    if [ "$_dir" != "$GUARD_LOG" ]; then mkdir -p "$_dir"; fi
+    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >>"$GUARD_LOG"
+  } 2>/dev/null || true
+}
+
+NODE_BIN=""
+if command -v jq >/dev/null 2>&1; then
+  PARSER=jq
+elif command -v node >/dev/null 2>&1; then
+  PARSER=node
+  NODE_BIN=node
+elif command -v nodejs >/dev/null 2>&1; then
+  PARSER=node
+  NODE_BIN=nodejs
+else
+  PARSER=none
+fi
+
+# Neither parser available. Deliberately NOT fail-closed: a PreToolUse hook that
+# exits 2 denies every Bash call, which bricks the session — including the very
+# commands needed to install jq or node. So allow, but be loud about it in the
+# log and on stderr: an unguarded host must be visible, not silently unprotected.
+#
+# There is no `node tools/human-needed.js raise` call here on purpose. That alert
+# is itself a Node script, and node being absent is the precondition of this
+# branch, so shelling out to it would fail exactly when it is needed and the
+# failure would be invisible. The log line IS the alert channel for this state.
+if [ "$PARSER" = none ]; then
+  guard_log "UNGUARDED neither jq nor node found on PATH - guard-git.sh is INERT on this host, every git command is allowed, including a direct push to main. Install jq or node. PATH=$PATH"
+  echo "guard-git.sh: UNGUARDED - neither jq nor node on PATH, so the git safety guard is INERT on this host (logged to $GUARD_LOG). Install jq or node." >&2
   exit 0
 fi
 
-CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null)
+# Dotted-path reader over the parsed payload. The payload arrives on stdin, not
+# argv — a Bash command line can be large and argv is size-capped.
+NODE_EXTRACT='let raw="";process.stdin.setEncoding("utf8");process.stdin.on("data",c=>{raw+=c});process.stdin.on("end",()=>{let v;try{v=JSON.parse(raw);for(const k of process.argv[1].split(".")){v=(v===null||v===undefined)?undefined:v[k];}}catch(e){v=undefined;}process.stdout.write(typeof v==="string"?v:"");});'
+
+# $1 = jq filter, $2 = the equivalent dotted path for the node fallback.
+json_field() {
+  case "$PARSER" in
+    jq) printf '%s' "$INPUT" | jq -r "$1" 2>/dev/null ;;
+    node) printf '%s' "$INPUT" | "$NODE_BIN" -e "$NODE_EXTRACT" "$2" 2>/dev/null ;;
+  esac
+}
+
+TOOL=$(json_field '.tool_name // ""' 'tool_name')
+
+if [ "$TOOL" != "Bash" ]; then
+  # A non-empty payload that yields no tool_name is a malformed or unexpected
+  # envelope, not another tool — same allow, but it should not be silent.
+  if [ -n "$INPUT" ] && [ -z "$TOOL" ]; then
+    guard_log "payload carried no tool_name (parser=$PARSER); allowed without inspection"
+  fi
+  exit 0
+fi
+
+CMD=$(json_field '.tool_input.command // ""' 'tool_input.command')
 
 # --- Segment the command, then match within a segment (#284) -----------------
 #
