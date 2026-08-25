@@ -69,6 +69,26 @@ The client automatically:
 
 Auth is explicit: the caller supplies a bearer token. The client does **not** read or reuse Claude Code's interactive credential store (`~/.claude/.credentials.json` or OS keychain).
 
+### Token Validation
+
+**The client does NOT enforce token presence.** If a server requires auth and no token is supplied, the client sends an unauthenticated request and the server returns HTTP 401.
+
+**Callers must validate tokens explicitly** using the exported `validateToken()` helper before constructing a client:
+
+```javascript
+import { createClient, validateToken } from './mcp-client.js';
+
+const token = process.env.NOTION_TOKEN;
+validateToken(token, 'NOTION_TOKEN');  // Throws if token is missing or empty
+
+const client = createClient({
+  url: 'https://mcp.notion.com/mcp',
+  token,
+});
+```
+
+This is a **design choice**: a client on the tailnet may connect to an unauthenticated Beeper endpoint, and the HTTP 401 is the appropriate feedback. Adapters that require auth must call `validateToken()` themselves.
+
 ### Notion
 
 **Environment variable:** `NOTION_TOKEN`  
@@ -181,6 +201,47 @@ if (!token) throw new Error('BEEPER_ACCESS_TOKEN not set');
 // ❌ Wrong: client does not do this
 // const credentials = readCredentialsFromClaudeStore();  // NO
 ```
+
+## Live Smoke Check
+
+An opt-in command-line probe tests the client against a real MCP endpoint. Skipped by default so the full test suite stays network-free.
+
+**Usage:**
+```bash
+export MCP_TOKEN=your-token-here  # Set the credential env var
+node tools/mcp-client.js --probe https://mcp.server.com/v1/mcp
+```
+
+**What it does:**
+1. Initializes the session (handshake)
+2. Lists available tools
+3. Prints tool count and names
+4. Exits 0 on success, 1 on failure
+
+**Example output:**
+```
+Initializing...
+Listing tools...
+Found 12 tool(s)
+  1. read_database
+  2. query_database
+  3. create_page
+  ...
+✓ Smoke check passed
+```
+
+**To test a live server:**
+```bash
+# Notion
+export MCP_TOKEN=secret_your-notion-token-here
+node tools/mcp-client.js --probe https://mcp.notion.com/mcp
+
+# Beeper (local)
+unset MCP_TOKEN  # Beeper endpoint on tailnet may not require auth
+node tools/mcp-client.js --probe http://100.82.195.75:23373/v0/mcp
+```
+
+This is the one place the client speaks to a real endpoint — integration proof before adapters run in production.
 
 ## Related Specs
 

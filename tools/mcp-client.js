@@ -14,6 +14,7 @@
 // isError: true all throw with the server's message. Never log or include tokens in any error.
 
 const MAX_RESPONSE_SIZE = 16 * 1024 * 1024; // 16 MiB
+const MAX_TOOL_PAGES = 50;
 const DEFAULT_TIMEOUT_MS = 30000;
 
 /**
@@ -100,25 +101,36 @@ export function createClient({
   }
 
   let sessionId = null;
+  let protocolVersion = null;
 
   /**
    * Send a JSON-RPC 2.0 request and parse the response.
+   * Supports both regular requests (with id) and notifications (without id).
    * @private
    */
-  async function request(method, params = null) {
+  async function request(method, params = null, { isNotification = false } = {}) {
     const body = {
       jsonrpc: '2.0',
-      id: 1,
       method,
     };
+    // Notifications do not have an id field
+    if (!isNotification) {
+      body.id = 1;
+    }
     if (params !== null) body.params = params;
 
     const headers = {
       'Content-Type': 'application/json',
+      // MCP streamable HTTP requires Accept header
+      'Accept': 'application/json, text/event-stream',
     };
 
     if (sessionId) {
       headers['Mcp-Session-Id'] = sessionId;
+    }
+
+    if (protocolVersion) {
+      headers['MCP-Protocol-Version'] = protocolVersion;
     }
 
     if (token) {
@@ -166,6 +178,14 @@ export function createClient({
         text = new TextDecoder().decode(buffer);
       } catch (err) {
         throw new Error(`Failed to read response: ${err.message}`);
+      }
+
+      // Empty body is valid for notifications (202 response with no content)
+      if (!text || text.trim() === '') {
+        // For notifications, an empty body is success
+        if (isNotification) return null;
+        // For regular requests, empty body is an error
+        throw new Error('Empty response body');
       }
 
       // Check content type and parse accordingly
@@ -224,7 +244,7 @@ export function createClient({
   return {
     /**
      * Initialize the session (MCP handshake).
-     * Sets up session ID and client metadata.
+     * Captures session ID and protocol version, then sends notifications/initialized.
      */
     async initialize() {
       const result = await request('initialize', {
@@ -236,24 +256,68 @@ export function createClient({
         },
       });
 
+      // Capture protocol version from result for subsequent headers
+      if (result && result.protocolVersion) {
+        protocolVersion = result.protocolVersion;
+      }
+
+      // Send the required notifications/initialized notification
+      // Notifications have no id and the server returns 202 with empty body
+      await request('notifications/initialized', null, { isNotification: true });
+
       return result || {};
     },
 
     /**
      * List available tools on the server.
+     * Follows pagination using nextCursor to exhaustion.
      */
     async listTools() {
-      const result = await request('tools/list');
-      // If result is an array, return it directly
-      if (Array.isArray(result)) {
-        return result;
+      const allTools = [];
+      let cursor = null;
+      const seenCursors = new Set();
+      let pages = 0;
+
+      // Paginate through all results. Bounded: a server that repeats a cursor, or
+      // hands out an unending supply of them, must not spin a 2-minute cron adapter forever.
+      while (true) {
+        if (++pages > MAX_TOOL_PAGES) {
+          throw new Error(`tools/list exceeded ${MAX_TOOL_PAGES} pages; refusing to paginate further`);
+        }
+        const params = {};
+        if (cursor) {
+          params.cursor = cursor;
+        }
+
+        const result = await request('tools/list', Object.keys(params).length > 0 ? params : null);
+
+        // Extract tools from result
+        let tools = [];
+        if (Array.isArray(result)) {
+          tools = result;
+        } else if (result && typeof result === 'object' && result.tools) {
+          tools = result.tools;
+        } else if (!cursor) {
+          // On first iteration, if result is not in standard format, return it as-is
+          return result;
+        }
+
+        allTools.push(...tools);
+
+        // Check for pagination
+        if (result && result.nextCursor) {
+          if (seenCursors.has(result.nextCursor)) {
+            throw new Error('tools/list returned a repeated pagination cursor; refusing to loop');
+          }
+          seenCursors.add(result.nextCursor);
+          cursor = result.nextCursor;
+        } else {
+          // No more pages
+          break;
+        }
       }
-      // If result has a tools property, return that
-      if (result && result.tools) {
-        return result.tools;
-      }
-      // Otherwise return the result as-is (might be a single object or empty)
-      return result || [];
+
+      return allTools;
     },
 
     /**
@@ -298,4 +362,46 @@ export function validateToken(token, envVarName) {
   if (!token) {
     throw new Error(`MCP adapter: ${envVarName} environment variable is not set`);
   }
+}
+
+/**
+ * CLI entry point: opt-in live smoke check against a real MCP endpoint.
+ * Usage: node mcp-client.js --probe <url>
+ * Token read from env var named in the endpoint docs (e.g., NOTION_TOKEN).
+ */
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.length < 2 || args[0] !== '--probe') {
+    console.error('Usage: node mcp-client.js --probe <url>');
+    process.exit(1);
+  }
+
+  const url = args[1];
+  const token = process.env.MCP_TOKEN;
+
+  try {
+    const client = createClient({ url, token });
+    console.log('Initializing...');
+    await client.initialize();
+
+    console.log('Listing tools...');
+    const tools = await client.listTools();
+    console.log(`Found ${tools.length} tool(s)`);
+    tools.forEach((tool, i) => {
+      const name = tool.name || '(unknown)';
+      console.log(`  ${i + 1}. ${name}`);
+    });
+
+    console.log('✓ Smoke check passed');
+    process.exit(0);
+  } catch (err) {
+    console.error(`✗ Smoke check failed: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+// Only run main if this is the entry point
+import { isMainModule } from './is-main.js';
+if (isMainModule(import.meta.url)) {
+  main();
 }

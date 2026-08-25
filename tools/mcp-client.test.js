@@ -478,3 +478,157 @@ test('response size limit enforced', async () => {
     /Response too large/,
   );
 });
+
+test('Accept header sent on initialize', async () => {
+  let acceptHeaderPresent = false;
+  const acceptCheckFetch = async (url, options) => {
+    if (options.headers['Accept']) {
+      acceptHeaderPresent = options.headers['Accept'].includes('application/json');
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+      text: () => Promise.resolve('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}'),
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}')),
+    };
+  };
+
+  const client = createClient({
+    url: 'https://example.com/mcp',
+    fetchImpl: acceptCheckFetch,
+  });
+
+  await client.initialize();
+  assert(acceptHeaderPresent, 'Accept header must be present on initialize');
+});
+
+test('notifications/initialized sent after initialize', async () => {
+  let notificationsInitializedSent = false;
+  const methodTrackingFetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.method === 'notifications/initialized' && !('id' in body)) {
+      notificationsInitializedSent = true;
+      return {
+        ok: true,
+        status: 202,
+        statusText: 'Accepted',
+        headers: { get: () => null },
+        text: () => Promise.resolve(''),
+        arrayBuffer: () => Promise.resolve(new Uint8Array()),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+      text: () => Promise.resolve('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}'),
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}')),
+    };
+  };
+
+  const client = createClient({
+    url: 'https://example.com/mcp',
+    fetchImpl: methodTrackingFetch,
+  });
+
+  await client.initialize();
+  assert(notificationsInitializedSent, 'notifications/initialized must be sent after initialize');
+});
+
+test('MCP-Protocol-Version header echoed on subsequent requests', async () => {
+  let callCount = 0;
+  let versionHeaderOnSecondCall = null;
+
+  const versionTrackingFetch = async (url, options) => {
+    callCount++;
+    if (callCount === 3) {
+      versionHeaderOnSecondCall = options.headers['MCP-Protocol-Version'];
+    }
+    if (options.body && !JSON.parse(options.body).id) {
+      return {
+        ok: true,
+        status: 202,
+        statusText: 'Accepted',
+        headers: { get: () => null },
+        text: () => Promise.resolve(''),
+        arrayBuffer: () => Promise.resolve(new Uint8Array()),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+      text: () => Promise.resolve('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}'),
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}')),
+    };
+  };
+
+  const client = createClient({
+    url: 'https://example.com/mcp',
+    fetchImpl: versionTrackingFetch,
+  });
+
+  await client.initialize();
+  await client.initialize();
+  assert.equal(versionHeaderOnSecondCall, '2024-11-05', 'Protocol version should be echoed in subsequent requests');
+});
+
+test('listTools follows pagination with nextCursor', async () => {
+  let cursorValue = null;
+  const paginatingFetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.params && body.params.cursor) {
+      cursorValue = body.params.cursor;
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: { get: () => null },
+        text: () => Promise.resolve('{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"tool3"},{"name":"tool4"}]}}'),
+        arrayBuffer: () => Promise.resolve(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"tool3"},{"name":"tool4"}]}}')),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+      text: () => Promise.resolve('{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"tool1"},{"name":"tool2"}],"nextCursor":"page2"}}'),
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"tool1"},{"name":"tool2"}],"nextCursor":"page2"}}')),
+    };
+  };
+
+  const client = createClient({
+    url: 'https://example.com/mcp',
+    fetchImpl: paginatingFetch,
+  });
+
+  const tools = await client.listTools();
+  assert.equal(tools.length, 4, 'Should have all 4 tools from both pages');
+  assert.equal(tools[0].name, 'tool1');
+  assert.equal(tools[3].name, 'tool4');
+  assert.equal(cursorValue, 'page2', 'Should pass nextCursor on second request');
+});
+
+test('listTools refuses a repeated pagination cursor instead of looping forever', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (k) => (k === 'Content-Type' ? 'application/json' : null) },
+      arrayBuffer: async () =>
+        new TextEncoder().encode(
+          JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 't' }], nextCursor: 'same' } })
+        ).buffer,
+    };
+  };
+  const client = createClient({ url: 'https://example.test/mcp', fetchImpl });
+  await assert.rejects(() => client.listTools(), /repeated pagination cursor/);
+  assert.ok(calls < 10, `expected an early stop, got ${calls} requests`);
+});
