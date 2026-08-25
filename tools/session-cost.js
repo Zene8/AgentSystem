@@ -35,6 +35,22 @@ export function rowDate(row) {
   return new Date(row.ts || row.timestamp);
 }
 
+// Pure: #519 — fold each row's `unpriced` array (model ids session-cost-compute.js could not
+// price, carried through session-end.sh) into one { model -> total_out_tok } map across all
+// rows in scope. Silence here is the original defect: an unpriced model contributed real
+// output tokens that never appeared in any total, so this must be additive across rows, not
+// last-write-wins, or a second session on the same unpriced model would hide the first.
+export function collectUnpriced(rows) {
+  const out = {};
+  for (const r of rows) {
+    for (const u of (r.unpriced || [])) {
+      if (!u || !u.model) continue;
+      out[u.model] = (out[u.model] || 0) + (u.out_tok || 0);
+    }
+  }
+  return out;
+}
+
 // #155: defense against double-logged rows. Root cause investigated: sona-writeback-hook.js
 // is intentionally registered on BOTH the Stop and SubagentStop events (see HOOK_REGISTRY in tools/deploy-hooks.js),
 // which is by design (main-session AND subagent episodic capture) — but session-end.sh (the writer
@@ -152,6 +168,22 @@ async function main() {
     filtered.slice(-5).reverse().forEach(s => {
       console.log(`  $${(s.cost_usd||0).toFixed(4)} | ${s.agent||'?'} | ${s.in_tok||0}in ${s.out_tok||0}out | ${(s.ts || s.timestamp || '').slice(0,16)}`);
     });
+  }
+
+  // #519: an unpriced model must never be a silent $0 in the total above. Print it loud rather
+  // than failing the process (exit 0 by design) -- session-cost.js is a routine reporting
+  // command run interactively and from other scripts that only expect a summary, and a nonzero
+  // exit here would break those callers on every run touching a model this table hasn't caught
+  // up to yet. The visible cost of that choice is that nothing here enforces a fix -- callers
+  // that need enforcement (e.g. tools/model-tier-guard.js, #519 follow-up) must check this
+  // themselves rather than relying on this process's exit code.
+  const unpriced = collectUnpriced(filtered);
+  const unpricedModels = Object.keys(unpriced);
+  if (unpricedModels.length > 0) {
+    console.log('');
+    for (const model of unpricedModels) {
+      console.log(`  UNPRICED: ${model} (${unpriced[model].toLocaleString()} output tokens)`);
+    }
   }
 }
 
