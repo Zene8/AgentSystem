@@ -10,7 +10,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -22,10 +22,15 @@ const HOOK = path.join(__dirname, 'claude-hooks', 'guard-git.sh');
  * copies the pattern under test proves only that it copied it correctly.
  * @returns {number} 2 when the hook blocks, 0 when it allows.
  */
-function run(command, toolName = 'Bash', cwd = process.cwd()) {
+function run(command, toolName = 'Bash', cwd = process.cwd(), env = null) {
   const input = JSON.stringify({ tool_name: toolName, tool_input: { command } });
   try {
-    execFileSync('bash', [HOOK], { input, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync(env ? BASH : 'bash', [HOOK], {
+      input,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+    });
     return 0;
   } catch (err) {
     return err.status;
@@ -215,4 +220,148 @@ test('allows other gh issue or git commands', () => {
   ]) {
     assert.equal(run(cmd), 0, `should have been allowed: ${cmd}`);
   }
+});
+
+// --- #516: the guard must not evaporate when jq is missing -------------------
+//
+// The payload was parsed with jq only, jq's stderr went to /dev/null, and a host
+// without jq therefore got TOOL="" -> `TOOL != Bash` -> exit 0 on EVERY Bash
+// call. `git push origin main` sailed through with no diagnostic. These tests
+// run the REAL script with a PATH that genuinely has no jq on it, rather than
+// asserting on the source, because "the fallback is written" and "the fallback
+// runs" are different claims and only the second one is the fix.
+
+/** Absolute path to bash, resolved from the UNMODIFIED PATH — the stripped PATH
+ * below may not contain it, and the point is to strip the hook's PATH, not ours. */
+function resolveExe(name) {
+  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const p = path.join(dir, name + ext);
+      try {
+        if (fs.statSync(p).isFile()) return p;
+      } catch { /* next */ }
+    }
+  }
+  return null;
+}
+
+const BASH = resolveExe('bash') || 'bash';
+
+function dirProvides(dir, name) {
+  const exts = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+  return exts.some((ext) => {
+    try {
+      return fs.statSync(path.join(dir, name + ext)).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
+// Externals the hook actually shells out to. `jq`/`node` are deliberately absent
+// from this list — they are what the tests remove.
+const HOOK_EXTERNALS = ['cat', 'tr', 'grep', 'git', 'date', 'mkdir'];
+
+/**
+ * A PATH with every directory that provides any of `hide` removed.
+ *
+ * Removing a directory is blunt: on Linux `jq` lives in /usr/bin next to grep,
+ * tr, cat, date and mkdir, so dropping it would break the hook for reasons that
+ * have nothing to do with this bug and the test would pass vacuously. So after
+ * filtering, anything the hook needs that no longer resolves is re-supplied from
+ * `shimDir` as a one-line exec wrapper around its original absolute path.
+ */
+function pathWithout(hide, shimDir) {
+  const kept = (process.env.PATH || '')
+    .split(path.delimiter)
+    .filter((dir) => dir && !hide.some((name) => dirProvides(dir, name)));
+
+  fs.mkdirSync(shimDir, { recursive: true });
+  for (const name of HOOK_EXTERNALS) {
+    if (kept.some((dir) => dirProvides(dir, name))) continue;
+    const target = resolveExe(name);
+    if (!target) continue;
+    const posix = target.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+    fs.writeFileSync(path.join(shimDir, name), `#!/bin/sh\nexec "${posix}" "$@"\n`, { mode: 0o755 });
+  }
+  return [shimDir, ...kept].join(path.delimiter);
+}
+
+function withTmpDir(fn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-git-nojq-'));
+  try {
+    return fn(tmp);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+test('#516 jq absent: a direct push to main is STILL blocked', () => {
+  withTmpDir((tmp) => {
+    const PATH = pathWithout(['jq'], path.join(tmp, 'shim'));
+    // Sanity: the strip has to be real, or the assertion below proves nothing.
+    assert.equal(
+      spawnSync(BASH, ['-c', 'command -v jq'], { env: { ...process.env, PATH }, encoding: 'utf8' }).status,
+      1,
+      'test setup failed: jq is still on the stripped PATH',
+    );
+    for (const cmd of [
+      `${PUSH} origin ${MAIN}`,
+      `${PUSH} -u origin ${MAIN}`,
+      `${PUSH} ${FORCE} origin ${MASTER}`,
+      'gh issue close 123',
+    ]) {
+      assert.equal(run(cmd, 'Bash', process.cwd(), { PATH }), 2, `should have been blocked with no jq: ${cmd}`);
+    }
+  });
+});
+
+test('#516 jq absent: the node fallback still reads the real command, not a blanket deny', () => {
+  withTmpDir((tmp) => {
+    const PATH = pathWithout(['jq'], path.join(tmp, 'shim'));
+    for (const cmd of [
+      `${PUSH} origin my-feature-branch`,
+      `${PUSH} -u origin issue-516-guard-git-jq-fallback`,
+      `git commit -m 'the ${MAIN} thing'`,
+    ]) {
+      assert.equal(run(cmd, 'Bash', process.cwd(), { PATH }), 0, `should have been allowed with no jq: ${cmd}`);
+    }
+    // And a non-Bash tool is still ignored, i.e. the fallback reads tool_name too.
+    assert.equal(run(`${PUSH} origin ${MAIN}`, 'Read', process.cwd(), { PATH }), 0);
+  });
+});
+
+test('#516 neither jq nor node: allows (never bricks the session) but says so loudly', () => {
+  withTmpDir((tmp) => {
+    const PATH = pathWithout(['jq', 'node', 'nodejs'], path.join(tmp, 'shim'));
+    // POSIX form: the hook is a shell script and derives the log's directory
+    // with `${VAR%/*}`, which knows nothing about backslashes.
+    const log = path.join(tmp, 'guard-git.log');
+    const logForShell = log.replace(/\\/g, '/');
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: `${PUSH} origin ${MAIN}` } });
+    const res = spawnSync(BASH, [HOOK], {
+      input,
+      encoding: 'utf8',
+      env: { ...process.env, PATH, GUARD_GIT_LOG: logForShell },
+    });
+
+    // Fail-closed here would deny every Bash call, including the ones needed to
+    // install jq or node — so exit 0 is the deliberate choice, not an oversight.
+    assert.equal(res.status, 0, 'must not fail closed: denying every Bash call bricks the session');
+    assert.match(res.stderr, /UNGUARDED/, 'the inert state must be visible on stderr');
+    assert(fs.existsSync(log), `expected a log line at ${log}`);
+    const body = fs.readFileSync(log, 'utf8');
+    assert.match(body, /UNGUARDED/);
+    assert.match(body, /neither jq nor node/);
+  });
+});
+
+test('#516 the payload parse has a non-jq path at all', () => {
+  // Cheap structural backstop for the case where a future edit "simplifies" the
+  // fallback away: every jq call must be paired with a node alternative.
+  const code = fs.readFileSync(HOOK, 'utf8');
+  assert.match(code, /command -v node/, 'guard-git.sh must probe for node as a jq fallback');
+  assert.match(code, /JSON\.parse/, 'guard-git.sh must carry a node JSON parse fallback');
 });
