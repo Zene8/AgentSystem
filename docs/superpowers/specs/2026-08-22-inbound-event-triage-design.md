@@ -303,3 +303,58 @@ personal data, before any private source is wired to it.
 - No npm dependencies. Node builtins plus `graph-lib.js` only, per the `tools/**` path rule.
 - `isMainModule(import.meta.url)` from `tools/is-main.js` for every new entry point. Never a
   hand-rolled `process.argv[1]` comparison — `tools/is-main.test.js` fails the build on one.
+
+## Reconciler Call Contract (Phase 6)
+
+The reconciler is a CLI tool in `tools/inbound-reconcile.js`. The skill (`daily-triage`, gitignored
+per #187) calls it to generate the autonomous-action audit section of the closeout.
+
+### Usage
+
+```bash
+node tools/inbound-reconcile.js [--date=YYYY-MM-DD] [--dry-run]
+```
+
+### Flags
+
+- `--date=YYYY-MM-DD`: Which day to reconcile (defaults to today in UTC)
+- `--dry-run`: Report verdict and summary to stdout, raise no alerts, exit 0
+
+### Output
+
+Writes to stdout a Markdown section suitable for embedding in the closeout, with:
+
+1. A "Polling Status" line: ✓ (all tiers active) or ⚠ (staleness detected)
+2. Staleness details (if any): which sources are stale and why
+3. Event summary: count of completed + dead-lettered items, one line per event showing:
+   - Time (HH:MM:SS UTC)
+   - Source (github/gmail/beeper/notion)
+   - Actor
+   - Verdict (action/notify/ignore)
+   - Why (classifier reason)
+   - Action outcome (spawned agent / capped / dropped / etc.)
+
+### Alert Behavior
+
+The tool manages the `inbound-poller-stale` alert:
+
+- **Raises** if any tier's last poll (`lastRunAt`) is older than 3x its cadence interval
+- **Resolves** if all tiers are healthy
+- **In dry-run mode:** no alerts are raised or resolved
+
+Exit code 1 if staleness detected and not `--dry-run`; 0 otherwise.
+
+### Example Integration
+
+```javascript
+// In daily-triage skill:
+const reconcileOutput = execSync('node tools/inbound-reconcile.js --date=2026-08-24').toString();
+closeout += '\n## Autonomous Actions (Inbound Poller)\n\n' + reconcileOutput;
+```
+
+### Date Semantics
+
+Events are attributed to a day by their **completion time** (`completedAt` for done items, `deadAt`
+for dead-lettered items), not by publish time. An item published on day N-1 but completed on day N
+appears in day N's closeout — the closeout records what actions the system *took* that day, not what
+arrived that day.
