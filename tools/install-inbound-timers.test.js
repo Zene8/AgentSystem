@@ -92,11 +92,30 @@ test('--dry-run includes Persistent=true for catch-up after reboot', { skip: !ha
   assert.equal(matches.length, 3, 'should appear once per timer unit (fast, medium, daily)');
 });
 
-test('--check fails when $LIFE_REPO is unset', { skip: !hasBash }, () => {
+test('--dry-run expands environment variables (no literal ${})', { skip: !hasBash }, () => {
+  const r = run(['--dry-run'], scratch());
+  assert(!r.stdout.includes('${'), 'rendered units should not contain literal ${ (env vars must be expanded)');
+  assert(r.stdout.includes('PATH=/'), 'PATH should be expanded to an absolute path');
+  assert(r.stdout.includes('HOME=/'), 'HOME should be expanded to a path starting with /');
+  assert(r.stdout.includes('LIFE_REPO=/tmp/test-life-repo'), 'LIFE_REPO should be expanded to the test value');
+});
+
+test('--check fails when units have no LIFE_REPO environment set', { skip: !hasBash }, () => {
   const home = scratch();
-  const r = run(['--check'], home, { LIFE_REPO: '' });
-  assert.notEqual(r.status, 0, '--check should fail when $LIFE_REPO is unset');
-  assert.match(r.stdout, /LIFE_REPO is unset/);
+  const dir = join(home, 'systemd', 'user');
+  mkdirSync(dir, { recursive: true });
+  // Create units without LIFE_REPO environment (simulating a case where install happened with LIFE_REPO unset)
+  for (const [tier, interval] of Object.entries({ fast: '2min', medium: '10min', daily: '1d' })) {
+    const script = join(HERE, 'inbound', 'poll-run.js');
+    writeFileSync(
+      join(dir, `inbound-poller-${tier}.service`),
+      `[Service]\nType=oneshot\nExecStart=/usr/bin/node ${script} --cadence=${tier}\nSuccessExitStatus=0 3\n`
+    );
+    writeFileSync(join(dir, `inbound-poller-${tier}.timer`), `[Timer]\nOnUnitActiveSec=${interval}\n`);
+  }
+  const r = run(['--check'], home);
+  assert.notEqual(r.status, 0, '--check should fail when units have no LIFE_REPO');
+  assert.match(r.stdout, /drift.*no LIFE_REPO/);
 });
 
 test('--check passes with poller script present and units intact', { skip: !hasBash }, () => {

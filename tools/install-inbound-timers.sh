@@ -60,9 +60,9 @@ WorkingDirectory=$REPO_ROOT
 # so a PATH containing one — a Windows-style dir under WSL, a literal % in a name — either
 # expands to something else or makes systemd reject the whole unit. Same treatment as
 # brain-sync.service.
-Environment="PATH=\${PATH//%/%%}"
-Environment="HOME=\${HOME//%/%%}"
-Environment="LIFE_REPO=\${LIFE_REPO}"
+Environment="PATH=${PATH//%/%%}"
+Environment="HOME=${HOME//%/%%}"
+Environment="LIFE_REPO=${LIFE_REPO}"
 ExecStart=$NODE_BIN $POLLER --cadence=$tier --alert
 # 3 = an adapter or cursor failed and an alert was raised. That is the poller working as
 # designed — hard stops are never silent — so systemd must not mark it failed. Same convention
@@ -131,13 +131,10 @@ case "$MODE" in
       drift=1
     fi
 
-    # Check $LIFE_REPO is set, since every adapter will fail without it and the unit won't
-    # carry a useful error message (stderr goes to the journal, which this check cannot read).
-    if [ -z "${LIFE_REPO:-}" ]; then
-      echo "missing    \$LIFE_REPO is unset — every adapter will fail closed"; drift=1
-    else
-      echo "in sync    \$LIFE_REPO is set to: $LIFE_REPO"
-    fi
+    # The unit files carry LIFE_REPO in their environment; that's what matters.
+    # We verify it below per-tier when checking each .service file.
+    # Note: $LIFE_REPO in the current shell is irrelevant here — we check what was
+    # baked into the units at install time.
 
     # Check each tier's unit pair.
     for tier in "${!TIERS[@]}"; do
@@ -154,8 +151,8 @@ case "$MODE" in
           echo "drift      $svc runs a script that is not there: ${script_path:-<none>}"; drift=1
         elif ! grep -q '^SuccessExitStatus=0 3' "$svc"; then
           echo "drift      $svc lost SuccessExitStatus=0 3 — a raised failure alert would read as a unit failure"; drift=1
-        elif ! grep -q "^Environment=\"LIFE_REPO=" "$svc"; then
-          echo "drift      $svc has no LIFE_REPO environment variable — every adapter will fail"; drift=1
+        elif ! grep -q '^Environment="LIFE_REPO=.' "$svc"; then
+          echo "drift      $svc has no LIFE_REPO environment variable (or it is empty) — every adapter will fail"; drift=1
         else
           echo "in sync    $svc -> $script_path"
         fi
