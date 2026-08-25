@@ -133,6 +133,28 @@ function runHookSync(scriptName, args, payload, workspacePath) {
   return status === 0 ? stdout : '';
 }
 
+/**
+ * Like runHookSync, but keeps the exit status and both streams. runHookSync returns '' whenever
+ * the child exits non-zero, which is exactly what a DENYING hook does — so a deny is
+ * indistinguishable there from an empty allow. #508's secret guard denies with exit 2 and must
+ * be honoured on this host too.
+ */
+function runHookCapture(scriptName, payload, workspacePath) {
+  const isBash = scriptName.endsWith('.sh');
+  const scriptPath = path.join(__dirname, scriptName);
+  const cmd = isBash ? 'bash' : process.execPath;
+  try {
+    const stdout = execFileSync(cmd, [scriptPath], {
+      input: JSON.stringify(payload), cwd: workspacePath, encoding: 'utf8', timeout: 15000,
+    });
+    return { status: 0, out: String(stdout || '') };
+  } catch (e) {
+    // Never log e.message here: for a guard whose input is a command line, the message can
+    // carry the command back into the debug log.
+    return { status: typeof e.status === 'number' ? e.status : 1, out: String(e.stdout || '') + String(e.stderr || '') };
+  }
+}
+
 function runHookAsync(scriptName, args, payload, workspacePath) {
   if (typeof args === 'object' && !Array.isArray(args)) {
     payload = args;
@@ -223,6 +245,16 @@ function handlePreToolUse(payload, workspacePath) {
       }
     };
     
+    // Secret guard FIRST (#508), and deliberately before the logDebug below: that line writes
+    // the command — literal secret included — to the debug log, so the guard must have had its
+    // say before anything renders the command anywhere.
+    const secrets = runHookCapture('guard-secrets.js', subPayload, workspacePath);
+    if (secrets.status === 2) {
+      logDebug('Blocked by guard-secrets: inlined literal secret'); // never log the command here
+      console.log(JSON.stringify({ decision: 'deny', reason: secrets.out.trim() }));
+      return;
+    }
+
     logDebug(`Running PreToolUse git-guard for command: ${cmdLine}`);
     const { status, stdout, stderr } = runHookCaptured('claude-hooks/guard-git.sh', subPayload, workspacePath);
 

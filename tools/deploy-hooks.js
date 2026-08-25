@@ -146,6 +146,11 @@ export const HOOK_REGISTRY = [
   // PostToolUse can now *replace* a result via hookSpecificOutput.updatedToolOutput, so a
   // redo would actually save. Nobody has asked for one — don't build it on spec.
   { event: 'PreToolUse',       command: b('guard-git.sh'),                      timeout: 5,  statusMessage: 'Guarding git...',               matcher: 'Bash' },
+  // #508: denies a Bash call whose command string holds the literal value of a ~/.claude/*.key
+  // file. tool_input.command is recorded verbatim in the transcript and ~/.claude/history.jsonl,
+  // so *using* a secret inline publishes it — the instruction "never print the value" cannot
+  // reach that path, which is how #506 leaked a key three times while being obeyed.
+  { event: 'PreToolUse',       command: n('guard-secrets.js'),                  timeout: 5,  statusMessage: 'Guarding secrets...',           matcher: 'Bash' },
   { event: 'Stop',             command: n('sona-writeback-hook.js'),            timeout: 5,  statusMessage: 'Writing episodic memory...' },
   { event: 'Stop',             command: n('injection-feedback-hook.js'),        timeout: 5,  statusMessage: 'Scoring memory usefulness...' },
   { event: 'Stop',             command: n('routine-compliance-hook.js'),        timeout: 5,  statusMessage: 'Checking routine compliance...' },
