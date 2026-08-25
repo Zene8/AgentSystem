@@ -42,12 +42,36 @@ export async function defaultClientFactory(opts = {}) {
  *
  * The allowlist is fail-closed: empty or missing yields ZERO items. This is load-bearing —
  * it is the outer gate that prevents accidentally polling all chats.
+ *
+ * Matching strategy: entries are matched in order of stability and security.
+ * - Bare entries or "id:" prefix: match on stable chat/room ID only (recommended, not spoofable)
+ * - "name:" prefix: match on display name — spoofable by anyone who can rename the room
+ *
+ * Example allowlist:
+ *   chats_allow: [room_id_123, "id:room_id_456", "name:Family"]
+ *
+ * SECURITY: A chat can be spoofed by renaming if you match on display name.
+ * Match on ID (bare or id: prefix) to prevent third-party spoofing.
  */
-export function isAllowed(chatName, chatsAllow = []) {
+export function isAllowed(chatId, chatName, chatsAllow = []) {
   if (!Array.isArray(chatsAllow) || chatsAllow.length === 0) {
     return false;
   }
-  return chatsAllow.includes(chatName);
+
+  for (const entry of chatsAllow) {
+    // Explicit ID match: "id:room_id_123" or bare "room_id_123"
+    if (entry.startsWith('id:')) {
+      if (chatId === entry.slice(3)) return true;
+    } else if (!entry.includes(':')) {
+      // Bare entry without colon: treat as ID (stable, not spoofable)
+      if (chatId === entry) return true;
+    } else if (entry.startsWith('name:')) {
+      // Explicit name match: "name:Family" — spoofable warning in doc above
+      if (chatName === entry.slice(5)) return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -82,11 +106,12 @@ export function urlFor(message, chatName) {
 export function isInteresting(message, policy) {
   const chatsAllow = (policy && policy.chatsAllow) || [];
 
-  // Get the chat name with fallback to room_name
-  const chatName = message.chat_name || message.room_name;
+  // Get stable chat ID and display name
+  const chatId = message.chat_id || message.room_id || '';
+  const chatName = message.chat_name || message.room_name || '';
 
   // Empty allowlist is fail-closed
-  if (!isAllowed(chatName, chatsAllow)) {
+  if (!isAllowed(chatId, chatName, chatsAllow)) {
     return false;
   }
 
@@ -103,23 +128,34 @@ export function isInteresting(message, policy) {
   return true;
 }
 
+/**
+ * Convert a message to an envelope, or throw if the timestamp is unparseable.
+ *
+ * DO NOT invent timestamps. Messages without a real timestamp are dropped from the batch.
+ * A fabricated timestamp would advance the cursor past real messages, causing silent data loss.
+ */
 function toEnvelope(message, chatName) {
   const sender = message.sender || message.author || '(unknown)';
   const body = message.body || (message.content && message.content.body) || '';
   const subject = `[${chatName}] ${sender}`;
 
-  // Handle timestamp: prefer ISO string, fall back to millisecond timestamp, then current time
+  // Handle timestamp: prefer ISO string, fall back to millisecond timestamp
+  // DO NOT fall back to current time — that would advance the cursor past real data.
   let ts = message.timestamp;
   if (!ts && message.origin_server_ts) {
     // origin_server_ts is in milliseconds; convert to ISO string
     const numMs = typeof message.origin_server_ts === 'number'
       ? message.origin_server_ts
       : Number(message.origin_server_ts);
-    if (!Number.isNaN(numMs)) {
+    if (!Number.isNaN(numMs) && numMs > 0) {
       ts = new Date(numMs).toISOString();
     }
   }
-  if (!ts) ts = new Date().toISOString();
+
+  // Throw if we have no timestamp — this message will be dropped from the batch.
+  if (!ts) {
+    throw new Error('message has no parseable timestamp');
+  }
 
   return normalizeEnvelope({
     source: 'beeper',
@@ -185,8 +221,8 @@ export async function poll({
 
   const items = [];
   const invalid = [];
-  let newestTimestamp = cursor ? Date.parse(cursor) || 0 : 0;
-  let newestCursorId = cursor;
+  let newestTimestamp = null;
+  let newestCursorId = null;
 
   for (const message of messages) {
     if (!message || typeof message !== 'object') continue;
@@ -194,27 +230,20 @@ export async function poll({
     const chatName = message.chat_name || message.room_name || '(unknown)';
     const msgId = message.id || message.event_id;
 
-    // Track the newest timestamp and its associated ID
-    let msgTimestamp = 0;
-    if (message.timestamp) {
-      msgTimestamp = Date.parse(message.timestamp) || 0;
-    } else if (message.origin_server_ts) {
-      // origin_server_ts is in milliseconds
-      const numMs = typeof message.origin_server_ts === 'number'
-        ? message.origin_server_ts
-        : Number(message.origin_server_ts);
-      msgTimestamp = Number.isNaN(numMs) ? 0 : numMs;
-    }
-
-    if (msgTimestamp > newestTimestamp) {
-      newestTimestamp = msgTimestamp;
-      newestCursorId = msgId;
-    }
-
     if (!isInteresting(message, policy)) continue;
 
     try {
-      items.push(toEnvelope(message, chatName));
+      const envelope = toEnvelope(message, chatName);
+      items.push(envelope);
+
+      // ONLY advance cursor from successfully-created envelopes with real timestamps.
+      // A message that fails envelope creation is dropped, and its timestamp (if any)
+      // is never used. This prevents bad/unparseable timestamps from advancing the cursor.
+      const msgTimestamp = Date.parse(envelope.ts);
+      if (newestTimestamp === null || msgTimestamp > newestTimestamp) {
+        newestTimestamp = msgTimestamp;
+        newestCursorId = msgId;
+      }
     } catch (err) {
       invalid.push({
         id: msgId || 'unknown',
@@ -226,9 +255,13 @@ export async function poll({
   // Oldest first, same as GitHub
   items.sort((a, b) => a.ts.localeCompare(b.ts));
 
+  // Cursor advances only if we found valid messages. Otherwise keep the incoming cursor.
+  // This ensures we never lose position if there are no new messages.
+  const finalCursor = newestCursorId !== null ? newestCursorId : cursor;
+
   return {
     items,
-    cursor: newestCursorId,
+    cursor: finalCursor,
     seen: messages.length,
     invalid,
   };

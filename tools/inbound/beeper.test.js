@@ -13,13 +13,14 @@ import {
 } from './beeper.js';
 
 const POLICY = {
-  chatsAllow: ['#general', '#alerts'],
+  chatsAllow: ['room_general', 'id:room_alerts'],
 };
 
 function message(over = {}) {
   return {
     id: 'evt_001',
     sender: 'alice@beeper.com',
+    chat_id: 'room_general',
     chat_name: '#general',
     body: 'Hello world',
     timestamp: '2026-08-22T10:00:00Z',
@@ -42,15 +43,36 @@ function stubClient(messages) {
 }
 
 test('isAllowed: empty allowlist is fail-closed', () => {
-  assert.equal(isAllowed('#general', []), false);
-  assert.equal(isAllowed('#general', null), false);
-  assert.equal(isAllowed('#general', undefined), false);
+  assert.equal(isAllowed('room_general', '#general', []), false);
+  assert.equal(isAllowed('room_general', '#general', null), false);
+  assert.equal(isAllowed('room_general', '#general', undefined), false);
 });
 
-test('isAllowed: allowlist matching works', () => {
-  assert.equal(isAllowed('#general', ['#general', '#alerts']), true);
-  assert.equal(isAllowed('#alerts', ['#general', '#alerts']), true);
-  assert.equal(isAllowed('#random', ['#general', '#alerts']), false);
+test('isAllowed: bare entries match on stable chat ID (not spoofable)', () => {
+  assert.equal(isAllowed('room_general', '#general', ['room_general']), true);
+  assert.equal(isAllowed('room_alerts', '#alerts', ['room_alerts']), true);
+  assert.equal(isAllowed('room_unknown', '#general', ['room_general']), false);
+  // Name alone does not match bare entries
+  assert.equal(isAllowed('room_other', '#general', ['room_general']), false);
+});
+
+test('isAllowed: id: prefix is explicit ID matching', () => {
+  assert.equal(isAllowed('room_general', '#general', ['id:room_general']), true);
+  assert.equal(isAllowed('room_unknown', '#general', ['id:room_general']), false);
+});
+
+test('isAllowed: name: prefix matches display name but is spoofable', () => {
+  // A third party can rename a chat to match a name: entry
+  assert.equal(isAllowed('room_other', '#general', ['name:#general']), true);
+  assert.equal(isAllowed('room_other', '#changed', ['name:#general']), false);
+});
+
+test('isAllowed: entries can be mixed (bare IDs + name: entries)', () => {
+  const mixed = ['room_general', 'name:#family', 'id:room_special'];
+  assert.equal(isAllowed('room_general', '#anything', mixed), true);
+  assert.equal(isAllowed('room_other', '#family', mixed), true);
+  assert.equal(isAllowed('room_special', '#anything', mixed), true);
+  assert.equal(isAllowed('room_unknown', '#unknown', mixed), false);
 });
 
 test('externalIdFor creates stable IDs from message.id', () => {
@@ -91,7 +113,7 @@ test('urlFor returns app root when no chat name available', () => {
 
 test('isInteresting gates on allowlist, which is fail-closed when empty', () => {
   assert.equal(isInteresting(message(), POLICY), true);
-  assert.equal(isInteresting(message({ chat_name: '#random' }), POLICY), false);
+  assert.equal(isInteresting(message({ chat_id: 'room_random', chat_name: '#random' }), POLICY), false);
   assert.equal(isInteresting(message(), { chatsAllow: [] }), false);
   assert.equal(isInteresting(message(), {}), false);
 });
@@ -131,9 +153,9 @@ test('poll returns normalized envelopes, oldest first', async () => {
 
 test('poll respects the allowlist and filters out non-allowed chats', async () => {
   const { client } = stubClient([
-    message({ id: 'evt_1', chat_name: '#general' }),
-    message({ id: 'evt_2', chat_name: '#random', body: 'Should be filtered' }),
-    message({ id: 'evt_3', chat_name: '#alerts' }),
+    message({ id: 'evt_1', chat_id: 'room_general', chat_name: '#general' }),
+    message({ id: 'evt_2', chat_id: 'room_random', chat_name: '#random', body: 'Should be filtered' }),
+    message({ id: 'evt_3', chat_id: 'room_alerts', chat_name: '#alerts' }),
   ]);
 
   const out = await poll({ cursor: null, policy: POLICY, clientFactory: client });
@@ -223,14 +245,47 @@ test('poll truncates long message bodies to 4000 chars', async () => {
 
 test('poll uses fallback timestamp when message.timestamp is missing', async () => {
   const { client } = stubClient([
-    message({ id: 'evt_1', timestamp: null, origin_server_ts: 1692700800000 }),
+    message({ id: 'evt_1', chat_id: 'room_general', timestamp: null, origin_server_ts: 1692700800000 }),
   ]);
 
   const out = await poll({ cursor: null, policy: POLICY, clientFactory: client });
 
   assert.equal(out.items.length, 1);
-  // Should have parsed the origin_server_ts or used a date
+  // Should have parsed the origin_server_ts
   assert.ok(out.items[0].ts);
+});
+
+test('poll with unparseable timestamp message does not advance cursor past real one', async () => {
+  const { client } = stubClient([
+    message({ id: 'evt_1', chat_id: 'room_general', timestamp: '2026-08-22T10:00:00Z' }),
+    message({ id: 'evt_2', chat_id: 'room_general', timestamp: 'not-a-date' }),
+    message({ id: 'evt_3', chat_id: 'room_general', timestamp: '2026-08-22T12:00:00Z' }),
+  ]);
+
+  const out = await poll({ cursor: null, policy: POLICY, clientFactory: client });
+
+  // evt_2 should be in invalid (unparseable timestamp)
+  assert.equal(out.items.length, 2);
+  assert.equal(out.invalid.length, 1);
+  assert.equal(out.invalid[0].id, 'evt_2');
+  // Cursor should be evt_3 (the newest real timestamp)
+  assert.equal(out.cursor, 'evt_3');
+});
+
+test('poll cursor stays same when no valid messages are found', async () => {
+  const { client } = stubClient([
+    // All messages are filtered out by allowlist or other gates
+  ]);
+
+  const out = await poll({
+    cursor: 'evt_preserved',
+    policy: POLICY,
+    clientFactory: client,
+  });
+
+  // Cursor should not advance if no messages pass the filters
+  assert.equal(out.cursor, 'evt_preserved');
+  assert.equal(out.items.length, 0);
 });
 
 test('poll throws on auth failure (expired token scenario)', async () => {
@@ -315,12 +370,12 @@ test('poll with injected fetchImpl (no real network)', async () => {
 
 test('poll handles room_name fallback when chat_name is missing', async () => {
   const { client } = stubClient([
-    message({ id: 'evt_1', chat_name: null, room_name: '#alerts' }),
+    message({ id: 'evt_1', chat_id: 'room_alerts', chat_name: null, room_name: '#alerts' }),
   ]);
 
   const out = await poll({
     cursor: null,
-    policy: { chatsAllow: ['#alerts'] },
+    policy: { chatsAllow: ['room_alerts'] },
     clientFactory: client,
   });
 
@@ -330,7 +385,7 @@ test('poll handles room_name fallback when chat_name is missing', async () => {
 
 test('poll handles event_id fallback for externalId', async () => {
   const { client } = stubClient([
-    message({ id: null, event_id: '$matrix_event_123' }),
+    message({ id: null, chat_id: 'room_general', event_id: '$matrix_event_123' }),
   ]);
 
   const out = await poll({ cursor: null, policy: POLICY, clientFactory: client });
