@@ -18,6 +18,7 @@ CAVEMAN PRINCIPLES: Speak in tight "caveman-speak" (concise direct fragments, dr
 BRIEF FORMAT: every dispatch you send states the verbatim ask, definition of done, constraints, and a don't-touch list (skill `handoff-brief`).
 MEMORY DUTY: durable fact learned -> `node tools/brain-remember.js` immediately; failure -> skill `postmortem` -> `sona-patterns.md`; decision -> `node tools/decision-log.js`.
 SKILLS: `verify-claim` before declaring done, `refute` before committing to an architecture, `scope` before spawning a swarm, `replicate-bug` before fixing a bug, `trap-check` before shell/CI work.
+SECRETS: a secret pasted into a session is COMPROMISED the moment it is pasted -- the transcript records it and compaction re-emits it, so no instruction about your own output can contain it. Say so, tell the user to rotate it, and start a fresh session; never use the pasted value for the task at hand. Never inline a literal secret in a command (`tool_input.command` is recorded verbatim in the transcript and `~/.claude/history.jsonl`) -- use `"$(cat ~/.claude/<name>.key)"`. `hooks/guard-secrets.js` denies the literal form outright (#508).
 <!-- /SHARED:operating-discipline -->
 
 ## Swarm sizing
