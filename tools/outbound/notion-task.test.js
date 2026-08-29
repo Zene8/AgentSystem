@@ -80,7 +80,7 @@ test('createTask calls notion-create-pages with correct structure', async () => 
   assert.equal(capturedCall.args.parent.database_id, 'db-123');
 });
 
-test('createTask in dry-run mode returns what would be created', async () => {
+test('createTask in dry-run mode returns pageData without url/pageId', async () => {
   const factory = stubClientFactory();
   const result = await createTask({
     title: 'My Task',
@@ -90,9 +90,9 @@ test('createTask in dry-run mode returns what would be created', async () => {
   });
 
   assert.equal(result.dryRun, true);
-  assert.match(result.url, /DRY-RUN/);
-  assert.match(result.url, /My Task/);
   assert.ok(result.pageData, 'should include pageData in dry-run');
+  assert.equal(result.url, undefined, 'dryRun should not set url');
+  assert.equal(result.pageId, undefined, 'dryRun should not set pageId');
 });
 
 test('createTask propagates API errors', async () => {
@@ -161,7 +161,7 @@ test('createTask never calls mutating tools other than notion-create-pages', asy
   assert.ok(result.url);
 });
 
-test('createTask accepts optional body and more properties', async () => {
+test('createTask accepts optional moreProps', async () => {
   let capturedCall = null;
   const factory = () => {
     return {
@@ -175,13 +175,14 @@ test('createTask accepts optional body and more properties', async () => {
 
   await createTask({
     title: 'Test Title',
-    body: 'This is the description',
     databaseId: 'db-123',
-    moreProps: { custom_field: 'value' },
+    moreProps: { custom_field: 'value', status: 'In Progress' },
     mcpClientFactory: factory,
   });
 
-  assert.ok(capturedCall.args.properties.custom_field, 'should include moreProps');
+  assert.ok(capturedCall.args.properties.custom_field, 'should include custom_field in moreProps');
+  assert.equal(capturedCall.args.properties.custom_field, 'value');
+  assert.equal(capturedCall.args.properties.status, 'In Progress');
 });
 
 test('createTask builds correct Notion URL from page id', async () => {

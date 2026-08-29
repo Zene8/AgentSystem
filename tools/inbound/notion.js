@@ -86,13 +86,17 @@ export function isInteresting(page, policy) {
 
 /**
  * Normalize a Notion page to an envelope.
+ * Throws if the page lacks last_edited_time — never fabricates timestamps.
  */
 function toEnvelope(page) {
+  if (!page.last_edited_time) {
+    throw new Error('Notion page missing last_edited_time — cannot order');
+  }
   const title = getTitleFrom(page);
   return normalizeEnvelope({
     source: 'notion',
     externalId: externalIdFor(page),
-    ts: page.last_edited_time || new Date().toISOString(),
+    ts: page.last_edited_time,
     actor: page.created_by?.name || page.created_by?.id || 'Notion',
     subject: `Task: ${title}`,
     body: formatBody(page),
@@ -150,13 +154,13 @@ export async function poll({
       for (const page of result) {
         if (!page || typeof page !== 'object') continue;
 
-        const edited = page.last_edited_time ? Date.parse(page.last_edited_time) : 0;
-        if (edited > newest) newest = edited;
-
         if (!isInteresting(page, policy)) continue;
 
         try {
           items.push(toEnvelope(page));
+          // Only advance newest from pages that produced valid envelopes
+          const edited = page.last_edited_time ? Date.parse(page.last_edited_time) : 0;
+          if (edited > newest) newest = edited;
         } catch (err) {
           invalid.push({ id: page.id, error: err.message });
         }

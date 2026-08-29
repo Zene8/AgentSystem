@@ -8,6 +8,17 @@
 import { createClient, validateToken } from '../mcp-client.js';
 
 const MCP_ENDPOINT = 'https://calendarmcp.googleapis.com/mcp/v1';
+const ISO8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Validate that a string is in ISO 8601 format (YYYY-MM-DDTHH:MM:SS[.mmm][Z|±HH:MM]).
+ * @throws {Error} If the timestamp is not in ISO 8601 format.
+ */
+function validateISO8601(timestamp, fieldName) {
+  if (!ISO8601_REGEX.test(timestamp)) {
+    throw new Error(`${fieldName} must be in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ or similar): ${timestamp}`);
+  }
+}
 
 /**
  * Create an MCP client for Google Calendar.
@@ -22,18 +33,19 @@ function defaultMcpClientFactory({ token = process.env.GOOGLE_OAUTH_ACCESS_TOKEN
  * Create a new calendar event.
  *
  * Calls the Calendar MCP endpoint to create an event on the user's primary calendar.
- * Returns the created event ID and URL.
+ * Returns the created event ID and URL on success; on dryRun returns eventData without url/eventId.
  *
  * @param {Object} options
  * @param {string} options.title - Event title (required)
- * @param {string} options.start - Start time in ISO 8601 format (required)
- * @param {string} options.end - End time in ISO 8601 format (required)
+ * @param {string} options.start - Start time in ISO 8601 format, e.g. "2026-08-25T10:00:00Z" (required)
+ * @param {string} options.end - End time in ISO 8601 format; must be after start (required)
  * @param {string} [options.description] - Event description
- * @param {string[]} [options.attendees] - List of attendee email addresses
+ * @param {string[]} [options.attendees] - List of attendee email addresses (requires allowInvites=true)
+ * @param {boolean} [options.allowInvites=false] - If true, allow sending invitations to attendees; if false and attendees provided, throws
  * @param {Function} [options.mcpClientFactory] - Factory to create MCP client (injectable)
- * @param {boolean} [options.dryRun] - If true, return what would be created without creating it
- * @returns {Promise<{ eventId: string, url: string }>} Created event ID and calendar URL
- * @throws {Error} If the write fails or credentials are missing
+ * @param {boolean} [options.dryRun] - If true, return { dryRun: true, eventData } without creating or setting url/eventId
+ * @returns {Promise<{ eventId: string, url: string } | { dryRun: true, eventData: Object }>}
+ * @throws {Error} If validation fails, credentials missing, or end is not after start
  */
 export async function createEvent({
   title,
@@ -43,6 +55,7 @@ export async function createEvent({
   attendees = [],
   mcpClientFactory = defaultMcpClientFactory,
   dryRun = false,
+  allowInvites = false,
 } = {}) {
   if (!title || typeof title !== 'string') {
     throw new Error('createEvent: title is required and must be a string');
@@ -54,14 +67,28 @@ export async function createEvent({
     throw new Error('createEvent: end is required and must be an ISO 8601 timestamp');
   }
 
-  // Validate timestamps are in ISO 8601 format
+  // Validate ISO 8601 format strictly
+  validateISO8601(start, 'start');
+  validateISO8601(end, 'end');
+
+  // Validate timestamps parse correctly
   const startDate = new Date(start);
   const endDate = new Date(end);
   if (Number.isNaN(startDate.getTime())) {
-    throw new Error('createEvent: start and end must be valid ISO 8601 timestamps');
+    throw new Error('createEvent: start is not a valid ISO 8601 timestamp');
   }
   if (Number.isNaN(endDate.getTime())) {
-    throw new Error('createEvent: start and end must be valid ISO 8601 timestamps');
+    throw new Error('createEvent: end is not a valid ISO 8601 timestamp');
+  }
+
+  // Validate end > start
+  if (endDate <= startDate) {
+    throw new Error('createEvent: end must be after start');
+  }
+
+  // Guard attendees behind allowInvites flag
+  if (attendees && attendees.length > 0 && !allowInvites) {
+    throw new Error('createEvent: attendees require allowInvites=true to prevent unintended invitations');
   }
 
   // Build the event object in Google Calendar API format
@@ -77,9 +104,8 @@ export async function createEvent({
   }
 
   if (dryRun) {
-    // In dry-run mode, return what would be created
+    // In dry-run mode, return what would be created (no url/eventId fields)
     return {
-      url: `[DRY-RUN] Would create event: "${title}" from ${start} to ${end}`,
       dryRun: true,
       eventData,
     };
