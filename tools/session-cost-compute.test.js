@@ -105,6 +105,67 @@ test('computeSessionCost returns ok:false for a missing transcript', () => {
   assert.strictEqual(result.ok, false);
 });
 
+// #519: claude-opus-5 is the id sync-agents.js actually dispatches (tools/sync-agents.js:44,
+// MODELS.claude) — the old table only had the never-dispatched claude-opus-4-8, so the
+// dominant, most expensive tier was priced at $0 with no error.
+test('#519: buildPricingTable prices claude-opus-5 at $5/$25 per 1M', () => {
+  const pricing = buildPricingTable(new Date('2026-01-01'));
+  assert.strictEqual(pricing['claude-opus-5'].input, 5.00);
+  assert.strictEqual(pricing['claude-opus-5'].output, 25.00);
+  assert.strictEqual(pricing['claude-opus-5'].cacheWrite5m, 6.25);
+  assert.strictEqual(pricing['claude-opus-5'].cacheWrite1h, 10.00);
+  assert.strictEqual(pricing['claude-opus-5'].cacheRead, 0.50);
+});
+
+test('#519: buildPricingTable prices fable at $10/$50 per 1M', () => {
+  const pricing = buildPricingTable(new Date('2026-01-01'));
+  assert.strictEqual(pricing['fable'].input, 10.00);
+  assert.strictEqual(pricing['fable'].output, 50.00);
+  assert.strictEqual(pricing['claude-fable-5'].input, 10.00);
+});
+
+test('#519: bare aliases opus/sonnet/haiku resolve to their concrete tier prices', () => {
+  const pricing = buildPricingTable(new Date('2026-01-01'));
+  assert.deepStrictEqual(pricing['opus'], pricing['claude-opus-5']);
+  assert.deepStrictEqual(pricing['haiku'], pricing['claude-haiku-4-5-20251001']);
+  assert.deepStrictEqual(pricing['sonnet'], pricing['claude-sonnet-5']);
+});
+
+test('#519: bare "sonnet" alias tracks the date-dependent intro pricing, not a frozen copy', () => {
+  const before = buildPricingTable(new Date('2026-07-01'));
+  const after = buildPricingTable(new Date('2026-09-01'));
+  assert.strictEqual(before['sonnet'].input, 2.00); // intro rate
+  assert.strictEqual(after['sonnet'].input, 3.00);  // standard rate post-rollover
+});
+
+test('#519: priceUsage prices opus-5 usage correctly end-to-end', () => {
+  const byModel = { 'claude-opus-5': { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_5m: 0, cache_1h: 0, cache_read: 0 } };
+  const pricing = buildPricingTable(new Date('2026-01-01'));
+  const result = priceUsage(byModel, pricing);
+  assert.strictEqual(result.cost_usd, 30.00); // $5 input + $25 output at 1M each
+  assert.deepStrictEqual(result.unknown_models, []);
+});
+
+test('#519: <synthetic> prices at $0 and is NOT reported as an unknown model', () => {
+  const byModel = { '<synthetic>': { input_tokens: 0, output_tokens: 0, cache_5m: 0, cache_1h: 0, cache_read: 0 } };
+  const pricing = buildPricingTable();
+  const result = priceUsage(byModel, pricing);
+  assert.strictEqual(result.models['<synthetic>'].cost_usd, 0);
+  assert.deepStrictEqual(result.unknown_models, []);
+});
+
+test('#519: a genuinely unknown model alongside <synthetic> is still flagged (not buried)', () => {
+  const byModel = {
+    '<synthetic>': { input_tokens: 0, output_tokens: 0, cache_5m: 0, cache_1h: 0, cache_read: 0 },
+    'claude-nonexistent-9': { input_tokens: 100, output_tokens: 200_000, cache_5m: 0, cache_1h: 0, cache_read: 0 },
+  };
+  const pricing = buildPricingTable();
+  const result = priceUsage(byModel, pricing);
+  assert.deepStrictEqual(result.unknown_models, ['claude-nonexistent-9']);
+  assert.strictEqual(result.models['claude-nonexistent-9'].cost_usd, null);
+  assert.strictEqual(result.models['claude-nonexistent-9'].output_tokens, 200_000);
+});
+
 test('computeSessionCost reads a real transcript file end-to-end', () => {
   const dir = mkdtempSync(join(tmpdir(), 'scc-test-'));
   const file = join(dir, 'transcript.jsonl');

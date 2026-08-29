@@ -30,12 +30,32 @@ function sonnet5Pricing(now) {
   return { input: 3.00, output: 15.00, cacheWrite5m: 3.75, cacheWrite1h: 6.00, cacheRead: 0.30 };
 }
 
+// Concrete tier prices, defined once so bare aliases (#519 — 'opus'/'sonnet'/'haiku' show up in
+// transcripts too, not just the versioned ids) resolve to the SAME numbers as their versioned
+// counterparts instead of a second, driftable copy. 'sonnet' resolves through the date-dependent
+// sonnet5Pricing(now) path rather than a frozen snapshot, so the 2026-08-31 intro-rate rollover
+// applies to the alias too.
+const OPUS_5_PRICE  = { input: 5.00,  output: 25.00, cacheWrite5m: 6.25,  cacheWrite1h: 10.00, cacheRead: 0.50 };
+const FABLE_PRICE   = { input: 10.00, output: 50.00, cacheWrite5m: 12.50, cacheWrite1h: 20.00, cacheRead: 1.00 };
+const HAIKU_PRICE   = { input: 1.00,  output: 5.00,  cacheWrite5m: 1.25,  cacheWrite1h: 2.00,  cacheRead: 0.10 };
+
 export function buildPricingTable(now = new Date()) {
+  const sonnetPrice = sonnet5Pricing(now);
   return {
-    'claude-opus-4-8':           { input: 5.00, output: 25.00, cacheWrite5m: 6.25, cacheWrite1h: 10.00, cacheRead: 0.50 },
-    'claude-sonnet-5':           sonnet5Pricing(now),
-    'claude-haiku-4-5-20251001': { input: 1.00, output: 5.00,  cacheWrite5m: 1.25, cacheWrite1h: 2.00,  cacheRead: 0.10 },
-    'claude-haiku-4-5':          { input: 1.00, output: 5.00,  cacheWrite5m: 1.25, cacheWrite1h: 2.00,  cacheRead: 0.10 },
+    // claude-opus-4-8 kept for historical transcripts already on disk; claude-opus-5 (#519) is
+    // the id sync-agents.js actually dispatches ($5/$25, identical tier — see MODELS.claude).
+    'claude-opus-4-8':           OPUS_5_PRICE,
+    'claude-opus-5':             OPUS_5_PRICE,
+    'claude-fable-5':            FABLE_PRICE,
+    'fable':                     FABLE_PRICE,
+    'claude-sonnet-5':           sonnetPrice,
+    'claude-haiku-4-5-20251001': HAIKU_PRICE,
+    'claude-haiku-4-5':          HAIKU_PRICE,
+    // Bare aliases (#519): seen ~10x/10x/2x in transcripts since 2026-08-20 alongside the
+    // versioned ids. Resolve to the current concrete tier rather than reporting unpriced.
+    'opus':                      OPUS_5_PRICE,
+    'sonnet':                    sonnetPrice,
+    'haiku':                     HAIKU_PRICE,
   };
 }
 
@@ -74,6 +94,12 @@ export function aggregateUsage(transcriptText) {
   return byModel;
 }
 
+// Claude Code's own placeholder for a turn with no real model call (a suppressed response, a
+// server error before inference) -- always 0 tokens (confirmed against live transcripts, #519).
+// It is EXPECTED to be free, not a pricing gap, so it must never land in unknown_models next to
+// an actually-unpriced model id -- that would bury the real gap in noise on every run.
+const SYNTHETIC_MODEL = '<synthetic>';
+
 // Pure: price aggregated per-model usage. Unknown models are reported separately
 // (not silently priced at $0 and not silently dropped) so a new/renamed model shows
 // up as a visible gap instead of a quietly wrong total.
@@ -85,6 +111,11 @@ export function priceUsage(byModel, pricing) {
   for (const [model, u] of Object.entries(byModel)) {
     totalIn += u.input_tokens;
     totalOut += u.output_tokens;
+
+    if (model === SYNTHETIC_MODEL) {
+      models[model] = { ...u, cost_usd: 0 };
+      continue;
+    }
 
     const price = pricing[model];
     if (!price) {

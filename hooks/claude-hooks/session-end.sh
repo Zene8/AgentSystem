@@ -29,8 +29,14 @@ COMPUTED=$(node ~/dev/AgentSystem/tools/session-cost-compute.js "$TRANSCRIPT_PAT
 COST=$(echo "$COMPUTED" | jq -r '.cost_usd // 0' 2>/dev/null || echo "0")
 IN_TOK=$(echo "$COMPUTED" | jq -r '.in_tok // 0' 2>/dev/null || echo "0")
 OUT_TOK=$(echo "$COMPUTED" | jq -r '.out_tok // 0' 2>/dev/null || echo "0")
+# #519: session-cost-compute.js already collects unknown_models (model ids with no pricing
+# entry) but they were never persisted past this point, so a new/renamed model id silently
+# priced at $0 with no record anywhere. Carry the model id + its output-token volume into the
+# log row so session-cost.js can surface it later -- an empty array is the common case and
+# costs one extra "[]" per line.
+UNPRICED=$(echo "$COMPUTED" | jq -c '[(.unknown_models // [])[] as $m | {model: $m, out_tok: (.models[$m].output_tokens // 0)}]' 2>/dev/null || echo "[]")
 
-echo "{\"ts\":\"$TIMESTAMP\",\"session\":\"$SESSION_ID\",\"agent\":\"$AGENT\",\"cost_usd\":$COST,\"in_tok\":$IN_TOK,\"out_tok\":$OUT_TOK}" >> "$LOG"
+echo "{\"ts\":\"$TIMESTAMP\",\"session\":\"$SESSION_ID\",\"agent\":\"$AGENT\",\"cost_usd\":$COST,\"in_tok\":$IN_TOK,\"out_tok\":$OUT_TOK,\"unpriced\":$UNPRICED}" >> "$LOG"
 
 # Feature 1: Auto-name the session from first user prompt and apply done marker
 if [ "$SESSION_ID" != "unknown" ]; then

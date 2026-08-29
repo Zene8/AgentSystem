@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSessionLog, rowDate, dedupeSessions, checkSessionLog } from './session-cost.js';
+import { parseSessionLog, rowDate, dedupeSessions, checkSessionLog, collectUnpriced } from './session-cost.js';
 
 test('parseSessionLog: parses valid JSONL rows', () => {
   const text = '{"a":1}\n{"a":2}\n';
@@ -82,4 +82,28 @@ test('checkSessionLog: legacy timestamp-only rows count as resolvable (reader to
   const text = JSON.stringify({ timestamp: '2026-08-01T00:00:00.000Z', session: 's1' }) + '\n';
   const result = checkSessionLog(text);
   assert.equal(result.blind, false);
+});
+
+// #519: session-cost-compute.js's unknown_models was collected and then ignored end-to-end —
+// this is the aggregation half that lets session-cost.js surface it instead of dropping it.
+test('collectUnpriced: sums output tokens for an unpriced model across rows (not silently $0)', () => {
+  const rows = [
+    { unpriced: [{ model: 'claude-opus-99', out_tok: 1000 }] },
+    { unpriced: [{ model: 'claude-opus-99', out_tok: 500 }] },
+  ];
+  const result = collectUnpriced(rows);
+  assert.deepStrictEqual(result, { 'claude-opus-99': 1500 });
+});
+
+test('collectUnpriced: rows with no unpriced field contribute nothing (back-compat with old log rows)', () => {
+  const rows = [{ cost_usd: 1.2, in_tok: 10, out_tok: 5 }];
+  assert.deepStrictEqual(collectUnpriced(rows), {});
+});
+
+test('collectUnpriced: tracks multiple distinct unpriced models separately', () => {
+  const rows = [
+    { unpriced: [{ model: 'model-a', out_tok: 100 }, { model: 'model-b', out_tok: 200 }] },
+  ];
+  const result = collectUnpriced(rows);
+  assert.deepStrictEqual(result, { 'model-a': 100, 'model-b': 200 });
 });
