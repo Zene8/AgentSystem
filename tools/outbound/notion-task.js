@@ -23,24 +23,23 @@ function defaultMcpClientFactory({ token = process.env.NOTION_TOKEN } = {}) {
  * Create a new Notion task in a database.
  *
  * Calls `notion-create-pages` with the given properties. The page is created and
- * a URL is returned.
+ * a URL is returned. Only the title property is created; additional properties must be
+ * passed via `moreProps` with values matching your database schema.
  *
  * @param {Object} options
- * @param {string} options.title - Task title (required)
- * @param {string} [options.body] - Task description/body text
+ * @param {string} options.title - Page title (required)
  * @param {string} options.databaseId - Database ID to create the page in (required)
- * @param {string} [options.dueDate] - Due date in YYYY-MM-DD format
- * @param {Object} [options.moreProps] - Additional Notion page properties
+ * @param {Object} [options.moreProps] - Additional Notion page properties as property name/value pairs.
+ *   The caller is responsible for valid schema: property names and values must match the database.
  * @param {Function} [options.mcpClientFactory] - Factory to create MCP client (injectable)
  * @param {boolean} [options.dryRun] - If true, return what would be created without creating it
- * @returns {Promise<{ url: string }>} Created page URL
+ * @returns {Promise<{ pageId: string, url: string }>} Created page ID and URL
+ * @returns {Promise<{ dryRun: boolean, pageData: Object }>} Dry-run result with no url/pageId
  * @throws {Error} If the write fails or credentials are missing
  */
 export async function createTask({
   title,
-  body = '',
   databaseId,
-  dueDate = null,
   moreProps = {},
   mcpClientFactory = defaultMcpClientFactory,
   dryRun = false,
@@ -52,8 +51,8 @@ export async function createTask({
     throw new Error('createTask: databaseId is required and must be a string');
   }
 
-  // Build the page properties. In Notion, properties vary by database schema,
-  // but title is always present as a property.
+  // Build the page properties. In Notion, properties vary by database schema.
+  // Title is always present as a property; additional properties come from moreProps.
   const properties = {
     title: [
       {
@@ -64,13 +63,6 @@ export async function createTask({
     ...moreProps,
   };
 
-  // If body is provided, try to add it as a description or body field
-  // (exact field name depends on database schema)
-  if (body) {
-    // This is optional and depends on the database structure
-    // For now, we only set the title
-  }
-
   const pageData = {
     parent: {
       type: 'database_id',
@@ -80,9 +72,8 @@ export async function createTask({
   };
 
   if (dryRun) {
-    // In dry-run mode, return what would be created
+    // In dry-run mode, return what would be created; no url/pageId fields
     return {
-      url: `[DRY-RUN] Would create page with title: "${title}" in database ${databaseId}`,
       dryRun: true,
       pageData,
     };

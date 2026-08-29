@@ -23,13 +23,13 @@ import { createTask } from './tools/outbound/notion-task.js';
 
 const result = await createTask({
   title: 'Finish report',
-  body: 'Q3 financial summary',
   databaseId: 'abc-123-def-456',
-  dueDate: '2026-08-31',
+  moreProps: { status: 'In Progress' },
   dryRun: false,
 });
 
-// Returns: { url: 'https://www.notion.so/...', pageId: '...' }
+// On success: { url: 'https://www.notion.so/...', pageId: '...' }
+// On dryRun: { dryRun: true, pageData: {...} }
 ```
 
 ### Required Parameters
@@ -39,8 +39,6 @@ const result = await createTask({
 
 ### Optional Parameters
 
-- **`body`** (string): Page description or body text
-- **`dueDate`** (string): Due date in YYYY-MM-DD format
 - **`moreProps`** (object): Additional Notion page properties (database schema dependent)
 - **`dryRun`** (boolean, default `false`): If true, returns what would be created without writing
 - **`mcpClientFactory`** (function): Injected MCP client factory (for testing)

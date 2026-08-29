@@ -125,6 +125,23 @@ test('poll returns normalized envelopes, oldest first', async () => {
   assert.match(item.body, /title: My Task/);
 });
 
+test('poll advances cursor to the newest edited_time only from valid envelopes', async () => {
+  const pages = [
+    notionPage({ id: '1', last_edited_time: '2026-08-22T15:00:00Z' }),
+    notionPage({ id: '2', last_edited_time: undefined }), // missing timestamp
+  ];
+  const factory = stubClientFactory(pages);
+  const out = await poll({
+    cursor: '2026-08-22T09:00:00Z',
+    policy: { databases: ['db-1'] },
+    mcpClientFactory: factory,
+  });
+  // Cursor should be from the valid page (15:00), not the invalid one
+  assert.equal(out.cursor, '2026-08-22T15:00:00.000Z');
+  assert.equal(out.items.length, 1, 'should have 1 valid item');
+  assert.equal(out.invalid.length, 1, 'should have 1 invalid item');
+});
+
 test('poll advances cursor to the newest edited_time', async () => {
   const pages = [
     notionPage({ last_edited_time: '2026-08-22T15:00:00Z' }),
@@ -162,10 +179,26 @@ test('poll on an empty database keeps cursor and returns no items', async () => 
   assert.equal(out.cursor, '2026-08-22T09:00:00.000Z');
 });
 
+test('poll skips pages with missing last_edited_time and puts them in invalid', async () => {
+  const pages = [
+    notionPage({ id: '1' }),
+    notionPage({ id: '2', last_edited_time: undefined }),
+    notionPage({ id: '3' }),
+  ];
+  const factory = stubClientFactory(pages);
+  const out = await poll({
+    policy: { databases: ['db-1'] },
+    mcpClientFactory: factory,
+  });
+  assert.equal(out.items.length, 2, 'should have 2 valid items');
+  assert.equal(out.invalid.length, 1, 'should have 1 invalid item');
+  assert.equal(out.invalid[0].id, '2');
+  assert.match(out.invalid[0].error, /last_edited_time/);
+});
+
 test('poll skips malformed pages instead of losing the rest', async () => {
   const pages = [
     notionPage({ id: '1' }),
-    notionPage({ id: '2', last_edited_time: 'not-a-date' }),
     null,
     notionPage({ id: '3' }),
   ];
@@ -175,8 +208,7 @@ test('poll skips malformed pages instead of losing the rest', async () => {
     mcpClientFactory: factory,
   });
   assert.equal(out.items.length, 2);
-  assert.equal(out.invalid.length, 1);
-  assert.equal(out.invalid[0].id, '2');
+  assert.deepEqual(out.invalid, []);
 });
 
 test('poll calls notion-query-data-sources with the database id', async () => {

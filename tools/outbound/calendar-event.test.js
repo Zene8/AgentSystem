@@ -89,7 +89,7 @@ test('createEvent validates ISO 8601 timestamps', async () => {
     });
     assert.fail('Expected error for invalid start timestamp');
   } catch (err) {
-    assert.match(err.message, /ISO 8601 timestamp/);
+    assert.match(err.message, /ISO 8601 format/);
   }
 });
 
@@ -141,7 +141,7 @@ test('createEvent accepts description', async () => {
   assert.equal(capturedCall.args.description, 'Discuss Q3 planning');
 });
 
-test('createEvent accepts attendees', async () => {
+test('createEvent accepts attendees with allowInvites=true', async () => {
   let capturedCall = null;
   const factory = () => {
     return {
@@ -158,6 +158,7 @@ test('createEvent accepts attendees', async () => {
     start: '2026-08-25T10:00:00Z',
     end: '2026-08-25T11:00:00Z',
     attendees: ['alice@example.com', 'bob@example.com'],
+    allowInvites: true,
     mcpClientFactory: factory,
   });
 
@@ -166,7 +167,23 @@ test('createEvent accepts attendees', async () => {
   assert.equal(capturedCall.args.attendees[0].email, 'alice@example.com');
 });
 
-test('createEvent in dry-run mode returns what would be created', async () => {
+test('createEvent throws when attendees provided without allowInvites=true', async () => {
+  const factory = stubClientFactory();
+  try {
+    await createEvent({
+      title: 'Test Event',
+      start: '2026-08-25T10:00:00Z',
+      end: '2026-08-25T11:00:00Z',
+      attendees: ['alice@example.com'],
+      mcpClientFactory: factory,
+    });
+    assert.fail('Expected error for attendees without allowInvites');
+  } catch (err) {
+    assert.match(err.message, /attendees require allowInvites=true/);
+  }
+});
+
+test('createEvent in dry-run mode returns eventData without url/eventId', async () => {
   const factory = stubClientFactory();
   const result = await createEvent({
     title: 'Team Sync',
@@ -177,9 +194,9 @@ test('createEvent in dry-run mode returns what would be created', async () => {
   });
 
   assert.equal(result.dryRun, true);
-  assert.match(result.url, /DRY-RUN/);
-  assert.match(result.url, /Team Sync/);
   assert.ok(result.eventData, 'should include eventData in dry-run');
+  assert.equal(result.url, undefined, 'dryRun should not set url');
+  assert.equal(result.eventId, undefined, 'dryRun should not set eventId');
 });
 
 test('createEvent propagates API errors', async () => {
@@ -289,5 +306,65 @@ test('createEvent does not require attendees', async () => {
   // attendees should not be present if not provided
   if (capturedCall.args.attendees) {
     assert.equal(capturedCall.args.attendees.length, 0);
+  }
+});
+
+test('createEvent rejects non-ISO 8601 format timestamps like "March 5 2026"', async () => {
+  const factory = stubClientFactory();
+  try {
+    await createEvent({
+      title: 'Test',
+      start: 'March 5 2026',
+      end: '2026-08-25T11:00:00Z',
+      mcpClientFactory: factory,
+    });
+    assert.fail('Expected error for non-ISO 8601 format');
+  } catch (err) {
+    assert.match(err.message, /ISO 8601 format/);
+  }
+});
+
+test('createEvent rejects natural date strings like "2026-08-25" (no time)', async () => {
+  const factory = stubClientFactory();
+  try {
+    await createEvent({
+      title: 'Test',
+      start: '2026-08-25',
+      end: '2026-08-25T11:00:00Z',
+      mcpClientFactory: factory,
+    });
+    assert.fail('Expected error for date without time');
+  } catch (err) {
+    assert.match(err.message, /ISO 8601 format/);
+  }
+});
+
+test('createEvent validates end > start', async () => {
+  const factory = stubClientFactory();
+  try {
+    await createEvent({
+      title: 'Test',
+      start: '2026-08-25T11:00:00Z',
+      end: '2026-08-25T10:00:00Z',
+      mcpClientFactory: factory,
+    });
+    assert.fail('Expected error when end <= start');
+  } catch (err) {
+    assert.match(err.message, /end must be after start/);
+  }
+});
+
+test('createEvent rejects when start equals end', async () => {
+  const factory = stubClientFactory();
+  try {
+    await createEvent({
+      title: 'Test',
+      start: '2026-08-25T10:00:00Z',
+      end: '2026-08-25T10:00:00Z',
+      mcpClientFactory: factory,
+    });
+    assert.fail('Expected error when end equals start');
+  } catch (err) {
+    assert.match(err.message, /end must be after start/);
   }
 });
