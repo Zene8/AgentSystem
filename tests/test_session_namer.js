@@ -11,7 +11,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync
 import { join, basename, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { cwdToProjectDir } from '../tools/session-namer.js';
+import { cwdToProjectDir, findTranscript } from '../tools/session-namer.js';
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -918,6 +918,134 @@ test('--finalize: appends " [#N]" to the name when the session cwd is on branch 
   assert.match(entries[0].name, /\[#166\]/, `expected issue suffix in name, got: "${entries[0].name}"`);
   assert.equal(entries[0].issue, '166');
   assert.ok(!entries[0].title.includes('[#166]'), 'title field must stay clean, suffix only in name');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── Native UI title: rename must reach Claude Code's own picker, not only ────
+// our registry. The title lives in the session transcript as append-only
+// sidecar lines; the LAST occurrence wins.
+
+/** Every custom-title / agent-name value in a transcript, in file order. */
+function nativeTitles(transcriptPath) {
+  const out = { customTitle: [], agentName: [] };
+  for (const line of readFileSync(transcriptPath, 'utf8').split('\n').filter(Boolean)) {
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.type === 'custom-title') out.customTitle.push(o.customTitle);
+    if (o.type === 'agent-name')   out.agentName.push(o.agentName);
+  }
+  return out;
+}
+
+/** tmp HOME + registry entry + transcript, wired the way session-namer expects. */
+function makeNativeFixture({ finalized = true, withTranscript = true } = {}) {
+  const tmp = makeTmpDir();
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  mkdirSync(nexusDir, { recursive: true });
+  const sessionId = 'bbbb2222-0000-0000-0000-00000000000f';
+  const cwd = join(tmp, 'repo', 'myrepo');
+  mkdirSync(cwd, { recursive: true });
+
+  let transcript = null;
+  if (withTranscript) {
+    const projectDir = join(tmp, '.claude', 'projects', cwdToProjectDir(cwd));
+    mkdirSync(projectDir, { recursive: true });
+    transcript = join(projectDir, `${sessionId}.jsonl`);
+    writeFileSync(transcript, [
+      JSON.stringify({ type: 'custom-title', customTitle: 'myrepo - old name', sessionId }),
+      JSON.stringify({ type: 'user', message: { content: 'do the thing' } }),
+    ].join('\n') + '\n', 'utf8');
+  }
+
+  const registryPath = makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', cwd, title: 'old title', status: 'started',
+      name: 'myrepo - old name', timestamp: '2026-08-29T10:00:00.000Z', finalized },
+  ]);
+  return { tmp, sessionId, cwd, transcript, registryPath };
+}
+
+test('--rename writes the native UI title into the transcript (last value wins)', () => {
+  const { tmp, sessionId, transcript } = makeNativeFixture();
+
+  runNamer(['--rename', sessionId, 'a much better name'], { HOME: tmp });
+
+  const titles = nativeTitles(transcript);
+  assert.equal(titles.customTitle.at(-1), 'a much better name');
+  assert.equal(titles.agentName.at(-1), 'a much better name',
+    'agent-name must mirror custom-title, as the harness does when SessionStart sets sessionTitle');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('--auto-rename writes the composed <repo> - <date> - <summary> - <status> native title', () => {
+  const { tmp, sessionId, transcript } = makeNativeFixture();
+
+  runNamer(['--auto-rename', sessionId, 'wire native title write', '--status=done'], { HOME: tmp });
+
+  const last = nativeTitles(transcript).customTitle.at(-1);
+  assert.equal(last, 'myrepo - 2026-08-29 - wire native title write - done');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('native title write is append-only — prior transcript lines survive verbatim', () => {
+  const { tmp, sessionId, transcript } = makeNativeFixture();
+  const before = readFileSync(transcript, 'utf8');
+
+  runNamer(['--rename', sessionId, 'appended not rewritten'], { HOME: tmp });
+
+  const after = readFileSync(transcript, 'utf8');
+  assert.ok(after.startsWith(before),
+    'the original transcript must be a byte-exact prefix of the new one — a rewrite would race a live session');
+  assert.equal(nativeTitles(transcript).customTitle[0], 'myrepo - old name',
+    'the earlier title stays in the file; only the last one counts');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('a transcript with no trailing newline does not get a joined line', () => {
+  const { tmp, sessionId, transcript } = makeNativeFixture();
+  writeFileSync(transcript, JSON.stringify({ type: 'user', message: { content: 'x' } }), 'utf8'); // no \n
+
+  runNamer(['--rename', sessionId, 'no joined line'], { HOME: tmp });
+
+  for (const line of readFileSync(transcript, 'utf8').split('\n').filter(Boolean)) {
+    assert.doesNotThrow(() => JSON.parse(line), `every line must stay valid JSON, got: ${line}`);
+  }
+  assert.equal(nativeTitles(transcript).customTitle.at(-1), 'no joined line');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('rename still succeeds in the registry when the transcript is gone', () => {
+  const { tmp, sessionId, registryPath } = makeNativeFixture({ withTranscript: false });
+
+  const output = runNamer(['--rename', sessionId, 'registry only please'], { HOME: tmp });
+
+  assert.match(output, /registry only/, 'the caller must be told the UI write did not land');
+  assert.equal(readRegistry(registryPath)[0].name, 'registry only please',
+    'a missing transcript must not fail the rename');
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('findTranscript falls back to scanning project dirs when cwd is unknown', () => {
+  const { tmp, sessionId, transcript } = makeNativeFixture();
+
+  // findTranscript resolves PROJECTS_DIR from the module's own HOME, so the
+  // fallback is exercised through the CLI (which runs under the tmp HOME):
+  // rewrite the registry entry without a cwd, leaving only the scan path.
+  assert.equal(findTranscript(sessionId, null), null,
+    'sanity: this fixture session does not exist under the real HOME');
+
+  const nexusDir = join(tmp, 'agent-memory', 'nexus');
+  makeRegistry(nexusDir, [
+    { session: sessionId, repo: 'myrepo', title: 'old title', status: 'started',
+      name: 'myrepo - old name', timestamp: '2026-08-29T10:00:00.000Z', finalized: true },
+  ]);
+
+  runNamer(['--rename', sessionId, 'found without cwd'], { HOME: tmp });
+  assert.equal(nativeTitles(transcript).customTitle.at(-1), 'found without cwd');
 
   rmSync(tmp, { recursive: true, force: true });
 });
