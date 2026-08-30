@@ -46,9 +46,14 @@ The user invoked: `/bulk-rename-sessions $ARGUMENTS`
 
 ## Where the name shows up
 
-The tool writes to the session registry
-(`~/agent-memory/nexus/session-registry.jsonl`). The visible Claude Code
-session title is set by the `SessionStart` hook via `--print-title`, so a
-renamed session shows its new name **the next time it is started or
-resumed** — not immediately in the session picker. Same limit as
-`/rename-session`: only `SessionStart` may set `sessionTitle`.
+The tool writes both halves of the name:
+
+1. The session registry (`~/agent-memory/nexus/session-registry.jsonl`).
+2. The **native Claude Code title**, appended to the session's own transcript
+   as `custom-title` / `agent-name` sidecar lines — the same lines the harness
+   writes, last one wins.
+
+So a renamed session shows its new name in the session picker without waiting
+for a start or resume. If the transcript file is gone, the registry is still
+updated and the tool says `(registry only - no transcript found)` for that
+session.
