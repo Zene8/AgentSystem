@@ -21,7 +21,7 @@
  *   node session-namer.js --today
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, createReadStream } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, statSync, openSync, readSync, closeSync, mkdirSync, existsSync, readdirSync, createReadStream } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
@@ -93,6 +93,87 @@ export function cwdToProjectDir(cwd) {
   if (!cwd) return '';
   const resolved = resolve(cwd);
   return resolved.replace(/[^A-Za-z0-9]/g, '-');
+}
+
+/**
+ * findTranscript — absolute path of a session's transcript jsonl, or null.
+ * Prefers the cwd-derived project dir (one stat); falls back to scanning every
+ * project dir, since a registry entry can predate a cwd being recorded.
+ */
+export function findTranscript(sessionId, cwd) {
+  if (!sessionId) return null;
+  if (cwd) {
+    const direct = join(PROJECTS_DIR, cwdToProjectDir(cwd), `${sessionId}.jsonl`);
+    if (existsSync(direct)) return direct;
+  }
+  let dirs;
+  try { dirs = readdirSync(PROJECTS_DIR); } catch { return null; }
+  for (const d of dirs) {
+    const candidate = join(PROJECTS_DIR, d, `${sessionId}.jsonl`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * writeNativeTitle — make a rename visible in the Claude Code UI itself, not
+ * only in this tool's registry.
+ *
+ * The registry (`session-registry.jsonl`) is ours; the *native* title lives in
+ * the session's own transcript as sidecar lines:
+ *   {"type":"custom-title","customTitle":"...","sessionId":"..."}
+ *   {"type":"agent-name","agentName":"...","sessionId":"..."}
+ * Verified against live transcripts: those lines are APPEND-ONLY and the LAST
+ * occurrence wins — a single transcript routinely holds a dozen of them, and
+ * the picker shows the final value. So we append; we never rewrite the file.
+ * That matters because the transcript is user data that a live session may be
+ * writing to concurrently — a read-modify-write would race and could lose
+ * turns, while an append of two whole lines cannot.
+ *
+ * Both line types are written because that is what the harness itself does
+ * when the SessionStart hook sets `sessionTitle` (confirmed: the final pair in
+ * a resumed transcript carries the same value in both).
+ *
+ * Before this existed, a rename reached the UI only on the session's NEXT
+ * start/resume, via the SessionStart hook's --print-title path. That made a
+ * bulk rename of past sessions change nothing a user could see, since those
+ * sessions are precisely the ones nobody is about to resume.
+ *
+ * Returns true if the lines were appended, false if there is no transcript to
+ * append to (a registry entry whose jsonl was deleted) — never throws: a
+ * rename must still succeed in the registry if the UI write cannot land.
+ */
+export function writeNativeTitle(sessionId, cwd, name) {
+  if (!sessionId || !name) return false;
+  const transcript = findTranscript(sessionId, cwd);
+  if (!transcript) return false;
+  try {
+    // Only prepend a newline when the file does not already end with one; a
+    // blank line is harmless to a jsonl reader, but a joined line is not.
+    let prefix = '';
+    try {
+      const { size } = statSync(transcript);
+      if (size > 0) {
+        // Read only the final byte — a transcript can be megabytes and this
+        // runs once per renamed session in a bulk run.
+        const fd = openSync(transcript, 'r');
+        try {
+          const buf = Buffer.alloc(1);
+          readSync(fd, buf, 0, 1, size - 1);
+          if (buf[0] !== 0x0a) prefix = '\n';
+        } finally { closeSync(fd); }
+      }
+    } catch { /* unreadable — assume newline-terminated, append plainly */ }
+
+    const lines = [
+      JSON.stringify({ type: 'custom-title', customTitle: name, sessionId }),
+      JSON.stringify({ type: 'agent-name',   agentName:   name, sessionId }),
+    ].join('\n');
+    appendFileSync(transcript, prefix + lines + '\n', 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Extract 7 significant words from free text (issue #166: raised from 5 to 7). */
@@ -610,7 +691,8 @@ function cmdRename(sessionId, newName) {
 
   const updated = { ...entry, name: cleanName, title: titleSlug, renamed: true, renamedAt: new Date().toISOString() };
   saveEntry(updated);
-  console.log(`renamed ${entry.session.slice(0, 8)}… → "${cleanName}"`);
+  const native = writeNativeTitle(entry.session, entry.cwd, cleanName);
+  console.log(`renamed ${entry.session.slice(0, 8)}… → "${cleanName}"${native ? '' : ' (registry only — no transcript found)'}`);
 }
 
 /**
@@ -636,7 +718,8 @@ function cmdAutoRename({ sessionId, summary, status }) {
   const updated = { ...entry, name: cleanName, title: words, status: st,
                      renamed: true, renamedAt: new Date().toISOString() };
   saveEntry(updated);
-  console.log(`renamed ${entry.session.slice(0, 8)}… → "${cleanName}"`);
+  const native = writeNativeTitle(entry.session, entry.cwd, cleanName);
+  console.log(`renamed ${entry.session.slice(0, 8)}… → "${cleanName}"${native ? '' : ' (registry only — no transcript found)'}`);
 }
 
 function cmdResume(sessionId) {
