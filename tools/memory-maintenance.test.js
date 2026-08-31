@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { isStale } from './memory-maintenance.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -24,4 +25,14 @@ test('isStale: days<=0 always runs', () => {
 
 test('isStale: malformed timestamp → stale', () => {
   assert.strictEqual(isStale('not-a-date', 7), true);
+});
+
+// Retrieval walks graph.json, so an un-indexed node file is invisible to every agent — and the
+// later steps (dedup, decay, consolidate) only see indexed nodes too. reindex must stay first.
+test('dry-run step list starts with reindex', () => {
+  const out = execFileSync(process.execPath,
+    [new URL('memory-maintenance.js', import.meta.url).pathname, '--dry-run'], { encoding: 'utf8' });
+  const steps = out.split('would run steps:')[1].split(',').map((s) => s.trim());
+  assert.strictEqual(steps[0], 'reindex');
+  assert.ok(steps.includes('split'));
 });

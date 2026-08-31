@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
-import { computeBM25, expandTilde } from './graph-query.js';
+import { computeBM25, expandTilde, bm25Tokens } from './graph-query.js';
 
 // Shared df/N/avgdl for tests
 const terms = ['foo', 'bar'];
@@ -69,5 +69,17 @@ describe('computeBM25', () => {
     const normalized = Math.min(1.0, raw / (terms.length * MAX_BM25));
     assert.ok(normalized <= 1.0, `expected normalized (${normalized}) <= 1.0`);
     assert.ok(normalized >= 0, `expected normalized (${normalized}) >= 0`);
+  });
+});
+
+describe('bm25Tokens', () => {
+  it('splits punctuation and hyphens so query terms match real node bodies', () => {
+    assert.deepEqual(bm25Tokens('The `agent-memory` repo, centrally controlled.'),
+      ['the', 'agent', 'memory', 'repo', 'centrally', 'controlled']);
+  });
+  it('a term inside backticks/punctuation still scores (df/tf agree)', () => {
+    const doc = 'facts live in the `agent-memory` repo; memory is central.';
+    const score = computeBM25(['memory'], doc, new Map([['memory', 1]]), 10, 10);
+    assert.ok(score > 0, `expected >0, got ${score}`);
   });
 });

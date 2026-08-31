@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 // memory-maintenance.js — the "sleep cycle". Runs the full memory maintenance pass.
 // Wired two ways: (1) SessionStart hook with --if-stale (run-on-use), (2) scheduled cron.
-// Steps: split → reconsolidate → decay → stale-prune → consolidate → agent-brain-seed.
+// Steps: reindex → split → reconsolidate → decay → stale-prune → consolidate → agent-brain-seed.
+//
+// reindex runs FIRST and sweeps every brain: retrieval (memory-context.js, graph-query.js) walks
+// graph.json, so a node file missing from the index is invisible to every agent — and nothing else
+// in the system rebuilds the index (brain-sync resolves graph.json conflicts with --ours by design).
+// Every later step here also only sees indexed nodes, so dedup/decay/consolidation silently skip
+// un-indexed facts too. Found 476 unindexed nodes on baselyserver (456 personal + 20 agent-brain,
+// including friday-core and every <agent>-behavior node).
 // Reflection (LLM, slow) only with --reflect. Each step is non-fatal; failures are logged.
 // Usage: node tools/memory-maintenance.js [--if-stale=DAYS] [--reflect] [--dry-run] [--quiet] [--help]
 
@@ -41,6 +48,7 @@ function step(name, file, args, quiet) {
 
 export function runMaintenance({ reflect = false, quiet = false } = {}) {
   const results = [];
+  results.push(step('reindex', 'graph-reindex.js', [], quiet));
   results.push(step('split', 'personal-brain-split.js', [], quiet));
   results.push(step('reconsolidate', 'memory-reconsolidate.js', [`--brain-path=${pbPath}`], quiet));
   results.push(step('decay', 'memory-decay.js', ['--brain=personal-brain'], quiet));
@@ -80,7 +88,7 @@ if (isMain) {
   }
 
   if (dryRun) {
-    console.log('[dry-run] would run steps: split, reconsolidate, decay, stale-prune, memory-tune, consolidate, wikilink-sync, agent-brain-seed' + (flags.reflect ? ', reflect' : ''));
+    console.log('[dry-run] would run steps: reindex, split, reconsolidate, decay, stale-prune, memory-tune, consolidate, wikilink-sync, agent-brain-seed' + (flags.reflect ? ', reflect' : ''));
     process.exit(0);
   }
 

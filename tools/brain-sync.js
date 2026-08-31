@@ -450,8 +450,22 @@ if (pull.code !== 0) {
   for (const f of generated) git(['checkout', '--ours', '--', f]);
   git(['add', ...generated]);
   git([...IDENT, 'commit', '--quiet', '--no-edit']);
-  log(`resolved ${generated.length} generated graph.json conflict(s) — ` +
-      `regenerate with tools/graph-reindex.js`);
+
+  // Taking --ours drops whatever the other host indexed, so rebuild the index here instead of
+  // telling a human to. Nothing else in the system runs graph-reindex on a schedule tied to sync,
+  // and an unindexed node is invisible to every agent (retrieval walks graph.json, not nodes/).
+  const reindex = spawnSync(process.execPath, [path.join(path.dirname(__filename), 'graph-reindex.js')],
+    { encoding: 'utf8' });
+  const reindexed = reindex.status === 0;
+  if (reindexed) {
+    const changed = git(['status', '--porcelain'], { allowFail: true }).out;
+    if (changed) {
+      git(['add', '--all']);
+      git([...IDENT, 'commit', '--quiet', '-m', 'brain: reindex graph.json after sync conflict']);
+    }
+  }
+  log(`resolved ${generated.length} generated graph.json conflict(s)` +
+      (reindexed ? ' and reindexed' : ' — reindex failed, run tools/graph-reindex.js by hand'));
 }
 
 // ---------------------------------------------------------------------------- push

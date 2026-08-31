@@ -45,6 +45,15 @@ import {
   nodeAccessSignal,
 } from './graph-lib.js';
 
+// Tokenize for BM25. Split on non-word characters, not whitespace: memory node bodies are full of
+// `backticked paths`, punctuation and hyphenated slugs, so a whitespace split yields tokens like
+// "`agent-memory`" or "memory," that never equal a bare query term. df below counted those docs
+// (substring test) while tf scored 0 — high df, zero tf, so the more relevant a term was across the
+// brain the harder it was to match on. Hyphens split too, so "agent-memory" matches "memory".
+export function bm25Tokens(text) {
+  return String(text).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
 // BM25 keyword scoring.
 // terms: string[], docContent: string, df: Map<string,number>, N: number, avgdl: number
 // Returns raw BM25 score (not normalized).
@@ -52,7 +61,7 @@ export function computeBM25(terms, docContent, df, N, avgdl) {
   if (!terms || terms.length === 0) return 0;
   const k1 = 1.5;
   const b = 0.75;
-  const words = docContent.toLowerCase().split(/\s+/);
+  const words = bm25Tokens(docContent);
   const docLen = words.length || 1;
 
   let score = 0;
@@ -232,10 +241,12 @@ function main() {
     let totalWords = 0;
     const cacheN = contentCache.size;
     for (const [, content] of contentCache) {
-      totalWords += content.toLowerCase().split(/\s+/).length;
+      const words = bm25Tokens(content);
+      const tokens = new Set(words);
+      totalWords += words.length;
       for (const kw of keywords) {
         const t = kw.toLowerCase();
-        if (content.toLowerCase().includes(t)) {
+        if (tokens.has(t)) {
           dfMap.set(t, (dfMap.get(t) || 0) + 1);
         }
       }
