@@ -105,9 +105,11 @@ echo ""
 echo "=== Test 3: Sync log health ==="
 
 SYNC_LOG="${REPO_ROOT}/.agents/sync.log"
-assert_file_exists "sync.log exists" "$SYNC_LOG"
 
-if [ -f "$SYNC_LOG" ]; then
+# sync.log is generated and untracked, so a fresh clone legitimately has none.
+if [ ! -f "$SYNC_LOG" ]; then
+  pass "sync.log: absent (fresh checkout — sync-agents.js has not run here yet)"
+else
   LAST_SUCCESS=$(grep "\[SUCCESS\]" "$SYNC_LOG" | tail -1)
   if [ -n "$LAST_SUCCESS" ]; then
     pass "sync.log: has at least one SUCCESS entry"
@@ -171,7 +173,7 @@ if [ "$SKIP_CLI_SYNC" = "true" ]; then
   echo "[SKIP] SKIP_CLI_SYNC=true — skipping cross-CLI sync test (CI mode)"
 else
   # Detect OS — user-level paths differ
-  if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ -n "$WINDIR" ]]; then
+  if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ -n "${WINDIR:-}" ]]; then
     USERPROFILE="${USERPROFILE:-$HOME}"
     CLAUDE_MEMORY_DIR="${USERPROFILE}/.claude/agents-memory"
     COPILOT_MEMORY_DIR="${USERPROFILE}/.copilot/memory"
