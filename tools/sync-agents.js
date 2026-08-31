@@ -46,9 +46,10 @@ const MODELS = {
 };
 
 const SYNC_LOG = join(REPO_ROOT, '.agents', 'sync.log');
-// `--check` writes nothing, including here. sync.log is tracked in git, so a read-only check that
-// appends to it leaves the working tree dirty — which makes `--check` unusable in CI and in any
-// "is the repo clean?" gate, the exact thing it exists to support.
+// `--check` writes nothing, including here: a read-only check that appends to a log has no business
+// touching the tree. sync.log is untracked (#536) — while it was tracked, every sync-agents.js run
+// left the tree dirty forever, so repo-sync.js skipped the session-start pull on every host and the
+// checkout silently ran stale code.
 const LOG_ENABLED = !process.argv.includes('--check');
 function logLine(level, msg) {
   if (!LOG_ENABLED) return;
