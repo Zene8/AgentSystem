@@ -303,3 +303,66 @@ test('the leak test: rehydrated command runs for real, and its output leaks noth
   assert.match(audit, /"event":"rehydrate"/);
   assert.ok(!audit.includes(AWS_SECRET), 'the audit log must never quote a secret');
 });
+
+// -------------------------------------------------------------------------------------------
+// stdin size cap (Sam F2): stdin is untrusted IN SIZE. An uncapped read loop is memory
+// exhaustion at a trust boundary, and a hook killed by the OOM killer writes no JSON — which on
+// PostToolUse means the ORIGINAL, unredacted output is used. So the cap must fail closed.
+// -------------------------------------------------------------------------------------------
+
+/** Stream `bytes` of raw junk at the hook's stdin without building it all in this process. */
+function runHookRaw(bytes, phase) {
+  const home = tmpdir('home');
+  const chunk = 'x'.repeat(1024 * 1024);
+  const res = spawnSync(process.execPath, [HOOK, `--phase=${phase}`], {
+    input: chunk.repeat(bytes / (1024 * 1024)),
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, SECRET_SHIELD_HOME: home },
+  });
+  let json = null;
+  if (res.stdout && res.stdout.trim()) {
+    try { json = JSON.parse(res.stdout); } catch { /* asserted by caller */ }
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json, home };
+}
+
+test('post: a payload over the stdin cap is withheld, not passed through', () => {
+  const res = runHookRaw(33 * 1024 * 1024, 'post'); // MAX_STDIN_BYTES is 32MB
+  assert.equal(res.status, 0, 'must still exit 0 — a non-zero exit makes the harness ignore our JSON');
+  assert.ok(res.json, `expected JSON on stdout, got: ${res.stdout.slice(0, 200)}`);
+  assert.equal(res.json.hookSpecificOutput.hookEventName, 'PostToolUse');
+  // The whole payload is 'x' repeated; the replacement must be the notice, never those bytes.
+  const out = res.json.hookSpecificOutput.updatedToolOutput;
+  assert.equal(typeof out, 'string');
+  assert.match(out, /secret-shield: withheld/);
+  assert.ok(!out.includes('xxxxxxxxxx'), 'original payload bytes must not survive');
+  assert.match(res.stderr, /exceeded/);
+});
+
+test('pre: a tool input over the stdin cap is DENIED, not run uninspected', () => {
+  const res = runHookRaw(33 * 1024 * 1024, 'pre');
+  assert.equal(res.status, 0);
+  assert.ok(res.json, `expected JSON on stdout, got: ${res.stdout.slice(0, 200)}`);
+  assert.equal(res.json.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.equal(res.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(res.json.hookSpecificOutput.permissionDecisionReason, /could not be inspected/);
+});
+
+test('a payload UNDER the cap is unaffected by it', () => {
+  const { cwd, home } = setup({});
+  // ~2MB of harmless text in a Bash result: well under the cap, must pass through untouched.
+  const payload = {
+    tool_name: 'Bash',
+    cwd,
+    tool_response: { stdout: 'hello world\n'.repeat(160000), stderr: '', exit_code: 0 },
+  };
+  const res = runHook(payload, { home });
+  assert.equal(res.status, 0);
+  assert.ok(!/exceeded/.test(res.stderr), `unexpected cap trip: ${res.stderr}`);
+  // Nothing secret in it, so the hook emits nothing and the original is used — that is correct here.
+  if (res.json) {
+    const out = res.json.hookSpecificOutput.updatedToolOutput;
+    assert.ok(!JSON.stringify(out).includes('withheld'), 'a clean under-cap payload must not be blanked');
+  }
+});

@@ -133,3 +133,39 @@ Store the labelled form and `sweepKnown` never matches the bare secret. Both def
 `the leak test` in `hooks/secret-shield-hook.test.js`, which asserts the full round trip: real secret
 reaches the shell, the command works, and its output returns with zero bytes of the secret and the
 same placeholder. If that test ever fails, `rehydrate` is a net loss and must be turned off.
+
+## The vault must never leave this host (Sam F4, #222)
+
+The vault directory is `<home>/.claude/secret-shield/`, and it holds two files that are only
+dangerous together: `<project>.vault` (AES-256-GCM ciphertext) and `vault.key` (the raw 32-byte key
+that decrypts it). Copying the pair copies the plaintext, and the encryption at rest stops
+protecting anything.
+
+That matters here specifically because this repo already runs a tool that commits and pushes a
+directory to a git repo shared by every host: `~/agent-memory` (see CLAUDE.md, "Central brain"),
+synced on a ~15-minute timer. A tool that swept `~/.claude/**` into the brain, or that wrote the
+shield dir under `~/agent-memory`, would replicate the vault key to every machine and into git
+history — silently, with a green exit code.
+
+**Verified state of the repo as of this change.** No such path exists:
+
+- `tools/brain-sync.js`, `tools/brain-sync-run.js`, `tools/brain-join.sh`, `tools/brain-remember.js`,
+  `tools/bootstrap-repo.js` and `hooks/continuous-sync-hook.js` touch `~/agent-memory` only. None
+  reads anything under `~/.claude`.
+- The tools that DO write into `~/.claude` — `tools/sync-agents.js`, `tools/install-skills.js`,
+  `tools/deploy-hooks.js`, `tools/deploy-private-skills.sh` — are one-way, repo → a **named**
+  subdirectory (`agents/`, `skills/`, `commands/`, `hooks/`). None enumerates `~/.claude` itself, and
+  none copies out of it.
+- The shield resolves its own directory under `.claude` and never names an `agent-memory` or `nexus`
+  path.
+
+**This is enforced, not just documented.** `tests/secret-shield-no-sync.test.js` fails if a
+brain-sync tool grows a `~/.claude` reference, if the shield's own modules start naming a brain path,
+or if any tool other than the shield names the `secret-shield` directory. The leak would be
+introduced by a source edit and would never show up in a passing run of the sync tools themselves,
+so the check is structural on purpose.
+
+The remaining exposure is a **backup tool outside this repo** (a dotfiles sync, a whole-home cloud
+backup) that captures `~/.claude/`. Nothing here can enforce that. Exclude
+`~/.claude/secret-shield/` from any such tool, or accept that the vault is only as private as that
+backup is.

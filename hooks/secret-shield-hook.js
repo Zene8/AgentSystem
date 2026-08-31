@@ -38,8 +38,22 @@ const {
 
 const NOTICE = '[secret-shield: withheld - the shield could not verify this output, so it was not passed through]';
 
+// Hard cap on the payload we will hold in memory. stdin here is UNTRUSTED IN SIZE: the harness
+// hands us whatever a tool produced, and a runaway `cat` of a multi-gigabyte file is an ordinary
+// accident, not an attack. An uncapped read loop turns that into memory exhaustion at a trust
+// boundary, and a hook that dies to the OOM killer never writes its JSON — which on PostToolUse is
+// exactly the fail-WIDE-OPEN case (see fact 2 in the header). So we stop reading at the cap and
+// fail closed deliberately, the same choice redactShape() makes at MAX_DEPTH.
+//
+// 32MB is far above any real tool result (a Read is capped at 2000 lines, a Bash result is
+// truncated by the harness long before this) and far below the point where holding it hurts.
+const MAX_STDIN_BYTES = 32 * 1024 * 1024;
+
+/** @returns {{ text: string, truncated: boolean }} truncated=true means we hit MAX_STDIN_BYTES and
+ *  the payload is INCOMPLETE — never parse it, never pass the original through. */
 function readStdin() {
   const chunks = [];
+  let total = 0;
   const buf = Buffer.alloc(65536);
   for (;;) {
     let n;
@@ -51,9 +65,15 @@ function readStdin() {
       throw err;
     }
     if (n === 0) break;
+    total += n;
+    if (total > MAX_STDIN_BYTES) {
+      // Stop accumulating. We do NOT keep draining to EOF: the point of the cap is to bound memory
+      // and time, and the writer getting EPIPE is the correct signal that we are done with it.
+      return { text: '', truncated: true };
+    }
     chunks.push(Buffer.from(buf.subarray(0, n)));
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return { text: Buffer.concat(chunks).toString('utf8'), truncated: false };
 }
 
 /**
@@ -245,7 +265,27 @@ function main() {
 
   let input;
   try {
-    const raw = readStdin();
+    const { text: raw, truncated } = readStdin();
+    if (truncated) {
+      // Over the cap: we never saw the whole payload, so we cannot know it is clean. There is no
+      // tool_response to mirror the shape of (we could not parse anything), so the blanked result is
+      // a plain string notice — the one case where shape preservation is impossible and safety wins.
+      appendAudit({ event: 'fail-closed', phase, reason: 'stdin-cap', limit: MAX_STDIN_BYTES }, home);
+      process.stderr.write(`secret-shield: tool payload exceeded ${MAX_STDIN_BYTES} bytes; withheld
+`);
+      if (phase === 'pre') {
+        emit({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: `secret-shield: this tool input exceeded ${MAX_STDIN_BYTES} bytes, so it could not be inspected for vault placeholders. Refusing rather than running it uninspected.`,
+          },
+        });
+      } else {
+        emit({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: NOTICE } });
+      }
+      return;
+    }
     if (!raw.trim()) return;
     input = JSON.parse(raw);
   } catch {
