@@ -1305,9 +1305,9 @@ jobs:
   # (the ExecStart script exists on disk, SuccessExitStatus is intact, the timer repeats), not by
   # byte-equality against the path the caller happens to sit in.
   #
-  # Note: sync-agents.js writes .agents/sync.log, which is tracked, so this dirties the WORKSPACE
-  # checkout. That is harmless and expected — actions/checkout cleans it on the next run, and
-  # nothing here commits or pushes. Don't go looking for a bug when you see it.
+  # Note: sync-agents.js writes .agents/sync.log. It is untracked as of #536 — while it was
+  # tracked, that write dirtied every checkout it ran in, and repo-sync.js skips the session-start
+  # pull of a dirty tree, so hosts stopped pulling entirely.
   repair-install:
     if: inputs.mode == 'repair-install'
     runs-on: [self-hosted, Linux]
