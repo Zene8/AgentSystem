@@ -109,6 +109,20 @@ jobs:
             echo "PASSED: inbound-poller timers installed"
           fi
 
+          echo "=== Checking the Zene8/Basely self-hosted runners (#530) ==="
+          # Basely is a private repo, so its hosted-runner minutes are billed and a payment failure
+          # makes GitHub refuse to START a job: every check dies in 4-7s having done no work (#530).
+          # Its CI now targets [self-hosted, Linux] on this host, which means these runner units are
+          # load-bearing for another repo's merge gate. An offline runner is silent by construction:
+          # the job queues, nothing fails, and the PR just never gets a verdict.
+          if ! bash "${{ github.workspace }}/tools/install-basely-runners.sh" --check; then
+            echo "FAILED: Basely self-hosted runner drift detected"
+            driftFound=1
+            results="${results}• Zene8/Basely self-hosted runners offline, unregistered or drifted — Basely CI cannot report at all (tools/install-basely-runners.sh --check; repair by running it with no arguments on the runner host)\n"
+          else
+            echo "PASSED: Basely self-hosted runners registered and online"
+          fi
+
           echo "=== Checking skill parity drift (#305) ==="
           # --require-install: this runner is supposed to have skills deployed, same reasoning as
           # the hook check above — a bare ~/.claude/skills here is the outage, not a clean skip.

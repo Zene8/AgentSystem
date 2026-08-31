@@ -382,6 +382,31 @@ GitGuardian. A 30-minute grace window keeps a just-opened PR quiet. Alert key
 When a PR shows zero checks, check `gh pr view <n> --json mergeable` **first** — `CONFLICTING` is
 the usual answer, and a rebase brings the checks back.
 
+## Basely CI runs on our runners (#530)
+
+`Zene8/Basely` is **private**, so its hosted-runner minutes are billed — and on a payment failure
+GitHub does not queue the job, it refuses to **start** it: every check fails in 4-7s with zero work
+done and no code signal. Basely's `ci.yml`, `sam-audit.yml`, `pr-evidence-check.yml`,
+`workspace-script-guard.yml` and `db-migration-drift.yml` therefore run on `[self-hosted, Linux]`
+on baselyserver. Context names are unchanged, so Basely's ruleset needed no edit.
+
+- Install/repair/verify: `bash tools/install-basely-runners.sh` (`--check`, `--dry-run`,
+  `--uninstall`). systemd `--user`, two instances, labels `self-hosted,Linux,X64,basely-ci`. Not the
+  runner's own `svc.sh install` — that writes a system unit and needs root, and this host has no
+  passwordless sudo.
+- `--check` is in the daily `enforcement-drift-check` job. It asserts GitHub's view too, not just
+  local files: an offline runner is silent by construction — the job queues, nothing goes red, and
+  the PR simply never gets a verdict.
+- **`db-migration-drift` and `sandbox-image` still need Docker**, which is not installed on
+  baselyserver; rootless is also blocked (`newuidmap` absent). Neither is a required context, so
+  they do not gate a merge. `sandbox-image` is deliberately left on `ubuntu-latest` with the unblock
+  condition named in a comment above its `runs-on`.
+- `ci.yml`'s Build job env is pinned to **placeholder literals, never `secrets.*`** — Dependabot PRs
+  receive no repo secrets, so a `secrets.*` reference there interpolates to empty and the failure
+  looks like a code bug. `INNGEST_SIGNING_KEY` is in that list for exactly this reason: the guard in
+  `apps/basely/src/inngest/client.ts` throws when `NODE_ENV=production` and it is unset, and
+  `next build` collects page data with `NODE_ENV=production`. Do not weaken the guard.
+
 ## Path-Scoped Rules
 
 **DB / schema** (`*.sql`, `prisma/**`, `*.prisma`) — Pym domain. Migrate in dev first. Never
