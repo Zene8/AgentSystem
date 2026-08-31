@@ -27,3 +27,7 @@ logs/
 # and infra details — in a public repo. Ignored so they cannot re-enter by accident. Purging them
 # from git history is tracked in #214.
 /docs/archive/agents-memory/
+
+# secret-shield (#222) per-project config can carry local overrides (e.g. localModel.url); the
+# vault itself lives under ~/.claude/secret-shield/ (outside this repo), not here.
+.secret-shield.json

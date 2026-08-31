@@ -72,10 +72,15 @@ test('matcher groups stay separate', () => {
   const s = {};
   mergeHookSettings(s);
   const post = s.hooks.PostToolUse;
-  const matchers = post.map(g => g.matcher).sort();
-  assert.deepEqual(matchers, ['Bash', 'Write|Edit|NotebookEdit']);
+  // secret-shield (#222) registers with NO matcher on purpose — a secret leaves in whatever tool
+  // result happens to hold it — so an undefined matcher is a third, expected group here.
+  const matchers = post.map(g => g.matcher === undefined ? '(none)' : g.matcher).sort();
+  assert.deepEqual(matchers, ['(none)', 'Bash', 'Write|Edit|NotebookEdit']);
   assert.equal(post.find(g => g.matcher === 'Bash').hooks.length, 2); // routine-dispatch + pr-status-detect
   assert.equal(post.find(g => g.matcher === 'Write|Edit|NotebookEdit').hooks.length, 1);
+  const unmatched = post.find(g => g.matcher === undefined);
+  assert.equal(unmatched.hooks.length, 1);
+  assert.match(unmatched.hooks[0].command, /secret-shield-hook\.js/);
 });
 
 // A PostToolUse hook cannot replace a tool result, only append to it, so this one

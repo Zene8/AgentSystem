@@ -145,6 +145,18 @@ export const HOOK_REGISTRY = [
   // original and adding a summary on top: measured at +3218 chars on a 10,000-char payload.
   // PostToolUse can now *replace* a result via hookSpecificOutput.updatedToolOutput, so a
   // redo would actually save. Nobody has asked for one — don't build it on spec.
+  // secret-shield (#222). PostToolUse is registered with NO matcher on purpose: a secret leaves in
+  // whatever tool result happens to contain it, so scoping this to Bash|Read would just name the
+  // tools we thought of. It also fires inside subagents, which is where unattended tool output goes
+  // unread by a human. The hook exits 0 and writes nothing when it finds nothing, and only exit 0
+  // with JSON can apply a redaction — so a crash here fails OPEN, which is why the hook itself
+  // catches everything and emits a blanked result rather than throwing.
+  { event: 'PostToolUse',      command: n('secret-shield-hook.js', '--phase=post'), timeout: 10, statusMessage: 'Shielding secrets...' },
+  // The egress half. Only useful where a rehydrated value has to be real — a shell command or a
+  // file write — and it no-ops immediately unless `rehydrate` is turned on, which is NOT the
+  // default: rehydration puts a real secret back into a tool input, and is only safe because the
+  // --phase=post filter above catches it coming back.
+  { event: 'PreToolUse',       command: n('secret-shield-hook.js', '--phase=pre'), timeout: 10, statusMessage: 'Rehydrating secrets...',       matcher: 'Bash|Write|Edit|NotebookEdit' },
   { event: 'PreToolUse',       command: b('guard-git.sh'),                      timeout: 5,  statusMessage: 'Guarding git...',               matcher: 'Bash' },
   // #508: denies a Bash call whose command string holds the literal value of a ~/.claude/*.key
   // file. tool_input.command is recorded verbatim in the transcript and ~/.claude/history.jsonl,
